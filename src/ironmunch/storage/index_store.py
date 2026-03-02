@@ -448,7 +448,11 @@ class IndexStore:
             index_path.unlink()
             deleted = True
 
-        if content_dir.exists():
+        if content_dir.is_symlink():
+            # Symlink to another directory — remove the link, not the target
+            content_dir.unlink()
+            deleted = True
+        elif content_dir.exists():
             shutil.rmtree(content_dir)
             deleted = True
 
