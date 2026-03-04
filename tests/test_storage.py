@@ -211,6 +211,84 @@ def test_get_symbol_docstring_wrapped_as_untrusted(tmp_path):
     assert "UNTRUSTED_CODE" in docstring_val
 
 
+def test_get_symbol_signature_wrapped_as_untrusted(tmp_path):
+    """SEC-MED-2 followup: get_symbol should wrap signature with wrap_untrusted_content."""
+    from ironmunch.parser import Symbol
+    from ironmunch.tools.get_symbol import get_symbol
+
+    store = IndexStore(base_path=str(tmp_path))
+    content = 'def bar(x: int) -> str:\n    pass\n'
+
+    symbols = [
+        Symbol(
+            id="test-py::bar",
+            file="test.py",
+            name="bar",
+            qualified_name="bar",
+            kind="function",
+            language="python",
+            signature="def bar(x: int) -> str:",
+            byte_offset=0,
+            byte_length=len(content.encode()),
+        )
+    ]
+
+    store.save_index(
+        owner="testowner",
+        name="testrepo",
+        source_files=["test.py"],
+        symbols=symbols,
+        raw_files={"test.py": content},
+        languages={"python": 1},
+    )
+
+    result = get_symbol("testowner/testrepo", "test-py::bar", storage_path=str(tmp_path))
+
+    assert "signature" in result
+    # wrap_untrusted_content adds boundary markers like <<<UNTRUSTED_CODE_...>>>
+    assert "UNTRUSTED_CODE" in result["signature"], "signature must contain boundary markers"
+
+
+def test_get_symbols_signature_wrapped_as_untrusted(tmp_path):
+    """SEC-MED-2 followup: get_symbols should wrap signature with wrap_untrusted_content."""
+    from ironmunch.parser import Symbol
+    from ironmunch.tools.get_symbol import get_symbols
+
+    store = IndexStore(base_path=str(tmp_path))
+    content = 'def baz(y: str) -> int:\n    pass\n'
+
+    symbols = [
+        Symbol(
+            id="test-py::baz",
+            file="test.py",
+            name="baz",
+            qualified_name="baz",
+            kind="function",
+            language="python",
+            signature="def baz(y: str) -> int:",
+            byte_offset=0,
+            byte_length=len(content.encode()),
+        )
+    ]
+
+    store.save_index(
+        owner="testowner",
+        name="testrepo",
+        source_files=["test.py"],
+        symbols=symbols,
+        raw_files={"test.py": content},
+        languages={"python": 1},
+    )
+
+    result = get_symbols("testowner/testrepo", ["test-py::baz"], storage_path=str(tmp_path))
+
+    assert "symbols" in result
+    assert len(result["symbols"]) == 1
+    sym = result["symbols"][0]
+    # wrap_untrusted_content adds boundary markers like <<<UNTRUSTED_CODE_...>>>
+    assert "UNTRUSTED_CODE" in sym["signature"], "signature must contain boundary markers"
+
+
 def test_get_file_outline_signature_wrapped_as_untrusted(tmp_path):
     """SEC-MED-2: get_file_outline should wrap signature and summary with wrap_untrusted_content."""
     from ironmunch.parser import Symbol
