@@ -1,6 +1,5 @@
 """List indexed repositories."""
 
-import time
 from typing import Optional
 
 from ..core.boundaries import make_meta

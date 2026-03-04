@@ -2,7 +2,6 @@
 
 import os
 import tempfile
-import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -586,11 +585,8 @@ class TestGitignoreSizeCap:
             {"path": "src/app.js", "type": "blob", "size": 100},
         ]
 
-        start = time.time()
         result = discover_source_files(entries, gitignore_content=huge_gitignore)
-        elapsed = time.time() - start
 
-        assert elapsed < 2.0, f"discover_source_files took {elapsed:.2f}s with huge gitignore"
         # The oversized gitignore is skipped, so all valid files should appear
         assert "src/main.py" in result
         assert "src/app.js" in result

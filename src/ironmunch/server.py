@@ -35,6 +35,13 @@ from .core.limits import (
     MAX_CONTEXT_LINES, MAX_SEARCH_RESULTS,
 )
 
+# Integer parameter bounds used by _sanitize_arguments.
+# Maps parameter name -> (min_value, max_value).
+_INT_PARAM_BOUNDS: dict[str, tuple[int, int]] = {
+    "context_lines": (0, MAX_CONTEXT_LINES),
+    "max_results": (1, MAX_SEARCH_RESULTS),
+}
+
 
 # -- Tool description warning suffixes ----------------------------------------
 
@@ -410,11 +417,7 @@ def _sanitize_arguments(name: str, arguments: dict) -> dict | str:
         arguments["file_pattern"] = arguments["file_pattern"][:MAX_FILE_PATTERN_LENGTH]
 
     # Validate and coerce integer parameters
-    _INT_PARAMS = {
-        "context_lines": (0, MAX_CONTEXT_LINES),
-        "max_results": (1, MAX_SEARCH_RESULTS),
-    }
-    for param, (lo, hi) in _INT_PARAMS.items():
+    for param, (lo, hi) in _INT_PARAM_BOUNDS.items():
         if param not in arguments:
             continue
         val = arguments[param]
@@ -478,12 +481,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 storage_path=storage_path
             )
         elif name == "index_folder":
+            raw_roots = os.environ.get("IRONMUNCH_ALLOWED_ROOTS")
+            allowed_roots = (
+                [r.strip() for r in raw_roots.split(":") if r.strip()]
+                if raw_roots else None
+            )
             result = index_folder(
                 path=arguments["path"],
                 use_ai_summaries=arguments.get("use_ai_summaries", True),
                 storage_path=storage_path,
                 extra_ignore_patterns=arguments.get("extra_ignore_patterns"),
                 follow_symlinks=arguments.get("follow_symlinks", False),
+                allowed_roots=allowed_roots,
             )
         elif name == "list_repos":
             result = list_repos(storage_path=storage_path)
@@ -542,7 +551,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 storage_path=storage_path
             )
         else:
-            result = {"error": f"Unknown tool: {name}"}
+            raise RuntimeError(f"Unhandled known tool: {name}")
 
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 

@@ -327,6 +327,26 @@ class TestRateLimiting:
         for _ in range(5):
             assert _rate_limit("normal_tool") is True
 
+    def test_global_rate_limit_blocks_after_limit_reached(self):
+        """Filling _GLOBAL_TIMESTAMPS to the global cap must block the next call."""
+        import time
+        import ironmunch.server as server_module
+        from ironmunch.server import _rate_limit, _MAX_GLOBAL_CALLS_PER_MINUTE
+
+        # Clear all rate limit state to start fresh
+        server_module._GLOBAL_TIMESTAMPS.clear()
+        server_module._CALL_TIMESTAMPS.clear()
+
+        # Pack _GLOBAL_TIMESTAMPS with recent timestamps (within the 60-second window)
+        now = time.time()
+        server_module._GLOBAL_TIMESTAMPS[:] = [now] * _MAX_GLOBAL_CALLS_PER_MINUTE
+
+        # The next call must be blocked by the global limit
+        result = _rate_limit("some_known_tool")
+        assert result is False, (
+            "Expected _rate_limit to return False when global limit is full"
+        )
+
 
 # -- SEC-HIGH-1: unknown tool names rejected before rate limit ----------------
 
@@ -607,3 +627,109 @@ class TestCodeIndexPathValidation:
         assert len(result) == 1
         text = result[0].text
         assert "error" in text.lower()
+
+
+class TestParseRepoBareNameLookup:
+    """TEST-HIGH-1: parse_repo bare-name resolution covers found, not-found, ambiguous."""
+
+    def test_bare_name_found(self, tmp_path):
+        """parse_repo resolves a bare name when exactly one match exists."""
+        from ironmunch.tools._common import parse_repo
+        from ironmunch.storage import IndexStore
+        from ironmunch.parser import Symbol
+
+        store = IndexStore(base_path=str(tmp_path))
+        store.save_index(
+            owner="acme",
+            name="myproject",
+            source_files=["a.py"],
+            symbols=[Symbol(id="a-py::f", file="a.py", name="f",
+                            qualified_name="f", kind="function", language="python",
+                            signature="def f():", byte_offset=0, byte_length=10)],
+            raw_files={"a.py": "def f(): pass"},
+            languages={"python": 1},
+        )
+        owner, name = parse_repo("myproject", storage_path=str(tmp_path))
+        assert owner == "acme"
+        assert name == "myproject"
+
+    def test_bare_name_not_found(self, tmp_path):
+        """parse_repo raises RepoNotFoundError when no match exists."""
+        from ironmunch.tools._common import parse_repo
+        from ironmunch.core.errors import RepoNotFoundError
+
+        with pytest.raises(RepoNotFoundError, match="not found"):
+            parse_repo("doesnotexist", storage_path=str(tmp_path))
+
+    def test_bare_name_ambiguous(self, tmp_path):
+        """parse_repo raises RepoNotFoundError when multiple repos share the name."""
+        from ironmunch.tools._common import parse_repo
+        from ironmunch.core.errors import RepoNotFoundError
+        from ironmunch.storage import IndexStore
+        from ironmunch.parser import Symbol
+
+        store = IndexStore(base_path=str(tmp_path))
+        for owner in ("org1", "org2"):
+            store.save_index(
+                owner=owner,
+                name="myproject",
+                source_files=["a.py"],
+                symbols=[Symbol(id="a-py::f", file="a.py", name="f",
+                                qualified_name="f", kind="function", language="python",
+                                signature="def f():", byte_offset=0, byte_length=10)],
+                raw_files={"a.py": "def f(): pass"},
+                languages={"python": 1},
+            )
+        with pytest.raises(RepoNotFoundError, match="[Aa]mbiguous"):
+            parse_repo("myproject", storage_path=str(tmp_path))
+
+
+# -- TEST-LOW-3: get_symbols mixed found/not-found ----------------------------
+
+class TestGetSymbolsMixed:
+    """TEST-LOW-3: get_symbols with a mix of valid and invalid symbol_ids."""
+
+    def test_get_symbols_mixed_valid_and_invalid(self, tmp_path):
+        """Valid symbol_ids return results; invalid ones return errors (no crash)."""
+        import tempfile
+        from ironmunch.storage.index_store import IndexStore
+        from ironmunch.tools.get_symbol import get_symbols
+        from ironmunch.parser import parse_file
+
+        src = "def alpha():\n    return 1\n\ndef beta():\n    return 2\n"
+
+        with tempfile.TemporaryDirectory() as storage:
+            store = IndexStore(storage)
+            symbols = parse_file(src, "funcs.py", "python")
+            sym_ids = [s.id for s in symbols if s.name in ("alpha", "beta")]
+            assert len(sym_ids) >= 1, "Expected at least one parsed symbol"
+
+            store.save_index(
+                owner="local", name="mixtest",
+                source_files=["funcs.py"],
+                symbols=symbols,
+                raw_files={"funcs.py": src},
+                languages={"python": 1},
+            )
+
+            valid_id = sym_ids[0]
+            invalid_id = "nonexistent::bogus_symbol_id"
+
+            result = get_symbols(
+                repo="local/mixtest",
+                symbol_ids=[valid_id, invalid_id],
+                storage_path=storage,
+            )
+
+            assert "symbols" in result, f"Expected 'symbols' key in result: {result}"
+            assert "errors" in result, f"Expected 'errors' key in result: {result}"
+
+            found_ids = [s["id"] for s in result["symbols"]]
+            assert valid_id in found_ids, (
+                f"Valid symbol {valid_id!r} missing from symbols: {found_ids}"
+            )
+
+            error_ids = [e["id"] for e in result["errors"]]
+            assert invalid_id in error_ids, (
+                f"Invalid symbol {invalid_id!r} missing from errors: {error_ids}"
+            )

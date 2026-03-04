@@ -13,7 +13,7 @@ from typing import Optional
 from ..parser.symbols import Symbol
 from ..security import sanitize_repo_identifier, sanitize_signature_for_api
 from ..core.limits import MAX_INDEX_SIZE, MAX_FILE_SIZE
-from ..core.validation import validate_path, ValidationError
+from ..core.validation import validate_path, ValidationError, is_within
 
 # Bump this when the index schema changes in an incompatible way.
 INDEX_VERSION = 2
@@ -98,49 +98,16 @@ class CodeIndex:
         return fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(file_path, f"*/{pattern}")
 
     def _score_symbol(self, sym: dict, query_lower: str, query_words: set) -> int:
-        """Calculate search score for a symbol."""
-        score = 0
+        """Calculate search score for a symbol.
 
-        # 1. Exact name match (highest weight)
-        name_lower = sym.get("name", "").lower()
-        if query_lower == name_lower:
-            score += 20
-        elif query_lower in name_lower:
-            score += 10
-
-        # 2. Name word overlap
-        for word in query_words:
-            if word in name_lower:
-                score += 5
-
-        # 3. Signature match
-        sig_lower = sym.get("signature", "").lower()
-        if query_lower in sig_lower:
-            score += 8
-        for word in query_words:
-            if word in sig_lower:
-                score += 2
-
-        # 4. Summary match
-        summary_lower = sym.get("summary", "").lower()
-        if query_lower in summary_lower:
-            score += 5
-        for word in query_words:
-            if word in summary_lower:
-                score += 1
-
-        # 5. Keyword match
-        keywords = set(sym.get("keywords", []))
-        matching_keywords = query_words & keywords
-        score += len(matching_keywords) * 3
-
-        # 6. Docstring match
-        doc_lower = sym.get("docstring", "").lower()
-        for word in query_words:
-            if word in doc_lower:
-                score += 1
-
-        return score
+        Delegates to the shared implementation in tools._common so the
+        ranking logic lives in exactly one place.  The import is deferred
+        to method-call time to avoid the circular import that would arise
+        if tools._common were imported at module level (tools._common
+        itself imports storage.IndexStore).
+        """
+        from ..tools._common import calculate_symbol_score  # deferred – avoids circular import
+        return calculate_symbol_score(sym, query_lower, query_words)
 
 
 class IndexStore:
@@ -180,6 +147,33 @@ class IndexStore:
         sanitize_repo_identifier(owner)
         sanitize_repo_identifier(name)
         return self.base_path / f"{owner}__{name}"
+
+    def _atomic_write(self, final_path: Path, data: "bytes | str") -> None:
+        """Write data to final_path atomically via a .tmp file.
+
+        Opens the .tmp file with O_NOFOLLOW | O_CREAT | O_TRUNC, writes
+        data, then renames the .tmp over final_path.  Cleans up the .tmp
+        on any failure so no partial file is left behind.
+
+        Args:
+            final_path: Destination path (must not be a symlink).
+            data: Bytes or str to write.  str is encoded as UTF-8.
+        """
+        tmp_path = final_path.with_suffix(final_path.suffix + ".tmp")
+        try:
+            if isinstance(data, bytes):
+                fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, "wb") as f:
+                    f.write(data)
+            else:
+                fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(data)
+            # Atomic rename (POSIX-atomic; best-effort on Windows)
+            tmp_path.replace(final_path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
     def save_index(
         self,
@@ -225,25 +219,47 @@ class IndexStore:
             git_head=git_head,
         )
 
-        # Save index JSON atomically: write to temp then rename
-        index_path = self._index_path(owner, name)
-        tmp_path = index_path.with_suffix(".json.tmp")
-        try:
-            fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(self._index_to_dict(index), f, indent=2)
-            # Atomic rename (on POSIX; best-effort on Windows)
-            tmp_path.replace(index_path)
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise
-
-        # Save raw files
+        # Prepare content directory
         content_dir = self._content_dir(owner, name)
         _makedirs_0o700(str(content_dir))
 
-        for file_path, content in raw_files.items():
-            self._safe_write_content(content_dir, file_path, content)
+        # Phase 1: write all content files to .tmp paths first so that any
+        # write failure leaves the existing index intact (no split state).
+        content_tmp_paths: list[tuple[Path, Path]] = []  # (final, tmp)
+        try:
+            for file_path, content in raw_files.items():
+                dest = (content_dir / file_path).resolve()
+                resolved_root = content_dir.resolve()
+                if not is_within(resolved_root, dest):
+                    continue  # Traversal — skip silently
+                _makedirs_0o700(str(dest.parent))
+                tmp_dest = dest.with_suffix(dest.suffix + ".tmp")
+                try:
+                    fd = os.open(
+                        str(tmp_dest),
+                        os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+                        0o600,
+                    )
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    content_tmp_paths.append((dest, tmp_dest))
+                except OSError:
+                    continue  # Symlink or permission error — skip
+
+            # Phase 2: write the JSON index to its .tmp path
+            index_path = self._index_path(owner, name)
+            json_data = json.dumps(self._index_to_dict(index), indent=2)
+            self._atomic_write(index_path, json_data)
+
+            # Phase 3: rename all content .tmp → final (after JSON succeeded)
+            for final, tmp in content_tmp_paths:
+                tmp.replace(final)
+            content_tmp_paths.clear()  # Mark all as renamed — nothing left to clean
+
+        finally:
+            # Clean up any content .tmp files that were not yet renamed
+            for _final, tmp in content_tmp_paths:
+                tmp.unlink(missing_ok=True)
 
         return index
 
@@ -487,34 +503,55 @@ class IndexStore:
             git_head=git_head,
         )
 
-        # Save atomically
-        index_path = self._index_path(owner, name)
-        tmp_path = index_path.with_suffix(".json.tmp")
-        try:
-            fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(self._index_to_dict(updated), f, indent=2)
-            tmp_path.replace(index_path)
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise
-
-        # Update raw files
+        # Prepare content directory
         content_dir = self._content_dir(owner, name)
         _makedirs_0o700(str(content_dir))
-
-        # Remove deleted files from content dir (with containment validation)
         resolved_root = content_dir.resolve()
-        for fp in deleted_files:
-            dead = (content_dir / fp).resolve()
-            if not str(dead).startswith(str(resolved_root) + os.sep):
-                continue  # Traversal — skip silently
-            if dead.exists():
-                dead.unlink()
 
-        # Write changed + new files
-        for fp, content in raw_files.items():
-            self._safe_write_content(content_dir, fp, content)
+        # Phase 1: write changed + new content files to .tmp paths first so
+        # that any write failure leaves the existing index intact (no split state).
+        content_tmp_paths: list[tuple[Path, Path]] = []  # (final, tmp)
+        try:
+            for fp, content in raw_files.items():
+                dest = (content_dir / fp).resolve()
+                if not is_within(resolved_root, dest):
+                    continue  # Traversal — skip silently
+                _makedirs_0o700(str(dest.parent))
+                tmp_dest = dest.with_suffix(dest.suffix + ".tmp")
+                try:
+                    fd = os.open(
+                        str(tmp_dest),
+                        os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+                        0o600,
+                    )
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    content_tmp_paths.append((dest, tmp_dest))
+                except OSError:
+                    continue  # Symlink or permission error — skip
+
+            # Phase 2: write the updated JSON index to its .tmp path
+            index_path = self._index_path(owner, name)
+            json_data = json.dumps(self._index_to_dict(updated), indent=2)
+            self._atomic_write(index_path, json_data)
+
+            # Phase 3: remove deleted files from content dir (containment-validated)
+            for fp in deleted_files:
+                dead = (content_dir / fp).resolve()
+                if not is_within(resolved_root, dead):
+                    continue  # Traversal — skip silently
+                if dead.exists():
+                    dead.unlink()
+
+            # Phase 4: rename all content .tmp → final (after JSON succeeded)
+            for final, tmp in content_tmp_paths:
+                tmp.replace(final)
+            content_tmp_paths.clear()  # Mark all as renamed — nothing left to clean
+
+        finally:
+            # Clean up any content .tmp files that were not yet renamed
+            for _final, tmp in content_tmp_paths:
+                tmp.unlink(missing_ok=True)
 
         return updated
 
@@ -586,7 +623,7 @@ class IndexStore:
         """
         dest = (content_dir / file_path).resolve()
         resolved_root = content_dir.resolve()
-        if not str(dest).startswith(str(resolved_root) + os.sep):
+        if not is_within(resolved_root, dest):
             return False  # Traversal — reject silently
         _makedirs_0o700(str(dest.parent))
         try:

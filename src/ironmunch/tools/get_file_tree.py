@@ -1,11 +1,11 @@
 """Get file tree for a repository."""
 
 import os
-import time
+from collections import Counter
 from typing import Optional
 
 from ..core.boundaries import make_meta
-from ..core.errors import sanitize_error
+from ..core.errors import sanitize_error, RepoNotFoundError
 from ..storage import IndexStore
 from ..parser import LANGUAGE_EXTENSIONS
 from ._common import parse_repo, timed, elapsed_ms
@@ -29,10 +29,10 @@ def get_file_tree(
     start = timed()
 
     # --- security gate: parse + validate repo identifier ---
-    parsed = parse_repo(repo, storage_path)
-    if isinstance(parsed, dict):
-        return parsed
-    owner, name = parsed
+    try:
+        owner, name = parse_repo(repo, storage_path)
+    except RepoNotFoundError as exc:
+        return {"error": str(exc)}
 
     # --- security gate: validate path_prefix ---
     if "\x00" in path_prefix:
@@ -77,6 +77,7 @@ def get_file_tree(
 
 def _build_tree(files: list[str], index, path_prefix: str) -> list[dict]:
     """Build nested tree from flat file list."""
+    symbol_counts: Counter = Counter(s.get("file") for s in index.symbols)
     root: dict = {}
 
     for file_path in files:
@@ -91,7 +92,7 @@ def _build_tree(files: list[str], index, path_prefix: str) -> list[dict]:
 
             if is_last:
                 # File node
-                symbol_count = sum(1 for s in index.symbols if s.get("file") == file_path)
+                symbol_count = symbol_counts[file_path]
 
                 _, ext = os.path.splitext(file_path)
                 lang = LANGUAGE_EXTENSIONS.get(ext, "")

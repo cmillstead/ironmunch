@@ -1,10 +1,9 @@
 """Get file outline -- symbols in a specific file."""
 
-import time
 from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
-from ..core.errors import sanitize_error
+from ..core.errors import sanitize_error, RepoNotFoundError
 from ..storage import IndexStore
 from ..parser import Symbol, SymbolNode, build_symbol_tree
 from ._common import parse_repo, timed, elapsed_ms
@@ -28,10 +27,10 @@ def get_file_outline(
     start = timed()
 
     # --- security gate: parse + validate repo identifier ---
-    parsed = parse_repo(repo, storage_path)
-    if isinstance(parsed, dict):
-        return parsed
-    owner, name = parsed
+    try:
+        owner, name = parse_repo(repo, storage_path)
+    except RepoNotFoundError as exc:
+        return {"error": str(exc)}
 
     store = IndexStore(base_path=storage_path)
     index = store.load_index(owner, name)

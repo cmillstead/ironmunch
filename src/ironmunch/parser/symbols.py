@@ -27,15 +27,6 @@ class Symbol:
     content_hash: str = ""         # SHA-256 of symbol source bytes (for drift detection)
 
 
-def slugify(text: str) -> str:
-    """Convert file path to slug format.
-
-    Replace / with - and . with - for use in symbol IDs.
-    Example: src/main.py -> src-main-py
-    """
-    return text.replace("/", "-").replace(".", "-")
-
-
 def make_symbol_id(file_path: str, qualified_name: str, kind: str = "") -> str:
     """Generate unique symbol ID.
 

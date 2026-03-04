@@ -52,6 +52,16 @@ def assert_path_limits(path: str) -> None:
         )
 
 
+def is_within(root: Path | str, path: Path | str) -> bool:
+    """Return True if *path* is strictly inside *root* (not equal, not a sibling).
+
+    Both arguments must already be resolved absolute paths.
+    Uses an ``os.sep`` guard to prevent prefix-only matches
+    (e.g. ``/foo/bar`` should not match root ``/foo/b``).
+    """
+    return str(path).startswith(str(root) + os.sep)
+
+
 def assert_inside_root(full_path: str, root: str) -> None:
     """Step 5: Strict containment check with os.sep guard."""
     if not full_path.startswith(root + os.sep):

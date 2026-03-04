@@ -12,6 +12,10 @@ import sys
 from .validation import ValidationError
 
 
+class RepoNotFoundError(ValidationError):
+    """Raised when a repository identifier cannot be resolved."""
+
+
 _ERRNO_MESSAGES = {
     errno.ENOENT: "File not found",
     errno.EACCES: "Permission denied",

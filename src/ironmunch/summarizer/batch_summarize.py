@@ -3,7 +3,6 @@
 import os
 import re
 import secrets
-from dataclasses import dataclass
 from typing import Optional
 
 import httpx as _httpx
@@ -51,17 +50,15 @@ def signature_fallback(symbol: Symbol) -> str:
         return sig[:120] if sig else f"{kind} {name}"
 
 
-@dataclass
 class BatchSummarizer:
     """AI-based batch summarization using Claude Haiku (Tier 2)."""
 
-    # claude-haiku-4-5-20251001 is the dated-snapshot model ID for Claude Haiku 4.5
-    # (format: <series>-<YYYYMMDD>). This is the correct Anthropic API identifier.
-    model: str = "claude-haiku-4-5-20251001"
-    max_tokens_per_batch: int = 500
-
-    def __post_init__(self):
-        self.client = None
+    def __init__(self, model: str = "claude-haiku-4-5-20251001", max_tokens_per_batch: int = 500) -> None:
+        # claude-haiku-4-5-20251001 is the dated-snapshot model ID for Claude Haiku 4.5
+        # (format: <series>-<YYYYMMDD>). This is the correct Anthropic API identifier.
+        self.model = model
+        self.max_tokens_per_batch = max_tokens_per_batch
+        self.client: "anthropic.Anthropic | None" = None
         self._init_client()
 
     def _init_client(self):

@@ -6,13 +6,12 @@ before reading. This prevents path traversal via crafted symbol records.
 """
 
 import hashlib
-import time
 from typing import Optional
 
 from ..security import validate_file_access, safe_read_file, sanitize_signature_for_api
 from ..core.limits import MAX_CONTEXT_LINES
 from ..core.boundaries import wrap_untrusted_content, make_meta
-from ..core.errors import sanitize_error
+from ..core.errors import sanitize_error, RepoNotFoundError
 from ..core.validation import ValidationError
 from ..storage import IndexStore
 from ._common import parse_repo, timed, elapsed_ms
@@ -40,10 +39,10 @@ def get_symbol(
     start = timed()
 
     # --- security gate: parse + validate repo identifier ---
-    parsed = parse_repo(repo, storage_path)
-    if isinstance(parsed, dict):
-        return parsed
-    owner, name = parsed
+    try:
+        owner, name = parse_repo(repo, storage_path)
+    except RepoNotFoundError as exc:
+        return {"error": str(exc)}
 
     store = IndexStore(base_path=storage_path)
     index = store.load_index(owner, name)
@@ -140,10 +139,10 @@ def get_symbols(
     start = timed()
 
     # --- security gate: parse + validate repo identifier ---
-    parsed = parse_repo(repo, storage_path)
-    if isinstance(parsed, dict):
-        return parsed
-    owner, name = parsed
+    try:
+        owner, name = parse_repo(repo, storage_path)
+    except RepoNotFoundError as exc:
+        return {"error": str(exc)}
 
     store = IndexStore(base_path=storage_path)
     index = store.load_index(owner, name)

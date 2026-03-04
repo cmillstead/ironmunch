@@ -15,7 +15,7 @@ from ..parser import parse_file, LANGUAGE_EXTENSIONS
 from ..security import sanitize_repo_identifier
 from ..core.errors import sanitize_error
 from ..core.limits import MAX_FILE_COUNT
-from ..core.validation import validate_path, ValidationError
+from ..core.validation import validate_path, ValidationError, is_within
 from ..storage import IndexStore
 from ..summarizer import summarize_symbols
 
@@ -26,6 +26,7 @@ def index_folder(
     storage_path: Optional[str] = None,
     extra_ignore_patterns: Optional[list[str]] = None,
     follow_symlinks: bool = False,
+    allowed_roots: Optional[list[str]] = None,
 ) -> dict:
     """Index a local folder containing source code.
 
@@ -35,6 +36,10 @@ def index_folder(
         storage_path: Custom storage path (default: ~/.code-index/).
         extra_ignore_patterns: Additional gitignore-style patterns to exclude.
         follow_symlinks: Whether to follow symlinks (default False for safety).
+        allowed_roots: Pre-split list of allowed root directories. When None
+            (not provided), indexing is denied by default. The caller
+            (server.py) is responsible for reading IRONMUNCH_ALLOWED_ROOTS
+            from the environment and splitting it before passing it here.
 
     Returns:
         Dict with indexing results.
@@ -43,7 +48,6 @@ def index_folder(
     folder_path = Path(path).expanduser().resolve()
 
     # Directory allowlist check — default-deny when unset
-    allowed_roots = os.environ.get("IRONMUNCH_ALLOWED_ROOTS")
     if not allowed_roots:
         return {
             "success": False,
@@ -51,14 +55,11 @@ def index_folder(
                      "Set it to a colon-separated list of allowed directories.",
         }
     # SEC-LOW-1: filter empty entries to prevent Path("").resolve() == CWD
-    parts = [r.strip() for r in allowed_roots.split(":") if r.strip()]
+    parts = [r.strip() for r in allowed_roots if r.strip()]
     if not parts:
         return {"success": False, "error": "IRONMUNCH_ALLOWED_ROOTS is empty after parsing"}
     allowed = [Path(p).expanduser().resolve() for p in parts]
-    if not any(
-        str(folder_path).startswith(str(a) + os.sep) or folder_path == a
-        for a in allowed
-    ):
+    if not any(is_within(a, folder_path) or folder_path == a for a in allowed):
         return {"success": False, "error": "Folder is outside allowed roots"}
 
     if not folder_path.exists():
@@ -92,7 +93,7 @@ def index_folder(
             try:
                 resolved = file_path.resolve()
                 resolved_root = folder_path.resolve()
-                if not str(resolved).startswith(str(resolved_root) + os.sep):
+                if not is_within(resolved_root, resolved):
                     continue
             except (OSError, ValueError):
                 continue

@@ -80,11 +80,7 @@ def validate_file_access(path: str, root: str) -> str:
 
 def safe_read_file(abs_path: str, root: str) -> str:
     """Read a file after validation. Uses errors='replace' for encoding safety."""
-    # Direct containment check for absolute paths
-    resolved = str(Path(abs_path).resolve())
-    resolved_root = str(Path(root).resolve())
-    if not resolved.startswith(resolved_root + os.sep):
-        raise ValidationError("Path resolves outside root directory")
+    validate_path(abs_path, root)
 
     size = os.path.getsize(abs_path)
     if size > MAX_FILE_SIZE:

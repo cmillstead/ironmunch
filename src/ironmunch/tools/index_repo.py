@@ -126,8 +126,8 @@ async def index_repo(
         if not all_symbols:
             return {"success": False, "error": "No symbols extracted"}
 
-        # Generate summaries
-        all_symbols = summarize_symbols(all_symbols, use_ai=use_ai_summaries)
+        # Generate summaries (run in thread to avoid blocking the event loop)
+        all_symbols = await asyncio.to_thread(summarize_symbols, all_symbols, use_ai=use_ai_summaries)
 
         # Save index
         store = IndexStore(base_path=storage_path)

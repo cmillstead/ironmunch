@@ -423,3 +423,59 @@ class TestQueryEchoSanitization:
             result = search_symbols(repo="local/qtest2", query=query, storage_path=storage)
             assert "query" in result
             assert "sk_live_" not in result["query"], f"Secret in query echo: {result['query']!r}"
+
+
+class TestGetSymbolVerify:
+    """TEST-LOW-1: get_symbol verify=True must detect hash mismatches."""
+
+    def test_verify_true_detects_hash_mismatch(self, tmp_path):
+        """When the stored content_hash doesn't match re-read content, content_verified=False."""
+        import tempfile
+        from ironmunch.storage.index_store import IndexStore
+        from ironmunch.tools.get_symbol import get_symbol
+        from ironmunch.parser import parse_file
+
+        src = "def my_func():\n    return 42\n"
+
+        with tempfile.TemporaryDirectory() as storage:
+            store = IndexStore(storage)
+            symbols = parse_file(src, "sample.py", "python")
+            func_symbols = [s for s in symbols if s.name == "my_func"]
+            assert func_symbols, "my_func not parsed"
+
+            store.save_index(
+                owner="local", name="verifytest",
+                source_files=["sample.py"],
+                symbols=symbols,
+                raw_files={"sample.py": src},
+                languages={"python": 1},
+            )
+
+            sym_id = func_symbols[0].id
+
+            # Corrupt the stored content_hash directly in the index JSON
+            import json
+            from pathlib import Path
+            index_path = Path(storage) / "local__verifytest.json"
+            assert index_path.exists(), f"Index file not found: {index_path}"
+
+            data = json.loads(index_path.read_text(encoding="utf-8"))
+            for sym in data.get("symbols", []):
+                if sym.get("id") == sym_id:
+                    sym["content_hash"] = "0" * 64  # intentionally wrong hash
+            index_path.write_text(json.dumps(data), encoding="utf-8")
+
+            result = get_symbol(
+                repo="local/verifytest",
+                symbol_id=sym_id,
+                verify=True,
+                storage_path=storage,
+            )
+
+            assert "_meta" in result, f"Expected _meta in result: {result}"
+            assert "content_verified" in result["_meta"], (
+                f"Expected content_verified key when verify=True: {result['_meta']}"
+            )
+            assert result["_meta"]["content_verified"] is False, (
+                f"Expected content_verified=False with corrupt hash, got: {result['_meta']['content_verified']}"
+            )

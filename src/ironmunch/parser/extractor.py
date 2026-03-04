@@ -292,12 +292,12 @@ def _clean_comment_markers(text: str) -> str:
             line = line[3:]
         elif line.startswith("/*"):
             line = line[2:]
+        elif line.startswith("//!"):
+            line = line[3:]
         elif line.startswith("///"):
             line = line[3:]
         elif line.startswith("//"):
             line = line[2:]
-        elif line.startswith("//!"):
-            line = line[3:]
         elif line.startswith("*"):
             line = line[1:]
 

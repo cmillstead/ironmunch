@@ -375,3 +375,85 @@ def test_search_symbols_signature_wrapped_as_untrusted(tmp_path):
     # SEC-MED-2: signature and summary must be wrapped with boundary markers
     assert "UNTRUSTED_CODE" in sym["signature"], "signature must contain boundary markers"
     assert "UNTRUSTED_CODE" in sym["summary"], "summary must contain boundary markers"
+
+
+# ---------------------------------------------------------------------------
+# TEST-MED-6: detect_changes() tests
+# ---------------------------------------------------------------------------
+
+def test_detect_changes_no_existing_index(tmp_path):
+    """With no prior index, all files should be reported as new."""
+    store = IndexStore(str(tmp_path))
+    changed, new_files, deleted = store.detect_changes("test", "repo", {"main.py": "x=1"})
+    assert changed == []
+    assert "main.py" in new_files
+    assert deleted == []
+
+
+def test_detect_changes_file_modified(tmp_path):
+    """A file whose content changed since last index is reported in changed."""
+    store = IndexStore(str(tmp_path))
+
+    # Save an initial index with main.py containing original content
+    store.save_index(
+        owner="test",
+        name="repo",
+        source_files=["main.py"],
+        symbols=[],
+        raw_files={"main.py": "x = 1"},
+        languages={"python": 1},
+    )
+
+    # Detect with different content for the same file
+    changed, new_files, deleted = store.detect_changes("test", "repo", {"main.py": "x = 2"})
+
+    assert "main.py" in changed
+    assert new_files == []
+    assert deleted == []
+
+
+def test_detect_changes_file_added(tmp_path):
+    """A file not present in the prior index is reported in new_files."""
+    store = IndexStore(str(tmp_path))
+
+    # Save an initial index with only main.py
+    store.save_index(
+        owner="test",
+        name="repo",
+        source_files=["main.py"],
+        symbols=[],
+        raw_files={"main.py": "x = 1"},
+        languages={"python": 1},
+    )
+
+    # Detect with an additional file
+    changed, new_files, deleted = store.detect_changes(
+        "test", "repo", {"main.py": "x = 1", "utils.py": "def helper(): pass"}
+    )
+
+    assert changed == []
+    assert "utils.py" in new_files
+    assert "main.py" not in new_files
+    assert deleted == []
+
+
+def test_detect_changes_file_deleted(tmp_path):
+    """A file present in the prior index but absent from current files is reported as deleted."""
+    store = IndexStore(str(tmp_path))
+
+    # Save an initial index with two files
+    store.save_index(
+        owner="test",
+        name="repo",
+        source_files=["main.py", "utils.py"],
+        symbols=[],
+        raw_files={"main.py": "x = 1", "utils.py": "def helper(): pass"},
+        languages={"python": 2},
+    )
+
+    # Detect with only main.py present (utils.py removed)
+    changed, new_files, deleted = store.detect_changes("test", "repo", {"main.py": "x = 1"})
+
+    assert changed == []
+    assert new_files == []
+    assert "utils.py" in deleted
