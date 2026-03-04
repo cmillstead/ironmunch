@@ -114,3 +114,71 @@ class TestConstantSignatureSanitization:
         assert "<REDACTED>" in const_syms[0].signature, (
             f"Expected <REDACTED> in signature: {const_syms[0].signature!r}"
         )
+
+
+class TestFunctionSignatureSanitization:
+    """SEC-HIGH-1: Function/method/class signatures must not leak secrets at parse time."""
+
+    def test_bearer_token_in_default_arg_redacted(self):
+        """Bearer token in default parameter value must be redacted in signature."""
+        # Use concatenation to avoid GitHub push protection matching literal token
+        token = "Bearer " + "abc123defghijklmnopqrs"
+        source = f'def connect(host, pw="{token}"): pass\n'
+        symbols = parse_file(source, "net.py", "python")
+        func_syms = [s for s in symbols if s.kind == "function"]
+        assert len(func_syms) == 1, "Expected one function symbol"
+        assert "abc123defghijklmnopqrs" not in func_syms[0].signature, (
+            f"Secret leaked in signature: {func_syms[0].signature!r}"
+        )
+        assert "<REDACTED>" in func_syms[0].signature, (
+            f"Expected <REDACTED> in signature: {func_syms[0].signature!r}"
+        )
+
+    def test_sk_live_api_key_in_default_arg_redacted(self):
+        """sk-live_ API key in default parameter value must be redacted in signature."""
+        # Use concatenation to avoid GitHub push protection matching literal token
+        api_key = "sk-live_" + "abcdef12345678901234567890"
+        source = f'def build(api_key="{api_key}"): pass\n'
+        symbols = parse_file(source, "builder.py", "python")
+        func_syms = [s for s in symbols if s.kind == "function"]
+        assert len(func_syms) == 1, "Expected one function symbol"
+        assert "abcdef12345678901234567890" not in func_syms[0].signature, (
+            f"Secret leaked in signature: {func_syms[0].signature!r}"
+        )
+        assert "<REDACTED>" in func_syms[0].signature, (
+            f"Expected <REDACTED> in signature: {func_syms[0].signature!r}"
+        )
+
+    def test_normal_function_signature_unchanged(self):
+        """Normal function signature without secrets must be returned unchanged."""
+        source = "def add(a: int, b: int = 0) -> int: pass\n"
+        symbols = parse_file(source, "math.py", "python")
+        func_syms = [s for s in symbols if s.kind == "function"]
+        assert len(func_syms) == 1, "Expected one function symbol"
+        assert "add" in func_syms[0].signature
+        assert "a: int" in func_syms[0].signature
+        assert "b: int = 0" in func_syms[0].signature
+        assert "<REDACTED>" not in func_syms[0].signature
+
+
+class TestDecoratorSanitization:
+    """SEC-MED-1: Decorator values must not leak secrets at parse time."""
+
+    def test_decorator_with_token_redacted(self):
+        """Token value in decorator argument must be redacted."""
+        # Use concatenation to avoid GitHub push protection matching literal token
+        token = "ghp_" + "A" * 36
+        source = (
+            f'@requires_auth(token="{token}")\n'
+            "def protected(): pass\n"
+        )
+        symbols = parse_file(source, "api.py", "python")
+        func_syms = [s for s in symbols if s.kind == "function"]
+        assert len(func_syms) == 1, "Expected one function symbol"
+        assert len(func_syms[0].decorators) == 1, "Expected one decorator"
+        assert "A" * 36 not in func_syms[0].decorators[0], (
+            f"Secret leaked in decorator: {func_syms[0].decorators[0]!r}"
+        )
+        assert "<REDACTED>" in func_syms[0].decorators[0], (
+            f"Expected <REDACTED> in decorator: {func_syms[0].decorators[0]!r}"
+        )
