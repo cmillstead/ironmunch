@@ -217,8 +217,8 @@ def test_nonce_generated_once_per_batch(monkeypatch):
     assert "parse_nonce" in captured
     # Same nonce used for both build and parse
     assert captured["build_nonce"] == captured["parse_nonce"]
-    # Nonce should be 8 hex chars
-    assert len(captured["build_nonce"]) == 8
+    # Nonce should be 32 hex chars (token_hex(16) → 128-bit entropy)
+    assert len(captured["build_nonce"]) == 32
     assert all(c in "0123456789abcdef" for c in captured["build_nonce"])
 
 
@@ -315,3 +315,84 @@ def test_extract_summary_from_docstring_redacts_secret():
     result = extract_summary_from_docstring(doc)
     assert secret not in result, "Secret leaked in summary: " + repr(result)
     assert "<REDACTED>" in result, "Expected <REDACTED> in summary: " + repr(result)
+
+
+# --- SEC-LOW-3: AI-returned summary sanitized via sanitize_signature_for_api() ---
+
+
+def test_parse_response_redacts_inline_secret():
+    """SEC-LOW-3: AI-returned summaries must have inline secrets redacted."""
+    summarizer = BatchSummarizer()
+    # Use concatenation to avoid GitHub push protection matching literal token patterns
+    secret = "sk_live_" + "x" * 24
+    response_text = f"1. A function that uses key={secret} for auth"
+    nonce = "0" * 8
+    summaries = summarizer._parse_response(response_text, 1, nonce=nonce)
+    assert summaries[0] is not None
+    assert secret not in summaries[0], f"Secret leaked in summary: {summaries[0]!r}"
+    assert "REDACTED" in summaries[0], f"Expected REDACTED, got: {summaries[0]!r}"
+
+
+# --- SEC-LOW-4: Anthropic SDK httpx client must not inherit proxy env vars ---
+
+
+def test_batch_summarizer_uses_no_proxy_client():
+    """SEC-LOW-4: BatchSummarizer Anthropic client must be constructed with trust_env=False."""
+    import inspect
+    import ironmunch.summarizer.batch_summarize as bsm
+
+    source = inspect.getsource(bsm.BatchSummarizer._init_client)
+    assert "trust_env=False" in source, (
+        "BatchSummarizer._init_client must pass trust_env=False to httpx.Client"
+    )
+    assert "http_client" in source, (
+        "BatchSummarizer._init_client must pass http_client= to Anthropic()"
+    )
+    assert "_httpx.Client" in source, (
+        "BatchSummarizer._init_client must use _httpx.Client (not the default httpx client)"
+    )
+
+
+# --- SEC-LOW-10: Nonce entropy must be at least 128 bits (32 hex chars) ---
+
+
+def test_nonce_entropy_sufficient():
+    """SEC-LOW-10: Batch nonce must have at least 128 bits of entropy (32 hex chars)."""
+    import secrets as _sec
+    from unittest.mock import patch
+
+    captured_args = []
+    original_token_hex = _sec.token_hex
+
+    def capturing_token_hex(n):
+        captured_args.append(n)
+        return original_token_hex(n)
+
+    with patch("ironmunch.summarizer.batch_summarize.secrets.token_hex", side_effect=capturing_token_hex):
+        # Trigger nonce generation by running _summarize_one_batch with a fake client
+
+        class FakeContent:
+            text = "1. Does something useful."
+
+        class FakeResponse:
+            content = [FakeContent()]
+
+        class FakeClient:
+            class messages:
+                @staticmethod
+                def create(**kwargs):
+                    return FakeResponse()
+
+        summarizer = BatchSummarizer.__new__(BatchSummarizer)
+        summarizer.client = FakeClient()
+        summarizer.model = "claude-haiku-4-5-20251001"
+        summarizer.max_tokens_per_batch = 500
+
+        sym = _make_symbol("def foo():")
+        summarizer._summarize_one_batch([sym])
+
+    # Verify token_hex was called with 16 (128-bit entropy)
+    assert captured_args, "secrets.token_hex was never called"
+    assert captured_args[0] == 16, (
+        f"Expected token_hex(16) for 128-bit nonce, got token_hex({captured_args[0]})"
+    )

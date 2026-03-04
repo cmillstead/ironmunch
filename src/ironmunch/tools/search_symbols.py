@@ -6,6 +6,7 @@ from typing import Optional
 from ..core.limits import MAX_SEARCH_RESULTS
 from ..core.boundaries import make_meta, wrap_untrusted_content
 from ..core.errors import sanitize_error
+from ..security import sanitize_signature_for_api
 from ..storage import IndexStore
 from ._common import parse_repo, timed, elapsed_ms
 
@@ -79,7 +80,7 @@ def search_symbols(
 
     return {
         "repo": f"{owner}/{name}",
-        "query": query,
+        "query": wrap_untrusted_content(sanitize_signature_for_api(query)),
         "result_count": len(scored_results),
         "results": scored_results,
         "_meta": {

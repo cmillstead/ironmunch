@@ -295,3 +295,131 @@ class TestSanitizeSignatureExtendedPatterns:
         sig = 'key = "sk_live_' + "x" * 24 + '"'
         result = sanitize_signature_for_api(sig)
         assert "<REDACTED>" in result
+
+
+class TestContextLinesRedaction:
+    """SEC-MED-1: context_before/context_after must redact secrets."""
+
+    def test_context_before_redacts_secret(self, tmp_path):
+        """Secret on line before a function must be redacted in context_before."""
+        import tempfile
+        from ironmunch.storage.index_store import IndexStore
+        from ironmunch.tools.get_symbol import get_symbol
+
+        src = (
+            'API_KEY = "sk_live_' + 'x' * 24 + '"\n'
+            "def my_func():\n"
+            "    return 42\n"
+        )
+        py_file = tmp_path / "sample.py"
+        py_file.write_text(src, encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as storage:
+            store = IndexStore(storage)
+            from ironmunch.parser import parse_file
+            symbols = parse_file(src, "sample.py", "python")
+            func_symbols = [s for s in symbols if s.name == "my_func"]
+            assert func_symbols, "my_func not parsed"
+            store.save_index(
+                owner="local", name="testctx",
+                source_files=["sample.py"],
+                symbols=symbols,
+                raw_files={"sample.py": src},
+                languages={"python": 1},
+            )
+            result = get_symbol(
+                repo="local/testctx",
+                symbol_id=func_symbols[0].id,
+                context_lines=1,
+                storage_path=storage,
+            )
+            assert "context_before" in result, "Expected context_before in result"
+            cb = result["context_before"]
+            assert "sk_live_" not in cb, f"Secret leaked in context_before: {cb!r}"
+            assert "REDACTED" in cb, f"Expected REDACTED in context_before: {cb!r}"
+
+    def test_context_after_redacts_secret(self, tmp_path):
+        """Secret on line after a function must be redacted in context_after."""
+        import tempfile
+        from ironmunch.storage.index_store import IndexStore
+        from ironmunch.tools.get_symbol import get_symbol
+
+        src = (
+            "def my_func():\n"
+            "    return 42\n"
+            'SECRET = "sk_live_' + 'y' * 24 + '"\n'
+        )
+        py_file = tmp_path / "sample2.py"
+        py_file.write_text(src, encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as storage:
+            store = IndexStore(storage)
+            from ironmunch.parser import parse_file
+            symbols = parse_file(src, "sample2.py", "python")
+            func_symbols = [s for s in symbols if s.name == "my_func"]
+            assert func_symbols, "my_func not parsed"
+            store.save_index(
+                owner="local", name="testctx2",
+                source_files=["sample2.py"],
+                symbols=symbols,
+                raw_files={"sample2.py": src},
+                languages={"python": 1},
+            )
+            result = get_symbol(
+                repo="local/testctx2",
+                symbol_id=func_symbols[0].id,
+                context_lines=1,
+                storage_path=storage,
+            )
+            assert "context_after" in result, "Expected context_after in result"
+            ca = result["context_after"]
+            assert "sk_live_" not in ca, f"Secret leaked in context_after: {ca!r}"
+            assert "REDACTED" in ca, f"Expected REDACTED in context_after: {ca!r}"
+
+
+class TestQueryEchoSanitization:
+    """SEC-LOW-13: query parameter must be sanitized before echoing in response."""
+
+    def test_search_text_query_redacted(self, tmp_path):
+        """search_text must not echo a secret token in the query field."""
+        import tempfile
+        from ironmunch.storage.index_store import IndexStore
+        from ironmunch.tools.search_text import search_text
+
+        src = "x = 1\n"
+        with tempfile.TemporaryDirectory() as storage:
+            store = IndexStore(storage)
+            store.save_index(
+                owner="local", name="qtest",
+                source_files=["x.py"],
+                symbols=[],
+                raw_files={"x.py": src},
+                languages={"python": 1},
+            )
+            query = "sk_live_" + "a" * 24
+            result = search_text(repo="local/qtest", query=query, storage_path=storage)
+            assert "query" in result
+            assert "sk_live_" not in result["query"], f"Secret in query echo: {result['query']!r}"
+
+    def test_search_symbols_query_redacted(self, tmp_path):
+        """search_symbols must not echo a secret token in the query field."""
+        import tempfile
+        from ironmunch.storage.index_store import IndexStore
+        from ironmunch.tools.search_symbols import search_symbols
+
+        src = "def foo(): pass\n"
+        with tempfile.TemporaryDirectory() as storage:
+            store = IndexStore(storage)
+            from ironmunch.parser import parse_file
+            symbols = parse_file(src, "x.py", "python")
+            store.save_index(
+                owner="local", name="qtest2",
+                source_files=["x.py"],
+                symbols=symbols,
+                raw_files={"x.py": src},
+                languages={"python": 1},
+            )
+            query = "sk_live_" + "b" * 24
+            result = search_symbols(repo="local/qtest2", query=query, storage_path=storage)
+            assert "query" in result
+            assert "sk_live_" not in result["query"], f"Secret in query echo: {result['query']!r}"

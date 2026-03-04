@@ -6,6 +6,8 @@ import secrets
 from dataclasses import dataclass
 from typing import Optional
 
+import httpx as _httpx
+
 from ..parser.symbols import Symbol
 from ..security import sanitize_signature_for_api
 
@@ -68,7 +70,10 @@ class BatchSummarizer:
             from anthropic import Anthropic
             api_key = os.environ.get("ANTHROPIC_API_KEY")
             if api_key:
-                self.client = Anthropic(api_key=api_key)
+                self.client = Anthropic(
+                    api_key=api_key,
+                    http_client=_httpx.Client(trust_env=False),
+                )
         except ImportError:
             self.client = None
 
@@ -103,7 +108,7 @@ class BatchSummarizer:
         # Generate a per-batch nonce to create unpredictable delimiter tokens.
         # This prevents prompt injection via attacker-controlled signatures that
         # embed the static delimiter strings (SEC-MED-4).
-        nonce = secrets.token_hex(4)
+        nonce = secrets.token_hex(16)
 
         # Build prompt using nonce-based delimiters
         prompt = self._build_prompt(batch, nonce=nonce)
@@ -192,7 +197,10 @@ class BatchSummarizer:
                     if 1 <= num <= expected_count:
                         summary = parts[1].strip()
                         # SEC-LOW-9: strip non-printable chars and cap length
-                        summary = re.sub(r'[^\x20-\x7e\n]', '', summary).strip()[:200]
+                        # SEC-LOW-3: also redact inline secrets from AI response
+                        summary = sanitize_signature_for_api(
+                            re.sub(r'[^\x20-\x7e\n]', '', summary).strip()[:200]
+                        )
                         summaries[num - 1] = summary
                 except ValueError:
                     continue

@@ -40,7 +40,7 @@ def sanitize_error(err: Exception) -> str:
     - Everything else: generic fallback.
     """
     if isinstance(err, ValidationError):
-        return str(err)[:200]
+        return strip_system_paths(str(err))[:200]
 
     if isinstance(err, OSError) and err.errno in _ERRNO_MESSAGES:
         return _ERRNO_MESSAGES[err.errno]

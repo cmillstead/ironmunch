@@ -11,7 +11,7 @@ import errno
 import os
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 import httpx
 import pathspec
@@ -129,6 +129,8 @@ def discover_local_files(
     warnings: list[str] = []
     skipped_secret_count = 0
     skipped_binary_count = 0
+    skipped_symlink_escape_count = 0
+    skipped_path_traversal_count = 0
     root = folder_path.resolve()
 
     # Load .gitignore
@@ -168,7 +170,7 @@ def discover_local_files(
             if not follow_symlinks and file_path.is_symlink():
                 continue
             if file_path.is_symlink() and _is_symlink_escape(root, file_path):
-                warnings.append(f"Skipped symlink escape: {filename}")
+                skipped_symlink_escape_count += 1
                 continue
 
             # Get relative path for pattern matching
@@ -181,7 +183,7 @@ def discover_local_files(
             try:
                 resolved = file_path.resolve()
                 if not str(resolved).startswith(str(root) + os.sep):
-                    warnings.append(f"Skipped path traversal: {rel_path}")
+                    skipped_path_traversal_count += 1
                     continue
             except (OSError, ValueError):
                 continue
@@ -241,6 +243,10 @@ def discover_local_files(
         warnings.append(f"Skipped {skipped_secret_count} secret file(s)")
     if skipped_binary_count > 0:
         warnings.append(f"Skipped {skipped_binary_count} binary file(s)")
+    if skipped_symlink_escape_count > 0:
+        warnings.append(f"Skipped {skipped_symlink_escape_count} symlink escape(s)")
+    if skipped_path_traversal_count > 0:
+        warnings.append(f"Skipped {skipped_path_traversal_count} path traversal(s)")
 
     # File count limit with prioritization
     if len(files) > max_files:
@@ -350,7 +356,7 @@ async def fetch_file_content(
     """
     if ".." in path:
         raise ValueError("File path contains traversal sequence")
-    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{quote(path, safe='/')}"
     headers = {"Accept": "application/vnd.github.v3.raw"}
 
     if token:

@@ -385,6 +385,8 @@ def _sanitize_arguments(name: str, arguments: dict) -> dict | str:
 
     # Cap symbol_ids list length and validate items
     if name == "get_symbols" and "symbol_ids" in arguments:
+        if not isinstance(arguments["symbol_ids"], list):
+            return "Argument 'symbol_ids' must be a list"
         arguments["symbol_ids"] = [
             sid for sid in arguments["symbol_ids"][:MAX_BATCH_SYMBOLS]
             if isinstance(sid, str) and len(sid) <= MAX_ARGUMENT_LENGTH
@@ -438,11 +440,22 @@ def _sanitize_arguments(name: str, arguments: dict) -> dict | str:
     return arguments
 
 
+def _validate_storage_path(storage_path: str | None) -> str | None:
+    """Validate CODE_INDEX_PATH is absolute. Raises ValueError if not."""
+    if storage_path is not None:
+        from pathlib import Path
+        p = Path(storage_path)
+        if not p.is_absolute():
+            raise ValueError(
+                f"CODE_INDEX_PATH must be an absolute path: {storage_path!r}"
+            )
+        return str(p.resolve())
+    return None
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle tool calls with sanitized error responses."""
-    storage_path = os.environ.get("CODE_INDEX_PATH")
-
     if name not in KNOWN_TOOLS:
         return [TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]
 
@@ -457,6 +470,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         }))]
 
     try:
+        storage_path = _validate_storage_path(os.environ.get("CODE_INDEX_PATH"))
         if name == "index_repo":
             result = await index_repo(
                 url=arguments["url"],
