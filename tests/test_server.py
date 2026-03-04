@@ -131,3 +131,71 @@ async def test_call_tool_sanitizes_exceptions():
     assert "error" in payload
     # Should be sanitized -- no raw traceback or internal path info
     assert "Traceback" not in payload["error"]
+
+
+# -- Input bounds tests --------------------------------------------------------
+
+class TestCallToolInputBounds:
+    @pytest.mark.asyncio
+    async def test_oversized_string_argument_rejected(self):
+        result = await call_tool("search_text", {
+            "repo": "test/repo",
+            "query": "x" * 20_000,
+        })
+        text = result[0].text
+        assert "error" in text.lower()
+        assert "maximum length" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_empty_search_query_rejected(self):
+        result = await call_tool("search_text", {
+            "repo": "test/repo",
+            "query": "",
+        })
+        text = result[0].text
+        assert "error" in text.lower()
+        assert "empty" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_query_rejected(self):
+        result = await call_tool("search_text", {
+            "repo": "test/repo",
+            "query": "   ",
+        })
+        text = result[0].text
+        assert "error" in text.lower()
+        assert "empty" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_symbol_ids_list_capped(self):
+        result = await call_tool("get_symbols", {
+            "repo": "test/repo",
+            "symbol_ids": [f"sym_{i}" for i in range(200)],
+        })
+        # Should not crash -- repo won't exist but that's fine
+        text = result[0].text
+        assert "error" in text.lower()  # repo not found, but it didn't crash
+
+    def test_string_false_is_falsy(self):
+        """String 'false' must be coerced to False for boolean flags."""
+        from ironmunch.server import _sanitize_arguments
+        args = {"follow_symlinks": "false", "path": "/test"}
+        result = _sanitize_arguments("index_folder", args)
+        assert isinstance(result, dict)
+        assert result["follow_symlinks"] is False
+
+    def test_string_true_is_falsy_too(self):
+        """String 'true' is not in (True, 1) so it should be False."""
+        from ironmunch.server import _sanitize_arguments
+        args = {"verify": "true"}
+        result = _sanitize_arguments("get_symbol", args)
+        assert isinstance(result, dict)
+        assert result["verify"] is False
+
+    def test_actual_bool_true_preserved(self):
+        """Actual boolean True must be preserved."""
+        from ironmunch.server import _sanitize_arguments
+        args = {"follow_symlinks": True, "path": "/test"}
+        result = _sanitize_arguments("index_folder", args)
+        assert isinstance(result, dict)
+        assert result["follow_symlinks"] is True

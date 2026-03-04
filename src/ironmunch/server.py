@@ -28,6 +28,7 @@ from .tools.invalidate_cache import invalidate_cache
 from .tools.search_text import search_text
 from .tools.get_repo_outline import get_repo_outline
 from .core.errors import sanitize_error
+from .core.limits import MAX_ARGUMENT_LENGTH, MAX_BATCH_SYMBOLS
 
 
 # -- Tool description warning suffixes ----------------------------------------
@@ -329,10 +330,40 @@ async def list_tools() -> list[Tool]:
     ]
 
 
+def _sanitize_arguments(name: str, arguments: dict) -> dict | str:
+    """Validate and sanitize tool arguments. Returns error string on failure."""
+    # Cap string argument lengths
+    for key, val in arguments.items():
+        if isinstance(val, str) and len(val) > MAX_ARGUMENT_LENGTH:
+            return f"Argument '{key}' exceeds maximum length ({MAX_ARGUMENT_LENGTH})"
+
+    # Reject empty/whitespace-only queries
+    if name in ("search_text", "search_symbols") and "query" in arguments:
+        q = arguments["query"]
+        if not q or not q.strip():
+            return "Search query cannot be empty"
+
+    # Cap symbol_ids list length
+    if name == "get_symbols" and "symbol_ids" in arguments:
+        arguments["symbol_ids"] = arguments["symbol_ids"][:MAX_BATCH_SYMBOLS]
+
+    # Coerce boolean flags
+    for flag in ("follow_symlinks", "use_ai_summaries", "verify"):
+        if flag in arguments and not isinstance(arguments[flag], bool):
+            arguments[flag] = arguments[flag] in (True, 1)
+
+    return arguments
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle tool calls with sanitized error responses."""
     storage_path = os.environ.get("CODE_INDEX_PATH")
+
+    sanitized = _sanitize_arguments(name, arguments)
+    if isinstance(sanitized, str):
+        return [TextContent(type="text", text=json.dumps({"error": sanitized}))]
+    arguments = sanitized
 
     try:
         if name == "index_repo":

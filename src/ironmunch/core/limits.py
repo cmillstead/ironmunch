@@ -18,5 +18,9 @@ MAX_SEARCH_RESULTS: int = 50  # Max results per search query
 # Storage limits
 MAX_INDEX_SIZE: int = 50 * 1024 * 1024  # 50 MB max index JSON
 
+# Input validation limits
+MAX_ARGUMENT_LENGTH: int = 10_000  # Max string argument length
+MAX_BATCH_SYMBOLS: int = 50  # Max symbol IDs per get_symbols call
+
 # Network limits
 GITHUB_API_TIMEOUT: int = 30  # Seconds per GitHub API request
