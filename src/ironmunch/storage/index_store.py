@@ -24,6 +24,20 @@ def _file_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def _makedirs_0o700(path: str) -> None:
+    """Create directories with mode 0o700, respecting the umask correctly.
+
+    Python's os.makedirs() mode argument is modified by the process umask for
+    intermediate directories. To guarantee 0o700 we temporarily set umask=0o077
+    (which means only the owner bits survive from 0o777, giving 0o700).
+    """
+    old_umask = os.umask(0o077)
+    try:
+        os.makedirs(path, mode=0o700, exist_ok=True)
+    finally:
+        os.umask(old_umask)
+
+
 def _get_git_head(repo_path: Path) -> Optional[str]:
     """Get current HEAD commit hash for a git repo, or None."""
     try:
@@ -237,7 +251,7 @@ class IndexStore:
 
         # Save raw files
         content_dir = self._content_dir(owner, name)
-        content_dir.mkdir(parents=True, exist_ok=True)
+        _makedirs_0o700(str(content_dir))
 
         for file_path, content in raw_files.items():
             self._safe_write_content(content_dir, file_path, content)
@@ -466,7 +480,7 @@ class IndexStore:
 
         # Update raw files
         content_dir = self._content_dir(owner, name)
-        content_dir.mkdir(parents=True, exist_ok=True)
+        _makedirs_0o700(str(content_dir))
 
         # Remove deleted files from content dir (with containment validation)
         resolved_root = content_dir.resolve()
@@ -500,6 +514,10 @@ class IndexStore:
 
                 # Validate required fields before accessing
                 if not all(k in data for k in ("repo", "indexed_at", "symbols", "source_files", "languages")):
+                    continue
+
+                # Type-validate key string fields to prevent injection / errors
+                if not isinstance(data.get("repo"), str) or not isinstance(data.get("indexed_at"), str):
                     continue
 
                 repos.append({
@@ -548,7 +566,7 @@ class IndexStore:
         resolved_root = content_dir.resolve()
         if not str(dest).startswith(str(resolved_root) + os.sep):
             return False  # Traversal — reject silently
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        _makedirs_0o700(str(dest.parent))
         try:
             fd = os.open(
                 str(dest),

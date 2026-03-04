@@ -55,10 +55,13 @@ def _load_gitignore(folder_path: Path) -> Optional[pathspec.PathSpec]:
     """Load .gitignore from the folder root if it exists.
 
     Returns a compiled PathSpec for matching, or None if no .gitignore found.
+    Skips files larger than 65536 bytes to prevent pathspec DoS.
     """
     gitignore_path = folder_path / ".gitignore"
     if gitignore_path.is_file():
         try:
+            if gitignore_path.stat().st_size > 65536:
+                return None  # Too large; skip to prevent DoS
             content = gitignore_path.read_text(encoding="utf-8", errors="replace")
             return pathspec.PathSpec.from_lines("gitignore", content.splitlines())
         except Exception:

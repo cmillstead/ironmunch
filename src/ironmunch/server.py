@@ -30,7 +30,10 @@ from .tools.invalidate_cache import invalidate_cache
 from .tools.search_text import search_text
 from .tools.get_repo_outline import get_repo_outline
 from .core.errors import sanitize_error
-from .core.limits import MAX_ARGUMENT_LENGTH, MAX_BATCH_SYMBOLS, MAX_FILE_PATTERN_LENGTH
+from .core.limits import (
+    MAX_ARGUMENT_LENGTH, MAX_BATCH_SYMBOLS, MAX_FILE_PATTERN_LENGTH,
+    MAX_CONTEXT_LINES, MAX_SEARCH_RESULTS,
+)
 
 
 # -- Tool description warning suffixes ----------------------------------------
@@ -399,6 +402,31 @@ def _sanitize_arguments(name: str, arguments: dict) -> dict | str:
     # Cap file_pattern length to prevent pathological glob matching
     if "file_pattern" in arguments and isinstance(arguments["file_pattern"], str):
         arguments["file_pattern"] = arguments["file_pattern"][:MAX_FILE_PATTERN_LENGTH]
+
+    # Validate and coerce integer parameters
+    _INT_PARAMS = {
+        "context_lines": (0, 0, MAX_CONTEXT_LINES),   # (default, min, max)
+        "max_results": (10, 1, MAX_SEARCH_RESULTS),
+    }
+    for param, (default, lo, hi) in _INT_PARAMS.items():
+        if param not in arguments:
+            continue
+        val = arguments[param]
+        if isinstance(val, bool):
+            # bool is a subclass of int in Python but semantically wrong here
+            return f"Argument '{param}' must be an integer, got boolean"
+        if isinstance(val, (int, float)):
+            arguments[param] = max(lo, min(hi, int(val)))
+        elif isinstance(val, str):
+            try:
+                arguments[param] = max(lo, min(hi, int(val)))
+            except ValueError:
+                return f"Argument '{param}' must be an integer, got '{val}'"
+        else:
+            return (
+                f"Argument '{param}' must be an integer, "
+                f"got {type(val).__name__}"
+            )
 
     return arguments
 

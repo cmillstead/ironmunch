@@ -34,6 +34,14 @@ def get_file_tree(
         return parsed
     owner, name = parsed
 
+    # --- security gate: validate path_prefix ---
+    if "\x00" in path_prefix:
+        return {"error": "path_prefix contains null bytes"}
+    # Reject if any path component is a traversal sequence
+    prefix_parts = path_prefix.replace("\\", "/").split("/")
+    if any(part == ".." for part in prefix_parts):
+        return {"error": "path_prefix must not contain '..' components"}
+
     store = IndexStore(base_path=storage_path)
     index = store.load_index(owner, name)
 
