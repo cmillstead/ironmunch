@@ -10,6 +10,7 @@ Tools call this module, not core/ directly. Provides:
 - sanitize_repo_identifier() — owner/name validation
 """
 
+import errno
 import os
 import re
 from fnmatch import fnmatch
@@ -91,7 +92,14 @@ def safe_read_file(abs_path: str, root: str) -> str:
             f"File exceeds maximum size ({size} > {MAX_FILE_SIZE})"
         )
 
-    return Path(abs_path).read_text(encoding="utf-8", errors="replace")
+    try:
+        fd = os.open(abs_path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise ValidationError("Path is a symlink (O_NOFOLLOW)") from exc
+        raise
+    with os.fdopen(fd, encoding="utf-8", errors="replace") as fh:
+        return fh.read()
 
 
 def is_secret_file(file_path: str) -> bool:
@@ -129,14 +137,23 @@ _INLINE_SECRET_RE = re.compile(
     r"("
     # API key prefixes
     r"sk-[a-zA-Z0-9_\-]{20,}"
+    r"|sk_live_[a-zA-Z0-9]{24,}"
     r"|ghp_[a-zA-Z0-9]{36}"
     r"|gho_[a-zA-Z0-9]{36}"
+    r"|ghu_[a-zA-Z0-9]{36}"
+    r"|ghs_[a-zA-Z0-9]{36}"
     r"|github_pat_[a-zA-Z0-9_]{20,}"
     r"|AKIA[A-Z0-9]{16}"
     r"|xox[bprs]-[a-zA-Z0-9\-]{10,}"
     r"|glpat-[a-zA-Z0-9\-]{20,}"
+    # Connection strings with embedded credentials
+    r"|(?:postgres|mysql|mongodb(?:\+srv)?|redis|amqp)://[^:\s]+:[^@\s]+@"
+    # Bearer tokens
+    r"|Bearer\s+[A-Za-z0-9\-._~+/]{20,}"
+    # PEM headers
+    r"|-----BEGIN [A-Z ]+ KEY-----"
     # Parameter defaults with secrets
-    r"|(?:password|passwd|secret|api_key|apikey|token|auth)\s*=\s*[\"'][^\"']{4,}[\"']"
+    r"|(?:password|passwd|secret|api_key|apikey|token|auth|aws_secret_access_key|aws_session_token)\s*=\s*[\"'][^\"']{4,}[\"']"
     r")",
     re.IGNORECASE,
 )
