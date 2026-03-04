@@ -332,6 +332,13 @@ async def list_tools() -> list[Tool]:
     ]
 
 
+# Known tool names — used to reject unknown tools before rate limiting
+KNOWN_TOOLS = frozenset({
+    "index_repo", "index_folder", "list_repos", "get_file_tree",
+    "get_file_outline", "get_symbol", "get_symbols", "search_symbols",
+    "invalidate_cache", "search_text", "get_repo_outline",
+})
+
 # Rate limiting — per-tool sliding window
 _CALL_TIMESTAMPS: dict[str, list[float]] = defaultdict(list)
 _MAX_CALLS_PER_MINUTE: int = 60
@@ -400,6 +407,9 @@ def _sanitize_arguments(name: str, arguments: dict) -> dict | str:
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle tool calls with sanitized error responses."""
     storage_path = os.environ.get("CODE_INDEX_PATH")
+
+    if name not in KNOWN_TOOLS:
+        return [TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]
 
     sanitized = _sanitize_arguments(name, arguments)
     if isinstance(sanitized, str):
