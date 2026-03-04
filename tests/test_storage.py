@@ -169,3 +169,43 @@ def test_codeindex_search():
 
     results = index.search("login", kind="function")
     assert len(results) > 0
+
+
+def test_get_symbol_docstring_wrapped_as_untrusted(tmp_path):
+    """SEC-LOW-7: get_symbol should wrap docstring with wrap_untrusted_content."""
+    from ironmunch.parser import Symbol
+    from ironmunch.tools.get_symbol import get_symbol
+
+    store = IndexStore(base_path=str(tmp_path))
+    content = 'def foo():\n    """This is the docstring."""\n    pass\n'
+
+    symbols = [
+        Symbol(
+            id="test-py::foo",
+            file="test.py",
+            name="foo",
+            qualified_name="foo",
+            kind="function",
+            language="python",
+            signature="def foo():",
+            docstring="This is the docstring.",
+            byte_offset=0,
+            byte_length=len(content.encode()),
+        )
+    ]
+
+    store.save_index(
+        owner="testowner",
+        name="testrepo",
+        source_files=["test.py"],
+        symbols=symbols,
+        raw_files={"test.py": content},
+        languages={"python": 1},
+    )
+
+    result = get_symbol("testowner/testrepo", "test-py::foo", storage_path=str(tmp_path))
+
+    assert "docstring" in result
+    docstring_val = result["docstring"]
+    # wrap_untrusted_content adds boundary markers like <<<UNTRUSTED_CODE_...>>>
+    assert "UNTRUSTED_CODE" in docstring_val

@@ -103,7 +103,7 @@ def get_symbol(
         "end_line": symbol["end_line"],
         "signature": symbol["signature"],
         "decorators": symbol.get("decorators", []),
-        "docstring": symbol.get("docstring", ""),
+        "docstring": wrap_untrusted_content(symbol.get("docstring", "")),
         "content_hash": symbol.get("content_hash", ""),
         # --- content boundary wrapping ---
         "source": wrap_untrusted_content(source) if source else "",
@@ -176,7 +176,7 @@ def get_symbols(
             "end_line": symbol["end_line"],
             "signature": symbol["signature"],
             "decorators": symbol.get("decorators", []),
-            "docstring": symbol.get("docstring", ""),
+            "docstring": wrap_untrusted_content(symbol.get("docstring", "")),
             "content_hash": symbol.get("content_hash", ""),
             # --- content boundary wrapping ---
             "source": wrap_untrusted_content(source) if source else "",
