@@ -115,9 +115,9 @@ def get_symbol(
     }
 
     if context_before:
-        result["context_before"] = wrap_untrusted_content(context_before)
+        result["context_before"] = wrap_untrusted_content(sanitize_signature_for_api(context_before))
     if context_after:
-        result["context_after"] = wrap_untrusted_content(context_after)
+        result["context_after"] = wrap_untrusted_content(sanitize_signature_for_api(context_after))
 
     return result
 

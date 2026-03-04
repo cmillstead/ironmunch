@@ -232,16 +232,13 @@ class TestCallToolInputBounds:
         assert "context_lines" in result
         assert "integer" in result.lower()
 
-    def test_context_lines_dict_produces_meaningful_error_via_call_tool(self):
+    async def test_context_lines_dict_produces_meaningful_error_via_call_tool(self):
         """SEC-LOW-2: call_tool with context_lines=dict returns meaningful error, not internal error."""
-        import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
-            call_tool("get_symbol", {
-                "repo": "test/repo",
-                "symbol_id": "some-id",
-                "context_lines": {"key": "val"},
-            })
-        )
+        result = await call_tool("get_symbol", {
+            "repo": "test/repo",
+            "symbol_id": "some-id",
+            "context_lines": {"key": "val"},
+        })
         assert len(result) == 1
         payload = json.loads(result[0].text)
         assert "error" in payload
@@ -536,3 +533,77 @@ class TestMkdirMode:
         assert nested_dir.exists()
         mode = stat.S_IMODE(nested_dir.stat().st_mode)
         assert mode == 0o700, f"Expected 0o700 for nested dir, got {oct(mode)}"
+
+
+# -- SEC-LOW-1: symbol_ids type guard -----------------------------------------
+
+class TestGetSymbolsSymbolIdsTypeGuard:
+    """SEC-LOW-1: get_symbols must reject non-list symbol_ids before slicing."""
+
+    @pytest.mark.asyncio
+    async def test_get_symbols_rejects_non_list_symbol_ids_integer(self):
+        """SEC-LOW-1: integer symbol_ids must be rejected with a clear error."""
+        result = await call_tool(
+            "get_symbols",
+            {"repo": "local/nonexistent", "symbol_ids": 42},
+        )
+        text = result[0].text if result else ""
+        assert "symbol_ids" in text.lower() or "list" in text.lower(), (
+            f"Expected clear error about symbol_ids, got: {text!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_symbols_rejects_string_symbol_ids(self):
+        """SEC-LOW-1: string symbol_ids must be rejected, not iterated char by char."""
+        result = await call_tool(
+            "get_symbols",
+            {"repo": "local/nonexistent", "symbol_ids": "abc"},
+        )
+        text = result[0].text if result else ""
+        assert "symbol_ids" in text.lower() or "list" in text.lower(), (
+            f"Expected clear error about symbol_ids, got: {text!r}"
+        )
+
+    def test_symbol_ids_non_list_returns_error_string_from_sanitize(self):
+        """SEC-LOW-1: _sanitize_arguments must return an error string for non-list symbol_ids."""
+        from ironmunch.server import _sanitize_arguments
+        result = _sanitize_arguments("get_symbols", {
+            "repo": "test/repo",
+            "symbol_ids": {"key": "val"},
+        })
+        assert isinstance(result, str), "Expected error string for dict symbol_ids"
+        assert "symbol_ids" in result
+        assert "list" in result.lower()
+
+
+# -- SEC-LOW-7: CODE_INDEX_PATH validation ------------------------------------
+
+class TestCodeIndexPathValidation:
+    """SEC-LOW-7: Relative CODE_INDEX_PATH must be rejected."""
+
+    def test_relative_path_raises_value_error(self):
+        """_validate_storage_path must raise ValueError for a relative path."""
+        from ironmunch.server import _validate_storage_path
+        import pytest
+        with pytest.raises(ValueError, match="absolute"):
+            _validate_storage_path("../../relative/path")
+
+    def test_none_returns_none(self):
+        """_validate_storage_path(None) must return None (not set case)."""
+        from ironmunch.server import _validate_storage_path
+        assert _validate_storage_path(None) is None
+
+    def test_absolute_path_returned_resolved(self, tmp_path):
+        """_validate_storage_path with an absolute path must return its resolved form."""
+        from ironmunch.server import _validate_storage_path
+        result = _validate_storage_path(str(tmp_path))
+        assert result is not None
+        assert result.startswith("/")
+
+    async def test_relative_env_var_causes_error_in_call_tool(self, monkeypatch):
+        """SEC-LOW-7: Relative CODE_INDEX_PATH env var causes call_tool to return an error."""
+        monkeypatch.setenv("CODE_INDEX_PATH", "relative/path")
+        result = await call_tool("list_repos", {})
+        assert len(result) == 1
+        text = result[0].text
+        assert "error" in text.lower()

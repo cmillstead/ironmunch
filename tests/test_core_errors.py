@@ -60,3 +60,13 @@ def test_validation_error_truncated_at_200_chars():
     err = ValidationError("A" * 500)
     msg = sanitize_error(err)
     assert len(msg) <= 200
+
+
+def test_validation_error_path_stripped():
+    """SEC-LOW-14: ValidationError messages must have filesystem paths stripped."""
+    from ironmunch.core.errors import sanitize_error
+    from ironmunch.core.validation import ValidationError
+    err = ValidationError("Not allowed: /Users/cevin/secret-project/config.py")
+    msg = sanitize_error(err)
+    assert "/Users/cevin" not in msg, f"Path leaked in sanitized error: {msg!r}"
+    assert "Not allowed" in msg or len(msg) > 0  # something useful remains

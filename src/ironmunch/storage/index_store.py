@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..parser.symbols import Symbol
-from ..security import sanitize_repo_identifier
+from ..security import sanitize_repo_identifier, sanitize_signature_for_api
 from ..core.limits import MAX_INDEX_SIZE, MAX_FILE_SIZE
 from ..core.validation import validate_path, ValidationError
 
@@ -229,7 +229,7 @@ class IndexStore:
         index_path = self._index_path(owner, name)
         tmp_path = index_path.with_suffix(".json.tmp")
         try:
-            fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(self._index_to_dict(index), f, indent=2)
             # Atomic rename (on POSIX; best-effort on Windows)
@@ -286,6 +286,25 @@ class IndexStore:
             return None
         if not all(isinstance(s, dict) for s in data["symbols"]):
             return None
+        if not all(isinstance(f, str) for f in data["source_files"]):
+            return None
+        if not all(
+            isinstance(k, str) and isinstance(v, int) and v >= 0
+            for k, v in data["languages"].items()
+        ):
+            return None
+
+        # SEC-LOW-5: Re-sanitize symbol text fields on load to catch secrets
+        # written before current redaction rules or tampered on disk.
+        for sym in data["symbols"]:
+            for field in ("signature", "docstring", "summary"):
+                if field in sym and isinstance(sym[field], str):
+                    sym[field] = sanitize_signature_for_api(sym[field])
+            if "decorators" in sym and isinstance(sym["decorators"], list):
+                sym["decorators"] = [
+                    sanitize_signature_for_api(d) if isinstance(d, str) else d
+                    for d in sym["decorators"]
+                ]
 
         try:
             return CodeIndex(
@@ -472,7 +491,7 @@ class IndexStore:
         index_path = self._index_path(owner, name)
         tmp_path = index_path.with_suffix(".json.tmp")
         try:
-            fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(self._index_to_dict(updated), f, indent=2)
             tmp_path.replace(index_path)

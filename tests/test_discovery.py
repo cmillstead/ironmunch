@@ -691,3 +691,193 @@ class TestIndexFolderONoFollow:
         file_names = [f.name for f in files]
         # The real file should be discovered; the symlink is excluded by follow_symlinks=False
         assert "real.py" in file_names
+
+
+# ---------------------------------------------------------------------------
+# SEC-LOW-6: Symlink-escape and path-traversal warnings must be aggregate counts
+# ---------------------------------------------------------------------------
+
+class TestAggregateWarnings:
+    """SEC-LOW-6: Symlink-escape and traversal warnings must not expose filenames."""
+
+    def test_symlink_escape_warning_no_filename(self, tmp_path):
+        """Warning for symlink escape must be an aggregate count, not expose filename."""
+        import sys
+        from ironmunch.discovery import discover_local_files
+
+        if sys.platform == "win32":
+            pytest.skip("Symlinks unreliable on Windows")
+
+        # Create an outside target and a symlink that escapes the root
+        outside = tmp_path.parent / "outside_target_sec_low6.txt"
+        outside.write_text("secret content")
+        escape_link = tmp_path / "escape_link.py"
+        escape_link.symlink_to(outside)
+
+        # Also create a valid file so discovery returns something
+        (tmp_path / "real.py").write_text("def foo(): pass\n")
+
+        files, warnings = discover_local_files(tmp_path, follow_symlinks=True)
+        # The warning must not include the symlink filename
+        warning_text = " ".join(warnings)
+        assert "escape_link" not in warning_text, (
+            f"Filename 'escape_link' leaked in warning: {warning_text!r}"
+        )
+        # An aggregate warning should mention symlink skips
+        assert any("symlink" in w.lower() for w in warnings), (
+            f"Expected symlink aggregate warning, got: {warnings!r}"
+        )
+
+    def test_symlink_escape_aggregate_count_format(self, tmp_path):
+        """Symlink escape warning must contain a digit (aggregate count)."""
+        import sys
+        from ironmunch.discovery import discover_local_files
+
+        if sys.platform == "win32":
+            pytest.skip("Symlinks unreliable on Windows")
+
+        outside = tmp_path.parent / "outside_target_count_sec_low6.txt"
+        outside.write_text("data")
+        (tmp_path / "esc.py").symlink_to(outside)
+        (tmp_path / "real.py").write_text("x = 1\n")
+
+        files, warnings = discover_local_files(tmp_path, follow_symlinks=True)
+        symlink_warnings = [w for w in warnings if "symlink" in w.lower()]
+        for w in symlink_warnings:
+            assert any(ch.isdigit() for ch in w), (
+                f"Symlink warning must be a count, got: {w!r}"
+            )
+
+    def test_path_traversal_warning_no_path(self, tmp_path):
+        """Warning for path traversal must not expose the relative path."""
+        from ironmunch.discovery import discover_local_files
+
+        (tmp_path / "valid.py").write_text("def foo(): pass\n")
+        files, warnings = discover_local_files(tmp_path)
+        # For a clean directory, no traversal warnings expected
+        traversal_warnings = [w for w in warnings if "traversal" in w.lower()]
+        for w in traversal_warnings:
+            # Should be an aggregate count like "Skipped 1 path traversal(s)"
+            assert any(char.isdigit() for char in w), (
+                f"Traversal warning appears to expose a path rather than count: {w!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# SEC-LOW-11: GitHub tree path percent-encoded in URL construction
+# ---------------------------------------------------------------------------
+
+class TestGithubPathEncoding:
+    """SEC-LOW-11: GitHub tree paths must be percent-encoded in URLs."""
+
+    @pytest.mark.asyncio
+    async def test_path_with_hash_is_encoded(self):
+        """A file path containing '#' must be percent-encoded in the GitHub URL."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from ironmunch.discovery import fetch_file_content
+
+        captured_url = []
+
+        async def mock_get(url, **kwargs):
+            captured_url.append(url)
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.text = "# content"
+            return mock_resp
+
+        with patch("ironmunch.discovery.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = mock_get
+            mock_cls.return_value = mock_client
+
+            try:
+                await fetch_file_content(
+                    "octocat", "Hello-World", "src/file#1.py", token=None
+                )
+            except Exception:
+                pass
+
+        assert len(captured_url) > 0, "fetch_file_content did not make a GET request"
+        url_path_part = captured_url[0].split("contents/")[1]
+        assert "#" not in url_path_part, (
+            f"Unencoded '#' found in GitHub URL path: {captured_url[0]!r}"
+        )
+        assert "%23" in url_path_part, (
+            f"Expected '%23' (encoded '#') in URL, got: {captured_url[0]!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_path_with_space_is_encoded(self):
+        """A file path containing a space must be percent-encoded in the GitHub URL."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from ironmunch.discovery import fetch_file_content
+
+        captured_url = []
+
+        async def mock_get(url, **kwargs):
+            captured_url.append(url)
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.text = "content"
+            return mock_resp
+
+        with patch("ironmunch.discovery.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = mock_get
+            mock_cls.return_value = mock_client
+
+            try:
+                await fetch_file_content(
+                    "octocat", "Hello-World", "src/my file.py", token=None
+                )
+            except Exception:
+                pass
+
+        assert len(captured_url) > 0, "fetch_file_content did not make a GET request"
+        url_path_part = captured_url[0].split("contents/")[1]
+        assert " " not in url_path_part, (
+            f"Unencoded space found in GitHub URL path: {captured_url[0]!r}"
+        )
+        assert "%20" in url_path_part, (
+            f"Expected '%20' (encoded space) in URL, got: {captured_url[0]!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_slash_not_encoded_in_path(self):
+        """Path separators '/' must NOT be encoded (safe='/')."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from ironmunch.discovery import fetch_file_content
+
+        captured_url = []
+
+        async def mock_get(url, **kwargs):
+            captured_url.append(url)
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.text = "content"
+            return mock_resp
+
+        with patch("ironmunch.discovery.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.get = mock_get
+            mock_cls.return_value = mock_client
+
+            try:
+                await fetch_file_content(
+                    "octocat", "Hello-World", "src/sub/file.py", token=None
+                )
+            except Exception:
+                pass
+
+        assert len(captured_url) > 0
+        # The slash separators must survive as literal '/' in the URL
+        assert "src/sub/file.py" in captured_url[0], (
+            f"Path slashes should not be encoded, got: {captured_url[0]!r}"
+        )

@@ -196,3 +196,122 @@ class TestLoadIndexNoFollow:
                 assert result is None, (
                     "load_index must return None for a symlink index file"
                 )
+
+
+class TestLoadIndexElementValidation:
+    """SEC-LOW-2: load_index must validate element types within lists and dicts."""
+
+    def test_source_files_non_string_element_rejected(self):
+        """source_files with a non-string element must cause load_index to return None."""
+        with tempfile.TemporaryDirectory() as storage:
+            store = IndexStore(storage)
+            index_path = (
+                store.base_path / "test__repo.json"
+            )
+            malformed = {
+                "repo": "test/repo",
+                "owner": "test",
+                "name": "repo",
+                "indexed_at": "2026-01-01T00:00:00",
+                "source_files": ["valid.py", None, 42],
+                "symbols": [],
+                "languages": {"python": 1},
+                "file_count": 1,
+                "symbol_count": 0,
+            }
+            index_path.write_text(json.dumps(malformed), encoding="utf-8")
+            result = store.load_index("test", "repo")
+            assert result is None, "Expected None for source_files with non-string elements"
+
+    def test_languages_non_int_value_rejected(self):
+        """languages dict with non-integer value must cause load_index to return None."""
+        with tempfile.TemporaryDirectory() as storage:
+            store = IndexStore(storage)
+            index_path = store.base_path / "test__repo2.json"
+            malformed = {
+                "repo": "test/repo2",
+                "owner": "test",
+                "name": "repo2",
+                "indexed_at": "2026-01-01T00:00:00",
+                "source_files": ["valid.py"],
+                "symbols": [],
+                "languages": {"python": "not-an-int"},
+                "file_count": 1,
+                "symbol_count": 0,
+            }
+            index_path.write_text(json.dumps(malformed), encoding="utf-8")
+            result = store.load_index("test", "repo2")
+            assert result is None, "Expected None for languages with non-integer value"
+
+
+class TestLoadIndexResanitization:
+    """SEC-LOW-5: load_index must re-apply secret redaction to loaded symbol fields."""
+
+    def test_secret_in_signature_redacted_on_load(self):
+        """A secret token in a stored symbol signature must be redacted on load."""
+        with tempfile.TemporaryDirectory() as storage:
+            store = IndexStore(storage)
+            index_path = store.base_path / "test__resanitize.json"
+            secret = "sk_live_" + "x" * 24
+            malformed = {
+                "repo": "test/resanitize",
+                "owner": "test",
+                "name": "resanitize",
+                "indexed_at": "2026-01-01T00:00:00",
+                "source_files": ["main.py"],
+                "symbols": [{
+                    "id": "main.py::foo",
+                    "file": "main.py",
+                    "name": "foo",
+                    "qualified_name": "foo",
+                    "kind": "function",
+                    "language": "python",
+                    "signature": f"def foo(key='{secret}'):",
+                    "docstring": f"Uses key={secret}",
+                    "summary": f"Function with key {secret}",
+                    "decorators": [],
+                    "line": 1,
+                    "end_line": 2,
+                    "byte_offset": 0,
+                    "byte_length": 20,
+                    "content_hash": "abc123",
+                }],
+                "languages": {"python": 1},
+                "file_count": 1,
+                "symbol_count": 1,
+            }
+            index_path.write_text(json.dumps(malformed), encoding="utf-8")
+            idx = store.load_index("test", "resanitize")
+            assert idx is not None
+            sym = idx.symbols[0]
+            assert secret not in sym.get("signature", ""), "Secret in signature after load"
+            assert secret not in sym.get("docstring", ""), "Secret in docstring after load"
+            assert secret not in sym.get("summary", ""), "Secret in summary after load"
+
+
+class TestTempFileONofollow:
+    """SEC-LOW-8: temp-file writes must refuse to follow symlinks."""
+
+    def test_save_index_rejects_symlink_at_tmp_path(self, tmp_path):
+        """save_index must raise OSError if a symlink exists at the .json.tmp path."""
+        import sys
+
+        if sys.platform == "win32":
+            pytest.skip("O_NOFOLLOW not available on Windows")
+
+        store = IndexStore(base_path=str(tmp_path))
+        tmp_file = tmp_path / "local__testrepo.json.tmp"
+        decoy = tmp_path / "decoy.txt"
+        decoy.write_text("decoy content")
+        tmp_file.symlink_to(decoy)
+
+        # Attempt to save — must fail with OSError (ELOOP) not silently follow symlink
+        with pytest.raises(OSError):
+            store.save_index(
+                owner="local",
+                name="testrepo",
+                source_files=["x.py"],
+                symbols=[],
+                raw_files={"x.py": "x = 1"},
+                languages={"python": 1},
+            )

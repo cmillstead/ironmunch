@@ -45,7 +45,7 @@ def get_file_outline(
     if not file_symbols:
         return {
             "repo": f"{owner}/{name}",
-            "file": file_path,
+            "file": wrap_untrusted_content(file_path),
             "language": "",
             "symbols": [],
         }
@@ -64,7 +64,7 @@ def get_file_outline(
 
     return {
         "repo": f"{owner}/{name}",
-        "file": file_path,
+        "file": wrap_untrusted_content(file_path),
         "language": language,
         "symbols": symbols_output,
         "_meta": {

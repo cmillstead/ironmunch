@@ -104,7 +104,7 @@ def search_text(
 
     return {
         "repo": f"{owner}/{name}",
-        "query": query,
+        "query": wrap_untrusted_content(sanitize_signature_for_api(query)),
         "result_count": len(matches),
         "results": matches,
         "_meta": {
