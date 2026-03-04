@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from ..security import validate_file_access
+from ..security import validate_file_access, sanitize_signature_for_api
 from ..core.limits import MAX_SEARCH_RESULTS
 from ..core.boundaries import wrap_untrusted_content, make_meta
 from ..core.errors import sanitize_error
@@ -91,8 +91,8 @@ def search_text(
                 matches.append({
                     "file": file_path,
                     "line": line_num,
-                    # --- content boundary wrapping ---
-                    "text": wrap_untrusted_content(line.rstrip()[:200]),
+                    # --- content boundary wrapping (secret redaction before truncation) ---
+                    "text": wrap_untrusted_content(sanitize_signature_for_api(line.rstrip())[:200]),
                 })
                 if len(matches) >= max_results:
                     break
