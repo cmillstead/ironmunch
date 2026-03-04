@@ -3,7 +3,7 @@
 import time
 from typing import Optional
 
-from ..core.boundaries import make_meta
+from ..core.boundaries import make_meta, wrap_untrusted_content
 from ..core.errors import sanitize_error
 from ..storage import IndexStore
 from ..parser import Symbol, SymbolNode, build_symbol_tree
@@ -104,8 +104,8 @@ def _node_to_dict(node: SymbolNode) -> dict:
         "id": node.symbol.id,
         "kind": node.symbol.kind,
         "name": node.symbol.name,
-        "signature": node.symbol.signature,
-        "summary": node.symbol.summary,
+        "signature": wrap_untrusted_content(node.symbol.signature),
+        "summary": wrap_untrusted_content(node.symbol.summary),
         "line": node.symbol.line,
     }
 

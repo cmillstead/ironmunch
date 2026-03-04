@@ -574,3 +574,36 @@ class TestGitignoreSizeCap:
         # The oversized gitignore is skipped, so all valid files should appear
         assert "src/main.py" in result
         assert "src/app.js" in result
+
+
+# ---------------------------------------------------------------------------
+# SEC-LOW-3: Gitignore size cap for local folders (_load_gitignore)
+# ---------------------------------------------------------------------------
+
+class TestLoadGitignoreSizeCap:
+    """SEC-LOW-3: _load_gitignore must return None for files > 65536 bytes."""
+
+    def test_oversized_gitignore_returns_none(self, tmp_path):
+        """A .gitignore larger than 65536 bytes must be skipped (returns None)."""
+        gitignore = tmp_path / ".gitignore"
+        # Write just over 65536 bytes
+        gitignore.write_bytes(b"*.py\n" * 13108)  # ~65540 bytes
+        assert gitignore.stat().st_size > 65536
+
+        result = _load_gitignore(tmp_path)
+        assert result is None, (
+            "_load_gitignore should return None for oversized .gitignore"
+        )
+
+    def test_normal_sized_gitignore_loads(self, tmp_path):
+        """A normal-sized .gitignore must still be loaded."""
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("*.pyc\n__pycache__/\n")
+
+        result = _load_gitignore(tmp_path)
+        assert result is not None
+
+    def test_missing_gitignore_returns_none(self, tmp_path):
+        """No .gitignore file must return None (existing behavior preserved)."""
+        result = _load_gitignore(tmp_path)
+        assert result is None

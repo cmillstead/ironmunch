@@ -128,8 +128,8 @@ def _extract_symbol(
     else:
         qualified_name = name
 
-    # Build signature
-    signature = _build_signature(node, spec, source_bytes)
+    # Build signature and sanitize secrets at parse time (SEC-HIGH-1)
+    signature = sanitize_signature_for_api(_build_signature(node, spec, source_bytes))
 
     # Extract docstring
     docstring = _extract_docstring(node, spec, source_bytes)
@@ -321,7 +321,8 @@ def _extract_decorators(node, spec: LanguageSpec, source_bytes: bytes) -> list[s
     prev = node.prev_named_sibling
     while prev and prev.type == spec.decorator_node_type:
         decorator_text = source_bytes[prev.start_byte:prev.end_byte].decode("utf-8")
-        decorators.insert(0, decorator_text.strip())
+        # Sanitize secrets in decorator arguments at parse time (SEC-MED-1)
+        decorators.insert(0, sanitize_signature_for_api(decorator_text.strip()))
         prev = prev.prev_named_sibling
 
     return decorators

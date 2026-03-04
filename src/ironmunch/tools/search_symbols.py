@@ -4,7 +4,7 @@ import time
 from typing import Optional
 
 from ..core.limits import MAX_SEARCH_RESULTS
-from ..core.boundaries import make_meta
+from ..core.boundaries import make_meta, wrap_untrusted_content
 from ..core.errors import sanitize_error
 from ..storage import IndexStore
 from ._common import parse_repo, timed, elapsed_ms
@@ -70,8 +70,8 @@ def search_symbols(
             "name": sym["name"],
             "file": sym["file"],
             "line": sym["line"],
-            "signature": sym["signature"],
-            "summary": sym.get("summary", ""),
+            "signature": wrap_untrusted_content(sym["signature"]),
+            "summary": wrap_untrusted_content(sym.get("summary", "")),
             "score": score,
         })
 

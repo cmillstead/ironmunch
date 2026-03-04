@@ -53,6 +53,8 @@ def signature_fallback(symbol: Symbol) -> str:
 class BatchSummarizer:
     """AI-based batch summarization using Claude Haiku (Tier 2)."""
 
+    # claude-haiku-4-5-20251001 is the dated-snapshot model ID for Claude Haiku 4.5
+    # (format: <series>-<YYYYMMDD>). This is the correct Anthropic API identifier.
     model: str = "claude-haiku-4-5-20251001"
     max_tokens_per_batch: int = 500
 

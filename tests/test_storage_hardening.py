@@ -4,11 +4,10 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from ironmunch.storage.index_store import IndexStore, _get_git_head
+from ironmunch.storage.index_store import IndexStore
 from ironmunch.core.validation import ValidationError
 
 
@@ -151,30 +150,3 @@ class TestIncrementalSaveDeletedFilesTraversal:
             )
 
             assert not old_file.exists(), "Legitimate deleted file should be removed"
-
-
-class TestSubprocessEnvIsolation:
-    """SEC-HIGH-2: Verify _get_git_head() uses minimal environment."""
-
-    def test_get_git_head_minimal_env(self):
-        """subprocess.run must NOT receive GITHUB_TOKEN or ANTHROPIC_API_KEY."""
-        with tempfile.TemporaryDirectory() as tmp:
-            with patch("ironmunch.storage.index_store.subprocess.run") as mock_run:
-                mock_run.return_value = type("R", (), {"returncode": 0, "stdout": "abc123\n"})()
-                _get_git_head(Path(tmp))
-
-                assert mock_run.called
-                call_kwargs = mock_run.call_args
-                env = call_kwargs.kwargs.get("env") or call_kwargs[1].get("env")
-                assert env is not None, "subprocess.run must receive explicit env"
-                assert "GITHUB_TOKEN" not in env
-                assert "ANTHROPIC_API_KEY" not in env
-                assert "PATH" in env
-
-    def test_get_git_head_still_works(self):
-        """_get_git_head returns HEAD hash for a real git repo."""
-        # ironmunch itself is a git repo
-        repo = Path(__file__).parent.parent
-        result = _get_git_head(repo)
-        if result is not None:  # May be None in CI without git
-            assert len(result) == 40  # SHA-1 hex

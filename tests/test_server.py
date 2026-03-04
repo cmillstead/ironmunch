@@ -218,6 +218,96 @@ class TestCallToolInputBounds:
         assert isinstance(result, dict)
         assert len(result["file_pattern"]) == MAX_FILE_PATTERN_LENGTH
 
+    # -- SEC-LOW-2: integer type validation ------------------------------------
+
+    def test_context_lines_dict_returns_validation_error(self):
+        """SEC-LOW-2: context_lines with dict value must return a helpful error."""
+        from ironmunch.server import _sanitize_arguments
+        result = _sanitize_arguments("get_symbol", {
+            "repo": "test/repo",
+            "symbol_id": "some-id",
+            "context_lines": {"key": "val"},
+        })
+        assert isinstance(result, str), "Expected a validation error string"
+        assert "context_lines" in result
+        assert "integer" in result.lower()
+
+    def test_context_lines_dict_produces_meaningful_error_via_call_tool(self):
+        """SEC-LOW-2: call_tool with context_lines=dict returns meaningful error, not internal error."""
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(
+            call_tool("get_symbol", {
+                "repo": "test/repo",
+                "symbol_id": "some-id",
+                "context_lines": {"key": "val"},
+            })
+        )
+        assert len(result) == 1
+        payload = json.loads(result[0].text)
+        assert "error" in payload
+        # Must contain context_lines, not "internal" or "Traceback"
+        assert "context_lines" in payload["error"]
+        assert "Traceback" not in payload["error"]
+        assert "internal" not in payload["error"].lower()
+
+    def test_max_results_string_int_coerced(self):
+        """SEC-LOW-2: max_results with string integer must be coerced, not error."""
+        from ironmunch.server import _sanitize_arguments
+        result = _sanitize_arguments("search_symbols", {
+            "repo": "test/repo",
+            "query": "foo",
+            "max_results": "5",
+        })
+        assert isinstance(result, dict)
+        assert result["max_results"] == 5
+
+    def test_max_results_non_numeric_string_rejected(self):
+        """SEC-LOW-2: max_results='notanint' must return a validation error."""
+        from ironmunch.server import _sanitize_arguments
+        result = _sanitize_arguments("search_symbols", {
+            "repo": "test/repo",
+            "query": "foo",
+            "max_results": "notanint",
+        })
+        assert isinstance(result, str)
+        assert "max_results" in result
+        assert "integer" in result.lower()
+
+    def test_context_lines_float_coerced(self):
+        """SEC-LOW-2: context_lines=3.7 must be coerced to int 3."""
+        from ironmunch.server import _sanitize_arguments
+        result = _sanitize_arguments("get_symbol", {
+            "repo": "test/repo",
+            "symbol_id": "sid",
+            "context_lines": 3.7,
+        })
+        assert isinstance(result, dict)
+        assert result["context_lines"] == 3
+
+    def test_context_lines_clamped_to_max(self):
+        """SEC-LOW-2: context_lines above MAX_CONTEXT_LINES must be clamped."""
+        from ironmunch.server import _sanitize_arguments
+        from ironmunch.core.limits import MAX_CONTEXT_LINES
+        result = _sanitize_arguments("get_symbol", {
+            "repo": "test/repo",
+            "symbol_id": "sid",
+            "context_lines": 99999,
+        })
+        assert isinstance(result, dict)
+        assert result["context_lines"] == MAX_CONTEXT_LINES
+
+    def test_max_results_clamped_to_max(self):
+        """SEC-LOW-2: max_results above MAX_SEARCH_RESULTS must be clamped."""
+        from ironmunch.server import _sanitize_arguments
+        from ironmunch.core.limits import MAX_SEARCH_RESULTS
+        result = _sanitize_arguments("search_symbols", {
+            "repo": "test/repo",
+            "query": "foo",
+            "max_results": 99999,
+        })
+        assert isinstance(result, dict)
+        assert result["max_results"] == MAX_SEARCH_RESULTS
+
 
 class TestRateLimiting:
     """M-5: Rate limiting prevents tool call flooding."""
@@ -283,3 +373,166 @@ class TestUnknownToolRejectedBeforeRateLimit:
             f"Expected 0 global timestamps after fake calls, "
             f"got {len(server_module._GLOBAL_TIMESTAMPS)}"
         )
+
+
+# -- SEC-LOW-4: path_prefix validation in get_file_tree -----------------------
+
+class TestGetFileTreePathPrefixValidation:
+    """SEC-LOW-4: path_prefix with traversal sequences must be rejected."""
+
+    @pytest.mark.asyncio
+    async def test_dotdot_path_prefix_returns_error(self):
+        """path_prefix='../' must return an error, not traverse the filesystem."""
+        result = await call_tool("get_file_tree", {
+            "repo": "test/repo",
+            "path_prefix": "../",
+        })
+        assert len(result) == 1
+        payload = json.loads(result[0].text)
+        assert "error" in payload
+        assert ".." in payload["error"] or "path_prefix" in payload["error"]
+
+    @pytest.mark.asyncio
+    async def test_dotdot_as_component_rejected(self):
+        """path_prefix='src/../etc' must be rejected."""
+        result = await call_tool("get_file_tree", {
+            "repo": "test/repo",
+            "path_prefix": "src/../etc",
+        })
+        assert len(result) == 1
+        payload = json.loads(result[0].text)
+        assert "error" in payload
+
+    @pytest.mark.asyncio
+    async def test_null_byte_in_path_prefix_rejected(self):
+        """path_prefix with null byte must be rejected."""
+        result = await call_tool("get_file_tree", {
+            "repo": "test/repo",
+            "path_prefix": "src\x00evil",
+        })
+        assert len(result) == 1
+        payload = json.loads(result[0].text)
+        assert "error" in payload
+
+    def test_path_prefix_validation_direct(self):
+        """Test path_prefix validation directly in get_file_tree module."""
+        from ironmunch.tools.get_file_tree import get_file_tree
+        result = get_file_tree(repo="test/repo", path_prefix="../")
+        assert "error" in result
+
+
+# -- SEC-LOW-5: type-validate list_repos fields --------------------------------
+
+class TestListReposTypeValidation:
+    """SEC-LOW-5: list_repos must skip entries with non-string repo/indexed_at."""
+
+    def test_malformed_repo_null_is_skipped(self, tmp_path):
+        """An entry with 'repo': null must be silently skipped."""
+        from ironmunch.storage.index_store import IndexStore
+        import json as _json
+
+        store = IndexStore(base_path=str(tmp_path))
+
+        # Write a well-formed index so we have at least one valid entry
+        store.save_index(
+            owner="validowner",
+            name="validrepo",
+            source_files=["main.py"],
+            symbols=[],
+            raw_files={"main.py": ""},
+            languages={"python": 1},
+        )
+
+        # Manually write a malformed index file with "repo": null
+        malformed = {
+            "repo": None,
+            "indexed_at": "2026-01-01T00:00:00",
+            "symbols": [],
+            "source_files": [],
+            "languages": {},
+            "index_version": 2,
+            "file_hashes": {},
+            "git_head": "",
+            "owner": "bad",
+            "name": "entry",
+        }
+        bad_path = tmp_path / "bad__entry.json"
+        bad_path.write_text(_json.dumps(malformed))
+
+        repos = store.list_repos()
+
+        # Only the valid repo should appear; the malformed one is skipped
+        repo_names = [r["repo"] for r in repos]
+        assert "validowner/validrepo" in repo_names
+        assert any(r is None for r in repo_names) is False
+
+    def test_malformed_indexed_at_null_is_skipped(self, tmp_path):
+        """An entry with 'indexed_at': null must be silently skipped."""
+        from ironmunch.storage.index_store import IndexStore
+        import json as _json
+
+        store = IndexStore(base_path=str(tmp_path))
+
+        malformed = {
+            "repo": "owner/repo",
+            "indexed_at": None,  # non-string
+            "symbols": [],
+            "source_files": [],
+            "languages": {},
+            "index_version": 2,
+            "file_hashes": {},
+            "git_head": "",
+            "owner": "owner",
+            "name": "repo",
+        }
+        bad_path = tmp_path / "owner__repo.json"
+        bad_path.write_text(_json.dumps(malformed))
+
+        repos = store.list_repos()
+        assert len(repos) == 0
+
+
+# -- SEC-LOW-7: mkdir mode 0o700 for content directories ----------------------
+
+class TestMkdirMode:
+    """SEC-LOW-7: content subdirectories must be created with mode 0o700."""
+
+    def test_content_dir_mode_0o700(self, tmp_path):
+        """After indexing, the content directory must have mode 0o700."""
+        import stat
+        from ironmunch.storage.index_store import IndexStore
+
+        store = IndexStore(base_path=str(tmp_path))
+        store.save_index(
+            owner="testowner",
+            name="testrepo",
+            source_files=["nested/deep/file.py"],
+            symbols=[],
+            raw_files={"nested/deep/file.py": "x = 1"},
+            languages={"python": 1},
+        )
+
+        content_dir = tmp_path / "testowner__testrepo"
+        assert content_dir.exists()
+        mode = stat.S_IMODE(content_dir.stat().st_mode)
+        assert mode == 0o700, f"Expected 0o700, got {oct(mode)}"
+
+    def test_nested_content_subdir_mode_0o700(self, tmp_path):
+        """Intermediate content subdirectories must also have mode 0o700."""
+        import stat
+        from ironmunch.storage.index_store import IndexStore
+
+        store = IndexStore(base_path=str(tmp_path))
+        store.save_index(
+            owner="testowner",
+            name="testrepo",
+            source_files=["nested/deep/file.py"],
+            symbols=[],
+            raw_files={"nested/deep/file.py": "x = 1"},
+            languages={"python": 1},
+        )
+
+        nested_dir = tmp_path / "testowner__testrepo" / "nested"
+        assert nested_dir.exists()
+        mode = stat.S_IMODE(nested_dir.stat().st_mode)
+        assert mode == 0o700, f"Expected 0o700 for nested dir, got {oct(mode)}"

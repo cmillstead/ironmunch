@@ -235,6 +235,64 @@ def test_parse_response_caps_long_summary():
     assert len(summaries[0]) <= 200
 
 
+# --- SEC-LOW-10: Model ID format validation ---
+
+
+def test_batch_summarizer_model_id_format():
+    """SEC-LOW-10: Default model ID must be a non-empty dated-snapshot Anthropic identifier."""
+    summarizer = BatchSummarizer()
+    model_id = summarizer.model
+
+    # Must be a non-empty string
+    assert isinstance(model_id, str)
+    assert model_id, "model ID must not be empty"
+
+    # Must match Anthropic dated-snapshot format: claude-<series>-<YYYYMMDD>
+    # Series names may include hyphens and digits (e.g., "haiku-4-5").
+    import re
+    assert re.match(r"^claude-[a-z0-9][a-z0-9-]+-\d{8}$", model_id), (
+        f"model ID '{model_id}' does not match Anthropic dated-snapshot format "
+        "'claude-<series>-<YYYYMMDD>'"
+    )
+
+    # Must be the known valid Haiku 4.5 snapshot
+    assert model_id == "claude-haiku-4-5-20251001", (
+        f"Unexpected model ID '{model_id}'; expected 'claude-haiku-4-5-20251001'"
+    )
+
+
+def test_batch_summarizer_model_id_passed_to_api():
+    """SEC-LOW-10: Model ID must be forwarded verbatim to the Anthropic messages.create call."""
+    captured_kwargs = {}
+
+    class FakeContent:
+        text = "1. Does something."
+
+    class FakeResponse:
+        content = [FakeContent()]
+
+    class FakeMessages:
+        @staticmethod
+        def create(**kwargs):
+            captured_kwargs.update(kwargs)
+            return FakeResponse()
+
+    class FakeClient:
+        messages = FakeMessages()
+
+    summarizer = BatchSummarizer()
+    summarizer.client = FakeClient()
+
+    sym = _make_symbol("def foo():")
+    summarizer._summarize_one_batch([sym])
+
+    assert "model" in captured_kwargs, "model kwarg not passed to messages.create"
+    assert captured_kwargs["model"] == "claude-haiku-4-5-20251001", (
+        f"API call used model '{captured_kwargs['model']}'; "
+        "expected 'claude-haiku-4-5-20251001'"
+    )
+
+
 def test_parse_response_strips_non_printable():
     """SEC-LOW-9: Non-printable characters (except newlines) must be stripped from summaries."""
     summarizer = BatchSummarizer()
