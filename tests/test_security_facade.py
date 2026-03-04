@@ -217,3 +217,48 @@ class TestRepoIdentifierAsciiOnly:
     def test_cjk_rejected(self):
         with pytest.raises(ValidationError):
             sanitize_repo_identifier("\u4e16\u754c")
+
+
+class TestSafeReadFileSymlink:
+    """SEC-MED-1: safe_read_file must not follow symlinks (O_NOFOLLOW)."""
+
+    def test_symlink_to_outside_raises(self):
+        import os
+        with tempfile.TemporaryDirectory() as root:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as outside:
+                outside.write(b"outside content")
+                outside_path = outside.name
+            try:
+                link_path = Path(root) / "link.txt"
+                os.symlink(outside_path, link_path)
+                with pytest.raises((ValidationError, OSError)):
+                    safe_read_file(str(link_path), root)
+            finally:
+                os.unlink(outside_path)
+
+    def test_normal_file_read_returns_content(self):
+        with tempfile.TemporaryDirectory() as root:
+            f = Path(root) / "data.txt"
+            f.write_text("expected content", encoding="utf-8")
+            result = safe_read_file(str(f), root)
+            assert result == "expected content"
+
+
+class TestSanitizeSignatureExtendedPatterns:
+    """SEC-MED-2: extended inline secret patterns."""
+
+    def test_postgres_connection_string_redacted(self):
+        sig = 'url = "postgres://user:secretpass@host/db"'
+        result = sanitize_signature_for_api(sig)
+        assert "<REDACTED>" in result
+        assert "secretpass" not in result
+
+    def test_bearer_token_redacted(self):
+        sig = 'auth = "Bearer eyJabcdefghijklmnopqrstuvwxyz"'
+        result = sanitize_signature_for_api(sig)
+        assert "<REDACTED>" in result
+
+    def test_stripe_live_key_redacted(self):
+        sig = 'key = "sk_live_' + "x" * 24 + '"'
+        result = sanitize_signature_for_api(sig)
+        assert "<REDACTED>" in result

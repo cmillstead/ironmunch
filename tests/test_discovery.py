@@ -2,7 +2,9 @@
 
 import os
 import tempfile
+import time
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -502,3 +504,73 @@ class TestSkipPatternsTraversal:
     def test_dot_dot_at_start_skipped(self):
         from ironmunch.discovery import should_skip_file
         assert should_skip_file("../../etc/passwd") is True
+
+
+# ---------------------------------------------------------------------------
+# SEC-MED-3: HTTP scheme rejected in parse_github_url
+# ---------------------------------------------------------------------------
+
+class TestParseGithubUrlHttpRejected:
+    """HTTP URLs must be rejected; only HTTPS is accepted."""
+
+    def test_http_url_raises(self):
+        with pytest.raises(ValueError):
+            parse_github_url("http://github.com/owner/repo")
+
+    def test_https_url_still_works(self):
+        owner, repo = parse_github_url("https://github.com/owner/repo")
+        assert owner == "owner"
+        assert repo == "repo"
+
+
+# ---------------------------------------------------------------------------
+# SEC-LOW-6: trust_env=False on httpx.AsyncClient
+# ---------------------------------------------------------------------------
+
+class TestFetchRepoTreeTrustEnv:
+    """fetch_repo_tree must pass trust_env=False to httpx.AsyncClient."""
+
+    @pytest.mark.asyncio
+    async def test_trust_env_false(self):
+        from ironmunch.discovery import fetch_repo_tree
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"tree": []}
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        with patch("ironmunch.discovery.httpx.AsyncClient", return_value=mock_client) as mock_cls:
+            await fetch_repo_tree("owner", "repo", token=None)
+            call_kwargs = mock_cls.call_args.kwargs
+            assert call_kwargs.get("trust_env") is False
+
+
+# ---------------------------------------------------------------------------
+# SEC-LOW-2: Gitignore size cap in discover_source_files
+# ---------------------------------------------------------------------------
+
+class TestGitignoreSizeCap:
+    """A very large gitignore must not cause slow parsing; it should be skipped."""
+
+    def test_oversized_gitignore_skipped_quickly(self):
+        # 200 KB — well above the 65536 byte cap
+        huge_gitignore = "*.py\n" * 30000
+        assert len(huge_gitignore) > 65536
+
+        entries = [
+            {"path": "src/main.py", "type": "blob", "size": 100},
+            {"path": "src/app.js", "type": "blob", "size": 100},
+        ]
+
+        start = time.time()
+        result = discover_source_files(entries, gitignore_content=huge_gitignore)
+        elapsed = time.time() - start
+
+        assert elapsed < 2.0, f"discover_source_files took {elapsed:.2f}s with huge gitignore"
+        # The oversized gitignore is skipped, so all valid files should appear
+        assert "src/main.py" in result
+        assert "src/app.js" in result

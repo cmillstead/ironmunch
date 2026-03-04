@@ -239,3 +239,47 @@ class TestRateLimiting:
         _CALL_TIMESTAMPS.clear()
         for _ in range(5):
             assert _rate_limit("normal_tool") is True
+
+
+# -- SEC-HIGH-1: unknown tool names rejected before rate limit ----------------
+
+class TestUnknownToolRejectedBeforeRateLimit:
+    """SEC-HIGH-1: Unknown tool names must be rejected before rate limiting."""
+
+    @pytest.mark.asyncio
+    async def test_unknown_tool_returns_error_and_does_not_consume_global_slot(self):
+        """Calling an unknown tool returns an error AND does not touch _GLOBAL_TIMESTAMPS."""
+        import ironmunch.server as server_module
+        # Clear global rate limit state so we start fresh
+        server_module._GLOBAL_TIMESTAMPS.clear()
+        server_module._CALL_TIMESTAMPS.clear()
+
+        result = await call_tool("totally_fake_tool", {})
+
+        # Must return an error response
+        assert len(result) == 1
+        payload = json.loads(result[0].text)
+        assert "error" in payload
+        assert "totally_fake_tool" in payload["error"]
+
+        # Must NOT have consumed any global rate limit slot
+        assert len(server_module._GLOBAL_TIMESTAMPS) == 0, (
+            "Unknown tool call must not increment _GLOBAL_TIMESTAMPS"
+        )
+
+    @pytest.mark.asyncio
+    async def test_many_fake_tool_calls_do_not_exhaust_global_rate_limit(self):
+        """Flooding with fabricated tool names must not fill _GLOBAL_TIMESTAMPS."""
+        import ironmunch.server as server_module
+        server_module._GLOBAL_TIMESTAMPS.clear()
+        server_module._CALL_TIMESTAMPS.clear()
+
+        # Simulate many fake tool calls (well above the global limit of 120)
+        for i in range(150):
+            await call_tool(f"fake_tool_{i}", {})
+
+        # Global timestamps must remain empty — no slots were consumed
+        assert len(server_module._GLOBAL_TIMESTAMPS) == 0, (
+            f"Expected 0 global timestamps after fake calls, "
+            f"got {len(server_module._GLOBAL_TIMESTAMPS)}"
+        )

@@ -254,8 +254,8 @@ def parse_github_url(url: str) -> tuple[str, str]:
     # Validate URL scheme and hostname for full URLs
     if "://" in url:
         parsed = urlparse(url)
-        if parsed.scheme not in ("https", "http"):
-            raise ValueError(f"Only HTTP(S) URLs are supported")
+        if parsed.scheme != "https":
+            raise ValueError("Only HTTPS URLs are supported")
         if parsed.hostname not in ("github.com", "www.github.com"):
             raise ValueError("Only GitHub URLs are supported")
 
@@ -301,7 +301,7 @@ async def fetch_repo_tree(
     if token:
         headers["Authorization"] = f"token {token}"
 
-    async with httpx.AsyncClient(timeout=GITHUB_API_TIMEOUT, follow_redirects=False) as client:
+    async with httpx.AsyncClient(trust_env=False, timeout=GITHUB_API_TIMEOUT, follow_redirects=False) as client:
         response = await client.get(url, params=params, headers=headers)
         response.raise_for_status()
         data = response.json()
@@ -334,7 +334,7 @@ async def fetch_file_content(
     if token:
         headers["Authorization"] = f"token {token}"
 
-    async with httpx.AsyncClient(timeout=GITHUB_API_TIMEOUT, follow_redirects=False) as client:
+    async with httpx.AsyncClient(trust_env=False, timeout=GITHUB_API_TIMEOUT, follow_redirects=False) as client:
         response = await client.get(url, headers=headers)
         response.raise_for_status()
         return response.text
@@ -382,8 +382,10 @@ def discover_source_files(
     Returns:
         List of file paths (strings) that passed all filters.
     """
-    # Parse gitignore if provided
+    # Parse gitignore if provided — cap size to avoid pathspec DoS
     gitignore_spec = None
+    if gitignore_content and len(gitignore_content) > 65536:
+        gitignore_content = None  # Too large; skip
     if gitignore_content:
         try:
             gitignore_spec = pathspec.PathSpec.from_lines(

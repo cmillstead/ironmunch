@@ -480,3 +480,92 @@ class TestListReposValidation:
             # Should not crash, and should not include the random file
             for r in repos:
                 assert "repo" in r
+
+
+class TestSearchTextSecretRedaction:
+    """SEC-MED-5: search_text must redact inline secrets from matching lines."""
+
+    def test_secret_value_redacted_in_results(self):
+        """Matching lines containing hardcoded secrets must have secret value redacted."""
+        from ironmunch.tools.search_text import search_text
+        from ironmunch.parser.symbols import Symbol
+
+        # sk- + 20 chars meets the _INLINE_SECRET_RE threshold of 20 chars after 'sk-'
+        secret = "sk-testkey12345678901234"
+        file_content = f'API_KEY = "{secret}"\n'
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = IndexStore(tmp)
+            content_dir = Path(tmp) / "test__repo"
+            content_dir.mkdir(parents=True, exist_ok=True)
+            (content_dir / "config.py").write_text(file_content)
+
+            sym = Symbol(
+                id="config.py::API_KEY#constant",
+                file="config.py",
+                name="API_KEY",
+                qualified_name="API_KEY",
+                kind="constant",
+                language="python",
+                signature=f'API_KEY = "{secret}"',
+                line=1, end_line=1,
+                byte_offset=0,
+                byte_length=len(file_content.encode("utf-8")),
+                content_hash="a" * 64,
+            )
+            store.save_index(
+                owner="test", name="repo",
+                source_files=["config.py"],
+                symbols=[sym],
+                raw_files={"config.py": file_content},
+                languages={"python": 1},
+            )
+
+            result = search_text(repo="test/repo", query="sk-", storage_path=tmp)
+
+            assert result.get("result_count", 0) >= 1, "Expected at least one match"
+            texts = [m["text"] for m in result["results"]]
+            for text in texts:
+                assert secret not in text, f"Secret value must not appear in result: {text!r}"
+                assert "<REDACTED>" in text, f"Expected <REDACTED> in result: {text!r}"
+
+    def test_non_secret_content_not_redacted(self):
+        """Lines without secrets must pass through unchanged."""
+        from ironmunch.tools.search_text import search_text
+        from ironmunch.parser.symbols import Symbol
+
+        file_content = 'prefix = "sk-short"\n'  # Only 5 chars after sk- — not redacted
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = IndexStore(tmp)
+            content_dir = Path(tmp) / "test__repo2"
+            content_dir.mkdir(parents=True, exist_ok=True)
+            (content_dir / "safe.py").write_text(file_content)
+
+            sym = Symbol(
+                id="safe.py::prefix#constant",
+                file="safe.py",
+                name="prefix",
+                qualified_name="prefix",
+                kind="constant",
+                language="python",
+                signature='prefix = "sk-short"',
+                line=1, end_line=1,
+                byte_offset=0,
+                byte_length=len(file_content.encode("utf-8")),
+                content_hash="b" * 64,
+            )
+            store.save_index(
+                owner="test", name="repo2",
+                source_files=["safe.py"],
+                symbols=[sym],
+                raw_files={"safe.py": file_content},
+                languages={"python": 1},
+            )
+
+            result = search_text(repo="test/repo2", query="sk-short", storage_path=tmp)
+
+            assert result.get("result_count", 0) >= 1, "Expected at least one match"
+            texts = [m["text"] for m in result["results"]]
+            for text in texts:
+                assert "sk-short" in text, f"Non-secret value should not be redacted: {text!r}"

@@ -38,6 +38,7 @@ def _get_parser(lang_name: str) -> Parser:
 
 from .symbols import Symbol, make_symbol_id, compute_content_hash
 from .languages import LanguageSpec, LANGUAGE_REGISTRY
+from ..security import sanitize_signature_for_api
 
 
 def parse_file(content: str, filename: str, language: str) -> list[Symbol]:
@@ -349,7 +350,7 @@ def _extract_constant(
                     qualified_name=name,
                     kind="constant",
                     language=language,
-                    signature=sig[:100],  # Truncate long assignments
+                    signature=sanitize_signature_for_api(sig)[:100],  # Redact secrets, then truncate
                     line=node.start_point[0] + 1,
                     end_line=node.end_point[0] + 1,
                     byte_offset=node.start_byte,

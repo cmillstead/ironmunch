@@ -90,3 +90,27 @@ class TestGetParserAllowlist:
     def test_supported_language_works(self):
         parser = _get_parser("python")
         assert parser is not None
+
+
+class TestConstantSignatureSanitization:
+    """SEC-HIGH-2: Constant signatures must not leak secrets to external APIs."""
+
+    def test_database_url_password_redacted(self):
+        """Connection string password must not appear in constant signature."""
+        source = 'DATABASE_URL = "postgres://admin:secretpass@localhost/db"\n'
+        symbols = parse_file(source, "config.py", "python")
+        const_syms = [s for s in symbols if s.kind == "constant"]
+        assert len(const_syms) == 1, "Expected one constant symbol"
+        assert "secretpass" not in const_syms[0].signature, (
+            f"Secret leaked in signature: {const_syms[0].signature!r}"
+        )
+
+    def test_api_key_redacted_in_signature(self):
+        """API key value matching sk-* pattern must be redacted to <REDACTED>."""
+        source = 'API_KEY = "sk-abc123xyz456789012345"\n'
+        symbols = parse_file(source, "config.py", "python")
+        const_syms = [s for s in symbols if s.kind == "constant"]
+        assert len(const_syms) == 1, "Expected one constant symbol"
+        assert "<REDACTED>" in const_syms[0].signature, (
+            f"Expected <REDACTED> in signature: {const_syms[0].signature!r}"
+        )

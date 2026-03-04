@@ -52,3 +52,11 @@ def test_path_stripping():
     text = "Error reading /home/user/project/src/main.py: not found"
     stripped = strip_system_paths(text)
     assert "/home/" not in stripped
+
+
+def test_validation_error_truncated_at_200_chars():
+    """SEC-LOW-4: ValidationError messages must be capped at 200 characters."""
+    from ironmunch.core.validation import ValidationError
+    err = ValidationError("A" * 500)
+    msg = sanitize_error(err)
+    assert len(msg) <= 200
