@@ -490,3 +490,15 @@ class TestDiscoverSourceFiles:
         result = discover_source_files(entries)
         # .png and .exe are not in LANGUAGE_EXTENSIONS so they're filtered by ext
         assert result == ["src/main.py"]
+
+
+class TestSkipPatternsTraversal:
+    """Discovery must skip paths containing '..' segments."""
+
+    def test_dot_dot_in_path_skipped(self):
+        from ironmunch.discovery import should_skip_file
+        assert should_skip_file("src/../etc/passwd") is True
+
+    def test_dot_dot_at_start_skipped(self):
+        from ironmunch.discovery import should_skip_file
+        assert should_skip_file("../../etc/passwd") is True

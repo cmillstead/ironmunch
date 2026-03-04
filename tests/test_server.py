@@ -199,3 +199,25 @@ class TestCallToolInputBounds:
         result = _sanitize_arguments("index_folder", args)
         assert isinstance(result, dict)
         assert result["follow_symlinks"] is True
+
+
+class TestRateLimiting:
+    """M-5: Rate limiting prevents tool call flooding."""
+
+    def test_rate_limit_applied(self):
+        """Excessive calls to the same tool should be rate-limited."""
+        from ironmunch.server import _rate_limit, _CALL_TIMESTAMPS
+        # Clear any prior state
+        _CALL_TIMESTAMPS.clear()
+        blocked = 0
+        for _ in range(100):
+            if not _rate_limit("test_tool"):
+                blocked += 1
+        assert blocked > 0, "Rate limiting never kicked in"
+
+    def test_rate_limit_allows_normal_usage(self):
+        """A few calls should not be blocked."""
+        from ironmunch.server import _rate_limit, _CALL_TIMESTAMPS
+        _CALL_TIMESTAMPS.clear()
+        for _ in range(5):
+            assert _rate_limit("normal_tool") is True

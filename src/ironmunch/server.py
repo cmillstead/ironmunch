@@ -12,6 +12,8 @@ Ported from jcodemunch-mcp with three hardening layers:
 import asyncio
 import json
 import os
+import time
+from collections import defaultdict
 from typing import Any
 
 from mcp.server import Server
@@ -330,6 +332,23 @@ async def list_tools() -> list[Tool]:
     ]
 
 
+# Rate limiting — per-tool sliding window
+_CALL_TIMESTAMPS: dict[str, list[float]] = defaultdict(list)
+_MAX_CALLS_PER_MINUTE: int = 60
+
+
+def _rate_limit(tool_name: str) -> bool:
+    """Check if a tool call is within rate limits. Returns True if allowed."""
+    now = time.time()
+    timestamps = _CALL_TIMESTAMPS[tool_name]
+    # Prune old entries
+    timestamps[:] = [t for t in timestamps if now - t < 60]
+    if len(timestamps) >= _MAX_CALLS_PER_MINUTE:
+        return False
+    timestamps.append(now)
+    return True
+
+
 def _sanitize_arguments(name: str, arguments: dict) -> dict | str:
     """Validate and sanitize tool arguments. Returns error string on failure."""
     # Cap string argument lengths
@@ -364,6 +383,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     if isinstance(sanitized, str):
         return [TextContent(type="text", text=json.dumps({"error": sanitized}))]
     arguments = sanitized
+
+    if not _rate_limit(name):
+        return [TextContent(type="text", text=json.dumps({
+            "error": "Rate limit exceeded. Try again in a moment."
+        }))]
 
     try:
         if name == "index_repo":
