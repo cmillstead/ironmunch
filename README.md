@@ -55,11 +55,32 @@ Before any other tools work, you must index at least one repository. Ask your AI
 
 The AI will call `index_folder` or `index_repo`. This fetches files, parses ASTs, and extracts symbols into local storage. You only need to do this once -- subsequent calls skip unchanged files.
 
-**Step 3: Explore the codebase.**
+**Step 3: Add a CLAUDE.md to each repo.**
 
-Once indexed, the AI can use `get_repo_outline`, `search_symbols`, and `get_symbol` to navigate the codebase efficiently -- retrieving only the symbols it needs instead of entire files.
+Claude Code won't automatically reach for ironmunch over its built-in file tools — you need to tell it to. Add a `CLAUDE.md` at the repo root:
 
-**Step 4 (optional): Install git hooks for automatic reindexing.**
+```markdown
+## Code Navigation
+
+This repo is indexed in ironmunch. Use ironmunch MCP tools for code
+exploration instead of reading full files:
+
+- `search_symbols` — find functions/classes/types by name or description
+- `get_file_outline` — all symbols in a file with signatures
+- `get_symbol` — full source of a specific symbol
+- `get_repo_outline` — directory structure and language breakdown
+- `search_text` — full-text search across all files
+
+Use `Read` only for content that isn't a named symbol (config files, etc).
+```
+
+Claude Code loads `CLAUDE.md` automatically at the start of every session in that directory.
+
+**Step 4: Explore the codebase.**
+
+Once indexed, the AI will use `get_repo_outline`, `search_symbols`, and `get_symbol` to navigate efficiently -- retrieving only the symbols it needs instead of entire files.
+
+**Step 5 (optional): Install git hooks for automatic reindexing.**
 
 Keep indexes current without thinking about it:
 
