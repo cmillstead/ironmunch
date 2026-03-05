@@ -10,4 +10,13 @@ if [ -z "$IRONMUNCH" ]; then
     exit 0
 fi
 
-"$IRONMUNCH" index "$REPO_ROOT" --no-ai > /dev/null 2>&1 &
+(
+    RESULT=$("$IRONMUNCH" index "$REPO_ROOT" --no-ai 2>&1)
+    if echo "$RESULT" | grep -q '"success": true'; then
+        FILES=$(echo "$RESULT" | grep '"file_count"' | grep -o '[0-9]*')
+        SYMBOLS=$(echo "$RESULT" | grep '"symbol_count"' | grep -o '[0-9]*')
+        printf "\nironmunch: local index updated (%s files, %s symbols)\n" "$FILES" "$SYMBOLS" >&2
+    else
+        printf "\nironmunch: local reindex failed\n" >&2
+    fi
+) &

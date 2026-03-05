@@ -2,6 +2,17 @@
 # ironmunch post-push hook
 # Reindexes the GitHub remote repo after each push.
 # Install: cp hooks/post-push .git/hooks/post-push && chmod +x .git/hooks/post-push
+#
+# Git hooks don't inherit your shell environment. To provide GITHUB_TOKEN,
+# create ~/.config/ironmunch/env with:
+#   GITHUB_TOKEN=ghp_...
+
+# Load ironmunch env file if present (provides GITHUB_TOKEN etc.)
+IRONMUNCH_ENV="$HOME/.config/ironmunch/env"
+if [ -f "$IRONMUNCH_ENV" ]; then
+    # shellcheck disable=SC1090
+    . "$IRONMUNCH_ENV"
+fi
 
 IRONMUNCH="$(command -v ironmunch)"
 
@@ -27,4 +38,13 @@ if [ -z "$REPO" ]; then
     exit 0
 fi
 
-"$IRONMUNCH" index-repo "$REPO" --no-ai > /dev/null 2>&1 &
+(
+    RESULT=$(GITHUB_TOKEN="$GITHUB_TOKEN" "$IRONMUNCH" index-repo "$REPO" --no-ai 2>&1)
+    if echo "$RESULT" | grep -q '"success": true'; then
+        FILES=$(echo "$RESULT" | grep '"file_count"' | grep -o '[0-9]*')
+        SYMBOLS=$(echo "$RESULT" | grep '"symbol_count"' | grep -o '[0-9]*')
+        printf "\nironmunch: %s reindexed (%s files, %s symbols)\n" "$REPO" "$FILES" "$SYMBOLS" >&2
+    else
+        printf "\nironmunch: reindex of %s failed\n" "$REPO" >&2
+    fi
+) &
