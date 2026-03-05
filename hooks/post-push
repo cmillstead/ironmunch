@@ -1,0 +1,30 @@
+#!/bin/sh
+# ironmunch post-push hook
+# Reindexes the GitHub remote repo after each push.
+# Install: cp hooks/post-push .git/hooks/post-push && chmod +x .git/hooks/post-push
+
+IRONMUNCH="$(command -v ironmunch)"
+
+if [ -z "$IRONMUNCH" ]; then
+    exit 0
+fi
+
+# Get the GitHub remote URL and extract owner/repo
+REMOTE_URL="$(git remote get-url origin 2>/dev/null)"
+if [ -z "$REMOTE_URL" ]; then
+    exit 0
+fi
+
+# Normalize SSH and HTTPS remote URLs to owner/repo
+# ssh: git@github.com:owner/repo.git
+# https: https://github.com/owner/repo.git
+REPO=$(echo "$REMOTE_URL" | sed -E \
+    -e 's|git@github\.com:||' \
+    -e 's|https://github\.com/||' \
+    -e 's|\.git$||')
+
+if [ -z "$REPO" ]; then
+    exit 0
+fi
+
+"$IRONMUNCH" index-repo "$REPO" --no-ai > /dev/null 2>&1 &

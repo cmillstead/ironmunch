@@ -52,24 +52,32 @@ The AI will call `index_folder` or `index_repo`. This fetches files, parses ASTs
 
 Once indexed, the AI can use `get_repo_outline`, `search_symbols`, and `get_symbol` to navigate the codebase efficiently -- retrieving only the symbols it needs instead of entire files.
 
-## Git Hook: Auto-Reindex on Commit
+## Git Hooks: Auto-Reindex on Commit and Push
 
-ironmunch includes a post-commit hook that reindexes your repo after each commit. Only changed files are re-parsed (incremental via content hash), so it's fast.
+ironmunch includes two git hooks that keep indexes current automatically:
+
+| Hook | Trigger | Updates |
+|------|---------|---------|
+| `post-commit` | every commit | local folder index |
+| `post-push` | every push | GitHub repo index (auto-detects remote) |
 
 **Install in any repo:**
 
 ```bash
 cp /path/to/ironmunch/hooks/post-commit .git/hooks/post-commit
-chmod +x .git/hooks/post-commit
+cp /path/to/ironmunch/hooks/post-push   .git/hooks/post-push
+chmod +x .git/hooks/post-commit .git/hooks/post-push
 ```
 
-The hook calls `ironmunch index <repo-root> --no-ai` in the background so commits never block. Remove `--no-ai` from the hook if you want AI-generated summaries updated on each commit.
+Both hooks run in the background so they never block your workflow. Remove `--no-ai` from either hook if you want AI-generated summaries updated automatically.
 
 You can also call the indexer directly from the command line:
 
 ```bash
-ironmunch index ~/src/myproject
-ironmunch index ~/src/myproject --no-ai   # skip AI summaries (faster)
+ironmunch index ~/src/myproject              # index a local folder
+ironmunch index ~/src/myproject --no-ai     # skip AI summaries (faster)
+ironmunch index-repo owner/myproject        # index a GitHub repo
+ironmunch index-repo owner/myproject --no-ai
 ```
 
 ## Security Model

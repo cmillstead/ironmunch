@@ -590,14 +590,13 @@ async def run_server():
 def main():
     """Main entry point.
 
-    Supports an optional ``index`` subcommand for use in git hooks::
+    Supports optional subcommands for use in git hooks::
 
-        ironmunch index [path] [--no-ai]
+        ironmunch index [path] [--no-ai]       # index a local folder
+        ironmunch index-repo <url> [--no-ai]   # index a GitHub repo
 
-    When called as ``ironmunch index``, indexes the given path (default: current
-    directory) without starting the MCP server.  If ``IRONMUNCH_ALLOWED_ROOTS``
-    is not set, the target path itself is used as the allowed root so that the
-    CLI is usable outside an MCP session.
+    If ``IRONMUNCH_ALLOWED_ROOTS`` is not set, ``index`` defaults the allowed
+    root to the target path itself so the CLI is usable outside an MCP session.
     """
     import sys
 
@@ -614,6 +613,20 @@ def main():
         result = index_folder(path, use_ai_summaries=use_ai, storage_path=storage_path, allowed_roots=allowed)
         print(json.dumps(result, indent=2))
         sys.exit(0 if result.get("success") else 1)
+
+    elif len(sys.argv) >= 2 and sys.argv[1] == "index-repo":
+        args = sys.argv[2:]
+        use_ai = "--no-ai" not in args
+        url_args = [a for a in args if not a.startswith("--")]
+        if not url_args:
+            print(json.dumps({"error": "Usage: ironmunch index-repo <url> [--no-ai]"}))
+            sys.exit(1)
+        url = url_args[0]
+        storage_path = _CODE_INDEX_PATH or None
+        result = asyncio.run(index_repo(url, use_ai_summaries=use_ai, storage_path=storage_path))
+        print(json.dumps(result, indent=2))
+        sys.exit(0 if result.get("success") else 1)
+
     else:
         asyncio.run(run_server())
 
