@@ -55,9 +55,32 @@ Before any other tools work, you must index at least one repository. Ask your AI
 
 The AI will call `index_folder` or `index_repo`. This fetches files, parses ASTs, and extracts symbols into local storage. You only need to do this once -- subsequent calls skip unchanged files.
 
-**Step 3: Add a CLAUDE.md to each repo.**
+**Step 3 (Claude Code): Configure permissions and navigation.**
 
-Claude Code won't automatically reach for ironmunch over its built-in file tools — you need to tell it to. Add a `CLAUDE.md` at the repo root:
+Claude Code requires two extra steps:
+
+**a) Allow ironmunch tools** to avoid a permission prompt on every call. Add to `~/.claude/settings.json`:
+
+```json
+"permissions": {
+  "allow": [
+    "mcp__ironmunch__search_symbols",
+    "mcp__ironmunch__search_text",
+    "mcp__ironmunch__get_symbol",
+    "mcp__ironmunch__get_symbols",
+    "mcp__ironmunch__get_file_outline",
+    "mcp__ironmunch__get_file_tree",
+    "mcp__ironmunch__get_repo_outline",
+    "mcp__ironmunch__list_repos",
+    "mcp__ironmunch__index_repo",
+    "mcp__ironmunch__index_folder"
+  ]
+}
+```
+
+(`invalidate_cache` is intentionally omitted — prompting before deleting an index is desirable.)
+
+**b) Add a `CLAUDE.md`** to each repo so Claude Code uses ironmunch instead of reading full files:
 
 ```markdown
 ## Code Navigation
@@ -74,7 +97,7 @@ exploration instead of reading full files:
 Use `Read` only for content that isn't a named symbol (config files, etc).
 ```
 
-Claude Code loads `CLAUDE.md` automatically at the start of every session in that directory.
+Claude Code loads `CLAUDE.md` automatically at the start of every session.
 
 **Step 4: Explore the codebase.**
 
@@ -82,26 +105,7 @@ Once indexed, the AI will use `get_repo_outline`, `search_symbols`, and `get_sym
 
 **Step 5 (optional): Install git hooks for automatic reindexing.**
 
-Keep indexes current without thinking about it:
-
-```bash
-cp /path/to/ironmunch/hooks/post-commit .git/hooks/post-commit
-cp /path/to/ironmunch/hooks/post-push   .git/hooks/post-push
-chmod +x .git/hooks/post-commit .git/hooks/post-push
-```
-
-The hooks need their own env file since git hooks don't inherit your shell environment:
-
-```bash
-mkdir -p ~/.config/ironmunch
-cat > ~/.config/ironmunch/env <<'EOF'
-export GITHUB_TOKEN=ghp_...
-export IRONMUNCH_BIN=/path/to/.venv/bin/ironmunch
-EOF
-chmod 600 ~/.config/ironmunch/env
-```
-
-`IRONMUNCH_BIN` must point to the same binary your MCP client uses — without it the hooks may resolve to a version manager shim that doesn't have the module installed.
+See [Git Hooks](#git-hooks-auto-reindex-on-commit-and-push) below.
 
 ## Git Hooks: Auto-Reindex on Commit and Push
 
@@ -122,18 +126,18 @@ chmod +x .git/hooks/post-commit .git/hooks/post-push
 
 Both hooks run in the background so they never block your workflow. Remove `--no-ai` from either hook if you want AI-generated summaries updated automatically.
 
-**One-time hook setup** (git hooks don't inherit your shell environment):
+**One-time setup** — git hooks don't inherit your shell environment, so credentials and the binary path must be provided separately:
 
 ```bash
 mkdir -p ~/.config/ironmunch
-cat > ~/.config/ironmunch/env <<EOF
+cat > ~/.config/ironmunch/env <<'EOF'
 export GITHUB_TOKEN=ghp_...
 export IRONMUNCH_BIN=/path/to/.venv/bin/ironmunch
 EOF
 chmod 600 ~/.config/ironmunch/env
 ```
 
-`IRONMUNCH_BIN` should point to the same `ironmunch` binary used by your MCP client. Without it, the hooks may resolve to a shim (e.g. pyenv) that doesn't have the module installed.
+`IRONMUNCH_BIN` must point to the same binary your MCP client uses. Without it, the hooks may resolve to a version manager shim (e.g. pyenv) that doesn't have the module installed.
 
 You can also call the indexer directly from the command line:
 
