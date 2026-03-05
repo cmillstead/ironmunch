@@ -23,6 +23,8 @@ pip install ironmunch
 
 ## Quick Start
 
+**Step 1: Configure your MCP client.**
+
 Add ironmunch to your MCP client configuration. For Claude Desktop:
 
 ```json
@@ -40,7 +42,11 @@ Add ironmunch to your MCP client configuration. For Claude Desktop:
 }
 ```
 
-**Step 1: Index a repository.**
+- `IRONMUNCH_ALLOWED_ROOTS` is required for local folder indexing — set it to the parent directory of your projects (colon-separated for multiple roots).
+- `GITHUB_TOKEN` is required for private repos and to avoid rate limits on public ones.
+- `ANTHROPIC_API_KEY` is optional — enables AI-generated symbol summaries.
+
+**Step 2: Index a repository.**
 
 Before any other tools work, you must index at least one repository. Ask your AI:
 
@@ -49,9 +55,32 @@ Before any other tools work, you must index at least one repository. Ask your AI
 
 The AI will call `index_folder` or `index_repo`. This fetches files, parses ASTs, and extracts symbols into local storage. You only need to do this once -- subsequent calls skip unchanged files.
 
-**Step 2: Explore the codebase.**
+**Step 3: Explore the codebase.**
 
 Once indexed, the AI can use `get_repo_outline`, `search_symbols`, and `get_symbol` to navigate the codebase efficiently -- retrieving only the symbols it needs instead of entire files.
+
+**Step 4 (optional): Install git hooks for automatic reindexing.**
+
+Keep indexes current without thinking about it:
+
+```bash
+cp /path/to/ironmunch/hooks/post-commit .git/hooks/post-commit
+cp /path/to/ironmunch/hooks/post-push   .git/hooks/post-push
+chmod +x .git/hooks/post-commit .git/hooks/post-push
+```
+
+The hooks need their own env file since git hooks don't inherit your shell environment:
+
+```bash
+mkdir -p ~/.config/ironmunch
+cat > ~/.config/ironmunch/env <<'EOF'
+export GITHUB_TOKEN=ghp_...
+export IRONMUNCH_BIN=/path/to/.venv/bin/ironmunch
+EOF
+chmod 600 ~/.config/ironmunch/env
+```
+
+`IRONMUNCH_BIN` must point to the same binary your MCP client uses — without it the hooks may resolve to a version manager shim that doesn't have the module installed.
 
 ## Git Hooks: Auto-Reindex on Commit and Push
 
