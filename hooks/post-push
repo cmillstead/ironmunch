@@ -3,20 +3,21 @@
 # Reindexes the GitHub remote repo after each push.
 # Install: cp hooks/post-push .git/hooks/post-push && chmod +x .git/hooks/post-push
 #
-# Git hooks don't inherit your shell environment. To provide GITHUB_TOKEN,
-# create ~/.config/ironmunch/env with:
+# Git hooks don't inherit your shell environment. Create ~/.config/ironmunch/env with:
 #   GITHUB_TOKEN=ghp_...
+#   IRONMUNCH_BIN=/path/to/.venv/bin/ironmunch
 
-# Load ironmunch env file if present (provides GITHUB_TOKEN etc.)
+# Load ironmunch env file if present (provides GITHUB_TOKEN, IRONMUNCH_BIN etc.)
 IRONMUNCH_ENV="$HOME/.config/ironmunch/env"
 if [ -f "$IRONMUNCH_ENV" ]; then
     # shellcheck disable=SC1090
     . "$IRONMUNCH_ENV"
 fi
 
-IRONMUNCH="$(command -v ironmunch)"
+# Use IRONMUNCH_BIN from env file, fall back to PATH
+IRONMUNCH="${IRONMUNCH_BIN:-$(command -v ironmunch)}"
 
-if [ -z "$IRONMUNCH" ]; then
+if [ -z "$IRONMUNCH" ] || [ ! -x "$IRONMUNCH" ]; then
     exit 0
 fi
 

@@ -2,11 +2,23 @@
 # ironmunch post-commit hook
 # Reindexes the current repo after each commit (incremental -- skips unchanged files).
 # Install: cp hooks/post-commit .git/hooks/post-commit && chmod +x .git/hooks/post-commit
+#
+# Git hooks don't inherit your shell environment. Create ~/.config/ironmunch/env with:
+#   IRONMUNCH_BIN=/path/to/.venv/bin/ironmunch
+
+# Load ironmunch env file if present
+IRONMUNCH_ENV="$HOME/.config/ironmunch/env"
+if [ -f "$IRONMUNCH_ENV" ]; then
+    # shellcheck disable=SC1090
+    . "$IRONMUNCH_ENV"
+fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-IRONMUNCH="$(command -v ironmunch)"
 
-if [ -z "$IRONMUNCH" ]; then
+# Use IRONMUNCH_BIN from env file, fall back to PATH
+IRONMUNCH="${IRONMUNCH_BIN:-$(command -v ironmunch)}"
+
+if [ -z "$IRONMUNCH" ] || [ ! -x "$IRONMUNCH" ]; then
     exit 0
 fi
 
