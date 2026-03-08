@@ -71,13 +71,20 @@ class CodeIndex:
     index_version: int = INDEX_VERSION
     file_hashes: dict[str, str] = field(default_factory=dict)  # file_path -> sha256
     git_head: str = ""           # HEAD commit hash at index time (for git repos)
+    _symbol_by_id: dict[str, dict] = field(default_factory=dict, init=False, repr=False)
+
+    def __post_init__(self):
+        self._build_symbol_index()
+
+    def _build_symbol_index(self):
+        """Build the symbol-by-id lookup dict from the symbols list."""
+        self._symbol_by_id = {
+            sym["id"]: sym for sym in self.symbols if isinstance(sym, dict) and "id" in sym
+        }
 
     def get_symbol(self, symbol_id: str) -> Optional[dict]:
         """Find a symbol by ID."""
-        for sym in self.symbols:
-            if sym.get("id") == symbol_id:
-                return sym
-        return None
+        return self._symbol_by_id.get(symbol_id)
 
     def search(self, query: str, kind: Optional[str] = None, file_pattern: Optional[str] = None) -> list[dict]:
         """Search symbols with weighted scoring."""

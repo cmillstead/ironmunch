@@ -287,7 +287,7 @@ async def list_tools() -> list[Tool]:
                     "language": {
                         "type": "string",
                         "description": "Optional filter by language",
-                        "enum": ["python", "javascript", "typescript", "go", "rust", "java"]
+                        "enum": ["python", "javascript", "typescript", "go", "rust", "java", "php", "c", "cpp", "c_sharp", "ruby", "swift", "kotlin"]
                     },
                     "max_results": {
                         "type": "integer",
@@ -701,6 +701,165 @@ def _validate_storage_path(storage_path: str | None) -> str | None:
     return None
 
 
+# -- Tool handler registry -----------------------------------------------------
+# Each handler takes (arguments, storage_path) and returns a result dict.
+# Handlers that return a coroutine are awaited by call_tool().
+
+def _handle_index_repo(arguments: dict, storage_path: str | None) -> Any:
+    return index_repo(
+        url=arguments["url"],
+        use_ai_summaries=arguments.get("use_ai_summaries", True),
+        storage_path=storage_path,
+    )
+
+def _handle_index_folder(arguments: dict, storage_path: str | None) -> Any:
+    allowed_roots = ALLOWED_ROOTS if ALLOWED_ROOTS else None
+    return index_folder(
+        path=arguments["path"],
+        use_ai_summaries=arguments.get("use_ai_summaries", True),
+        storage_path=storage_path,
+        extra_ignore_patterns=arguments.get("extra_ignore_patterns"),
+        follow_symlinks=arguments.get("follow_symlinks", False),
+        allowed_roots=allowed_roots,
+    )
+
+def _handle_list_repos(arguments: dict, storage_path: str | None) -> Any:
+    return list_repos(storage_path=storage_path)
+
+def _handle_get_file_tree(arguments: dict, storage_path: str | None) -> Any:
+    return get_file_tree(
+        repo=arguments["repo"],
+        path_prefix=arguments.get("path_prefix", ""),
+        storage_path=storage_path,
+    )
+
+def _handle_get_file_outline(arguments: dict, storage_path: str | None) -> Any:
+    return get_file_outline(
+        repo=arguments["repo"],
+        file_path=arguments["file_path"],
+        storage_path=storage_path,
+    )
+
+def _handle_get_symbol(arguments: dict, storage_path: str | None) -> Any:
+    return get_symbol(
+        repo=arguments["repo"],
+        symbol_id=arguments["symbol_id"],
+        verify=arguments.get("verify", False),
+        context_lines=arguments.get("context_lines", 0),
+        storage_path=storage_path,
+    )
+
+def _handle_get_symbols(arguments: dict, storage_path: str | None) -> Any:
+    return get_symbols(
+        repo=arguments["repo"],
+        symbol_ids=arguments["symbol_ids"],
+        storage_path=storage_path,
+    )
+
+def _handle_search_symbols(arguments: dict, storage_path: str | None) -> Any:
+    return search_symbols(
+        repo=arguments["repo"],
+        query=arguments["query"],
+        kind=arguments.get("kind"),
+        file_pattern=arguments.get("file_pattern"),
+        language=arguments.get("language"),
+        max_results=arguments.get("max_results", 10),
+        storage_path=storage_path,
+    )
+
+def _handle_invalidate_cache(arguments: dict, storage_path: str | None) -> Any:
+    return invalidate_cache(
+        repo=arguments["repo"],
+        storage_path=storage_path,
+        confirm=arguments.get("confirm", False),
+    )
+
+def _handle_search_text(arguments: dict, storage_path: str | None) -> Any:
+    return search_text(
+        repo=arguments["repo"],
+        query=arguments["query"],
+        file_pattern=arguments.get("file_pattern"),
+        max_results=arguments.get("max_results", 20),
+        confirm_sensitive_search=arguments.get("confirm_sensitive_search", False),
+        storage_path=storage_path,
+    )
+
+def _handle_get_repo_outline(arguments: dict, storage_path: str | None) -> Any:
+    return get_repo_outline(
+        repo=arguments["repo"],
+        storage_path=storage_path,
+    )
+
+def _handle_get_callers(arguments: dict, storage_path: str | None) -> Any:
+    return get_callers(
+        repo=arguments["repo"],
+        symbol_id=arguments["symbol_id"],
+        max_depth=arguments.get("max_depth", 1),
+        storage_path=storage_path,
+    )
+
+def _handle_get_callees(arguments: dict, storage_path: str | None) -> Any:
+    return get_callees(
+        repo=arguments["repo"],
+        symbol_id=arguments["symbol_id"],
+        max_depth=arguments.get("max_depth", 1),
+        storage_path=storage_path,
+    )
+
+def _handle_get_call_chain(arguments: dict, storage_path: str | None) -> Any:
+    return get_call_chain(
+        repo=arguments["repo"],
+        from_symbol=arguments["from_symbol"],
+        to_symbol=arguments["to_symbol"],
+        max_depth=arguments.get("max_depth", 10),
+        storage_path=storage_path,
+    )
+
+def _handle_get_type_hierarchy(arguments: dict, storage_path: str | None) -> Any:
+    return get_type_hierarchy(
+        repo=arguments["repo"],
+        symbol_id=arguments["symbol_id"],
+        storage_path=storage_path,
+    )
+
+def _handle_get_imports(arguments: dict, storage_path: str | None) -> Any:
+    return get_imports(
+        repo=arguments["repo"],
+        file=arguments["file"],
+        direction=arguments.get("direction", "imports"),
+        storage_path=storage_path,
+    )
+
+def _handle_get_impact(arguments: dict, storage_path: str | None) -> Any:
+    return get_impact(
+        repo=arguments["repo"],
+        symbol_id=arguments["symbol_id"],
+        max_depth=arguments.get("max_depth", 3),
+        storage_path=storage_path,
+    )
+
+
+_TOOL_HANDLERS: dict[str, Any] = {
+    "index_repo": _handle_index_repo,
+    "index_folder": _handle_index_folder,
+    "list_repos": _handle_list_repos,
+    "get_file_tree": _handle_get_file_tree,
+    "get_file_outline": _handle_get_file_outline,
+    "get_symbol": _handle_get_symbol,
+    "get_symbols": _handle_get_symbols,
+    "search_symbols": _handle_search_symbols,
+    "invalidate_cache": _handle_invalidate_cache,
+    "search_text": _handle_search_text,
+    "get_repo_outline": _handle_get_repo_outline,
+    "get_callers": _handle_get_callers,
+    "get_callees": _handle_get_callees,
+    "get_call_chain": _handle_get_call_chain,
+    "get_type_hierarchy": _handle_get_type_hierarchy,
+    "get_imports": _handle_get_imports,
+    "get_impact": _handle_get_impact,
+}
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle tool calls with sanitized error responses."""
@@ -723,124 +882,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         }))]
 
     try:
-        if name == "index_repo":
-            result = await index_repo(
-                url=arguments["url"],
-                use_ai_summaries=arguments.get("use_ai_summaries", True),
-                storage_path=storage_path
-            )
-        elif name == "index_folder":
-            allowed_roots = ALLOWED_ROOTS if ALLOWED_ROOTS else None
-            result = index_folder(
-                path=arguments["path"],
-                use_ai_summaries=arguments.get("use_ai_summaries", True),
-                storage_path=storage_path,
-                extra_ignore_patterns=arguments.get("extra_ignore_patterns"),
-                follow_symlinks=arguments.get("follow_symlinks", False),
-                allowed_roots=allowed_roots,
-            )
-        elif name == "list_repos":
-            result = list_repos(storage_path=storage_path)
-        elif name == "get_file_tree":
-            result = get_file_tree(
-                repo=arguments["repo"],
-                path_prefix=arguments.get("path_prefix", ""),
-                storage_path=storage_path
-            )
-        elif name == "get_file_outline":
-            result = get_file_outline(
-                repo=arguments["repo"],
-                file_path=arguments["file_path"],
-                storage_path=storage_path
-            )
-        elif name == "get_symbol":
-            result = get_symbol(
-                repo=arguments["repo"],
-                symbol_id=arguments["symbol_id"],
-                verify=arguments.get("verify", False),
-                context_lines=arguments.get("context_lines", 0),
-                storage_path=storage_path
-            )
-        elif name == "get_symbols":
-            result = get_symbols(
-                repo=arguments["repo"],
-                symbol_ids=arguments["symbol_ids"],
-                storage_path=storage_path
-            )
-        elif name == "search_symbols":
-            result = search_symbols(
-                repo=arguments["repo"],
-                query=arguments["query"],
-                kind=arguments.get("kind"),
-                file_pattern=arguments.get("file_pattern"),
-                language=arguments.get("language"),
-                max_results=arguments.get("max_results", 10),
-                storage_path=storage_path
-            )
-        elif name == "invalidate_cache":
-            result = invalidate_cache(
-                repo=arguments["repo"],
-                storage_path=storage_path,
-                confirm=arguments.get("confirm", False),
-            )
-        elif name == "search_text":
-            result = search_text(
-                repo=arguments["repo"],
-                query=arguments["query"],
-                file_pattern=arguments.get("file_pattern"),
-                max_results=arguments.get("max_results", 20),
-                confirm_sensitive_search=arguments.get("confirm_sensitive_search", False),
-                storage_path=storage_path
-            )
-        elif name == "get_repo_outline":
-            result = get_repo_outline(
-                repo=arguments["repo"],
-                storage_path=storage_path
-            )
-        elif name == "get_callers":
-            result = get_callers(
-                repo=arguments["repo"],
-                symbol_id=arguments["symbol_id"],
-                max_depth=arguments.get("max_depth", 1),
-                storage_path=storage_path
-            )
-        elif name == "get_callees":
-            result = get_callees(
-                repo=arguments["repo"],
-                symbol_id=arguments["symbol_id"],
-                max_depth=arguments.get("max_depth", 1),
-                storage_path=storage_path
-            )
-        elif name == "get_call_chain":
-            result = get_call_chain(
-                repo=arguments["repo"],
-                from_symbol=arguments["from_symbol"],
-                to_symbol=arguments["to_symbol"],
-                max_depth=arguments.get("max_depth", 10),
-                storage_path=storage_path
-            )
-        elif name == "get_type_hierarchy":
-            result = get_type_hierarchy(
-                repo=arguments["repo"],
-                symbol_id=arguments["symbol_id"],
-                storage_path=storage_path
-            )
-        elif name == "get_imports":
-            result = get_imports(
-                repo=arguments["repo"],
-                file=arguments["file"],
-                direction=arguments.get("direction", "imports"),
-                storage_path=storage_path
-            )
-        elif name == "get_impact":
-            result = get_impact(
-                repo=arguments["repo"],
-                symbol_id=arguments["symbol_id"],
-                max_depth=arguments.get("max_depth", 3),
-                storage_path=storage_path
-            )
-        else:
-            raise RuntimeError(f"Unhandled known tool: {name}")
+        handler = _TOOL_HANDLERS[name]
+        result = handler(arguments, storage_path)
+        if asyncio.iscoroutine(result):
+            result = await result
 
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 

@@ -5,11 +5,12 @@ doesn't duplicate the logic.
 """
 
 import time
-from typing import Optional
+from typing import Optional, Union
 
 from ..security import sanitize_repo_identifier
 from ..storage import IndexStore
 from ..core.errors import sanitize_error, RepoNotFoundError
+from ..parser.graph import CodeGraph
 
 
 def parse_repo(
@@ -109,3 +110,55 @@ def calculate_symbol_score(sym: dict, query_lower: str, query_words: set) -> int
             score += 1
 
     return score
+
+
+def prepare_graph_query(
+    repo: str,
+    symbol_id: Optional[str] = None,
+    storage_path: Optional[str] = None,
+) -> Union[tuple, dict]:
+    """Shared setup for graph-based tool handlers.
+
+    Performs the common boilerplate shared by all graph tools:
+    1. Parse and validate the repo identifier.
+    2. Load the index from storage.
+    3. Optionally verify that a symbol exists in the index.
+    4. Build (or retrieve cached) CodeGraph.
+
+    Args:
+        repo: Repository identifier (owner/repo or just repo name).
+        symbol_id: Symbol ID to look up.  Pass ``None`` to skip
+            the symbol-existence check (e.g. for file-based queries).
+        storage_path: Custom storage path forwarded to IndexStore.
+
+    Returns:
+        On success a 5-tuple ``(owner, name, index, graph, symbol_info)``
+        where *symbol_info* is the symbol dict when *symbol_id* was
+        provided, or ``None`` otherwise.
+
+        On failure a plain ``dict`` with an ``"error"`` key that the
+        caller should return directly.
+    """
+    # --- security gate: parse + validate repo identifier ---
+    try:
+        owner, name = parse_repo(repo, storage_path)
+    except RepoNotFoundError as exc:
+        return {"error": str(exc)}
+
+    store = IndexStore(base_path=storage_path)
+    index = store.load_index(owner, name)
+
+    if not index:
+        return {"error": f"Repository not indexed: {owner}/{name}"}
+
+    # Verify target symbol exists (when requested)
+    symbol_info = None
+    if symbol_id is not None:
+        symbol_info = index.get_symbol(symbol_id)
+        if not symbol_info:
+            return {"error": f"Symbol not found: {symbol_id}"}
+
+    # Build graph from index
+    graph = CodeGraph.get_or_build(index.symbols)
+
+    return (owner, name, index, graph, symbol_info)

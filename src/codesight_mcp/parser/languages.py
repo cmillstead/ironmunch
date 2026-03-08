@@ -1,7 +1,7 @@
 """Language registry with LanguageSpec definitions for all supported languages."""
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional
 
 
 @dataclass
@@ -47,6 +47,278 @@ class LanguageSpec:
     import_node_types: list[str] = field(default_factory=list)        # Import statement node types
     inheritance_fields: list[str] = field(default_factory=list)       # AST fields for superclass/parent refs
     implementation_fields: list[str] = field(default_factory=list)    # AST fields for interface implementations
+
+    # Per-language import extraction: (node, source_bytes) -> list[str]
+    # Each language provides its own logic for extracting import names from an import node.
+    extract_import: Optional[Callable] = None
+
+    # Per-language type name collection: (child_node, source_bytes, extract_type_identifier_fn) -> list[str]
+    # Each language provides its own logic for collecting type names from inheritance fields.
+    collect_type_names: Optional[Callable] = None
+
+
+def _strip_quotes(text: str) -> str:
+    """Strip quotes from a string literal."""
+    text = text.strip()
+    if text.startswith('"""') and text.endswith('"""'):
+        return text[3:-3].strip()
+    if text.startswith("'''") and text.endswith("'''"):
+        return text[3:-3].strip()
+    if text.startswith('"') and text.endswith('"'):
+        return text[1:-1].strip()
+    if text.startswith("'") and text.endswith("'"):
+        return text[1:-1].strip()
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Per-language import extraction functions
+# Each takes (node, source_bytes) and returns list[str] of import names.
+# ---------------------------------------------------------------------------
+
+def _extract_import_python_import_statement(node, source_bytes: bytes) -> list[str]:
+    """Python: import foo, import foo.bar."""
+    imports = []
+    # Check for source field (JS/TS style) — not applicable to Python import_statement
+    # but the old code checked it for both Python and JS/TS since they share the node type.
+    source_node = node.child_by_field_name("source")
+    if source_node:
+        text = source_bytes[source_node.start_byte:source_node.end_byte].decode("utf-8")
+        imports.append(_strip_quotes(text))
+    else:
+        for named_child in node.named_children:
+            if named_child.type in ("dotted_name", "aliased_import"):
+                if named_child.type == "aliased_import":
+                    name_node = named_child.child_by_field_name("name")
+                    if name_node:
+                        imports.append(
+                            source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+                        )
+                else:
+                    imports.append(
+                        source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
+                    )
+    return imports
+
+
+def _extract_import_python_from(node, source_bytes: bytes) -> list[str]:
+    """Python: from foo.bar import baz."""
+    module_node = node.child_by_field_name("module_name")
+    if module_node:
+        return [source_bytes[module_node.start_byte:module_node.end_byte].decode("utf-8")]
+    return []
+
+
+def _extract_import_js_ts(node, source_bytes: bytes) -> list[str]:
+    """JS/TS: import ... from 'source'."""
+    source_node = node.child_by_field_name("source")
+    if source_node:
+        text = source_bytes[source_node.start_byte:source_node.end_byte].decode("utf-8")
+        return [_strip_quotes(text)]
+    return []
+
+
+def _extract_import_go(node, source_bytes: bytes) -> list[str]:
+    """Go: import 'fmt' or grouped imports."""
+    imports = []
+    for named_child in node.named_children:
+        if named_child.type == "import_spec":
+            path_node = named_child.child_by_field_name("path")
+            if path_node:
+                text = source_bytes[path_node.start_byte:path_node.end_byte].decode("utf-8")
+                imports.append(_strip_quotes(text))
+        elif named_child.type == "import_spec_list":
+            for spec_child in named_child.named_children:
+                if spec_child.type == "import_spec":
+                    path_node = spec_child.child_by_field_name("path")
+                    if path_node:
+                        text = source_bytes[path_node.start_byte:path_node.end_byte].decode("utf-8")
+                        imports.append(_strip_quotes(text))
+    return imports
+
+
+def _extract_import_java(node, source_bytes: bytes) -> list[str]:
+    """Java: import java.util.List."""
+    imports = []
+    for named_child in node.named_children:
+        if named_child.type == "scoped_identifier":
+            imports.append(
+                source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
+            )
+    return imports
+
+
+def _extract_import_rust(node, source_bytes: bytes) -> list[str]:
+    """Rust: use std::collections::HashMap."""
+    for named_child in node.named_children:
+        if named_child.type not in ("visibility_modifier",):
+            text = source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
+            return [text]
+    return []
+
+
+def _extract_import_php(node, source_bytes: bytes) -> list[str]:
+    """PHP: use App\\Models\\User."""
+    imports = []
+    for named_child in node.named_children:
+        if named_child.type in ("namespace_use_clause", "namespace_use_group"):
+            text = source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
+            imports.append(text)
+    return imports
+
+
+def _extract_import_c_include(node, source_bytes: bytes) -> list[str]:
+    """C/C++: #include <stdio.h> or #include 'myheader.h'."""
+    path_node = node.child_by_field_name("path")
+    if path_node:
+        text = source_bytes[path_node.start_byte:path_node.end_byte].decode("utf-8")
+        text = text.strip('<>"')
+        return [text]
+    return []
+
+
+def _extract_import_csharp_using(node, source_bytes: bytes) -> list[str]:
+    """C#: using System.Collections.Generic."""
+    for named_child in node.named_children:
+        if named_child.type in ("qualified_name", "identifier", "name"):
+            text = source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
+            return [text]
+    return []
+
+
+def _extract_import_cpp_using(node, source_bytes: bytes) -> list[str]:
+    """C++: using namespace std; or using std::string."""
+    for named_child in node.named_children:
+        text = source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
+        return [text]
+    return []
+
+
+def _extract_import_swift(node, source_bytes: bytes) -> list[str]:
+    """Swift: import Foundation."""
+    for named_child in node.named_children:
+        if named_child.type in ("identifier", "simple_identifier"):
+            text = source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
+            return [text]
+    return []
+
+
+def _extract_import_kotlin(node, source_bytes: bytes) -> list[str]:
+    """Kotlin: import kotlin.collections.List."""
+    for named_child in node.named_children:
+        if named_child.type in ("identifier", "qualified_identifier"):
+            text = source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
+            return [text]
+    return []
+
+
+def _make_import_dispatcher(handlers: dict[str, Callable]) -> Callable:
+    """Create a single extract_import function that dispatches by node type."""
+    def _extract(node, source_bytes: bytes) -> list[str]:
+        handler = handlers.get(node.type)
+        if handler:
+            return handler(node, source_bytes)
+        return []
+    return _extract
+
+
+# ---------------------------------------------------------------------------
+# Per-language type name collection functions
+# Each takes (child_node, source_bytes, extract_type_id_fn) and returns list[str].
+# ---------------------------------------------------------------------------
+
+def _collect_types_argument_list(child, source_bytes, extract_type_id):
+    """Python argument_list: class Foo(Bar, Baz)."""
+    result = []
+    for arg in child.named_children:
+        name = extract_type_id(arg, source_bytes)
+        if name:
+            result.append(name)
+    return result
+
+
+def _collect_types_class_heritage(child, source_bytes, extract_type_id):
+    """JS/TS class_heritage: extends_clause and/or implements_clause."""
+    result = []
+    for clause in child.named_children:
+        for type_child in clause.named_children:
+            name = extract_type_id(type_child, source_bytes)
+            if name:
+                result.append(name)
+    return result
+
+
+def _collect_types_superclass(child, source_bytes, extract_type_id):
+    """Java/Ruby superclass: directly contains a type_identifier."""
+    result = []
+    for type_child in child.named_children:
+        name = extract_type_id(type_child, source_bytes)
+        if name:
+            result.append(name)
+    return result
+
+
+def _collect_types_super_interfaces(child, source_bytes, extract_type_id):
+    """Java super_interfaces / interfaces: contains type_list."""
+    result = []
+    for type_child in child.named_children:
+        if type_child.type == "type_list":
+            for t in type_child.named_children:
+                name = extract_type_id(t, source_bytes)
+                if name:
+                    result.append(name)
+        else:
+            name = extract_type_id(type_child, source_bytes)
+            if name:
+                result.append(name)
+    return result
+
+
+def _collect_types_named_children(child, source_bytes, extract_type_id):
+    """Generic: extract identifiers from all named children.
+
+    Used for: PHP base_clause, PHP class_interface_clause, Rust trait_bounds,
+    C++ base_class_clause, C# base_list, Swift inheritance_specifier.
+    """
+    result = []
+    for type_child in child.named_children:
+        name = extract_type_id(type_child, source_bytes)
+        if name:
+            result.append(name)
+    return result
+
+
+def _collect_types_delegation_specifiers(child, source_bytes, extract_type_id):
+    """Kotlin delegation_specifiers: class Foo : Bar(), Baz."""
+    result = []
+    for spec_child in child.named_children:
+        if spec_child.type == "delegation_specifier":
+            for type_child in spec_child.named_children:
+                name = extract_type_id(type_child, source_bytes)
+                if name:
+                    result.append(name)
+                    break
+        else:
+            name = extract_type_id(spec_child, source_bytes)
+            if name:
+                result.append(name)
+    return result
+
+
+def _make_type_collector(handlers: dict[str, Callable]) -> Callable:
+    """Create a single collect_type_names function that dispatches by child node type."""
+    def _collect(child, source_bytes, extract_type_id):
+        handler = handlers.get(child.type)
+        if handler:
+            return handler(child, source_bytes, extract_type_id)
+        # Fallback: try to extract identifiers from all named children
+        result = []
+        for type_child in child.named_children:
+            name = extract_type_id(type_child, source_bytes)
+            if name:
+                result.append(name)
+        return result
+    return _collect
 
 
 # File extension to language mapping
@@ -100,6 +372,13 @@ PYTHON_SPEC = LanguageSpec(
     call_node_types=["call"],
     import_node_types=["import_statement", "import_from_statement"],
     inheritance_fields=["argument_list"],
+    extract_import=_make_import_dispatcher({
+        "import_statement": _extract_import_python_import_statement,
+        "import_from_statement": _extract_import_python_from,
+    }),
+    collect_type_names=_make_type_collector({
+        "argument_list": _collect_types_argument_list,
+    }),
 )
 
 
@@ -132,6 +411,12 @@ JAVASCRIPT_SPEC = LanguageSpec(
     call_node_types=["call_expression"],
     import_node_types=["import_statement"],
     inheritance_fields=["class_heritage"],
+    extract_import=_make_import_dispatcher({
+        "import_statement": _extract_import_js_ts,
+    }),
+    collect_type_names=_make_type_collector({
+        "class_heritage": _collect_types_class_heritage,
+    }),
 )
 
 
@@ -174,6 +459,12 @@ TYPESCRIPT_SPEC = LanguageSpec(
     import_node_types=["import_statement"],
     inheritance_fields=["class_heritage"],
     implementation_fields=["class_heritage"],
+    extract_import=_make_import_dispatcher({
+        "import_statement": _extract_import_js_ts,
+    }),
+    collect_type_names=_make_type_collector({
+        "class_heritage": _collect_types_class_heritage,
+    }),
 )
 
 
@@ -205,6 +496,9 @@ GO_SPEC = LanguageSpec(
     type_patterns=["type_declaration"],
     call_node_types=["call_expression"],
     import_node_types=["import_declaration"],
+    extract_import=_make_import_dispatcher({
+        "import_declaration": _extract_import_go,
+    }),
 )
 
 
@@ -240,6 +534,12 @@ RUST_SPEC = LanguageSpec(
     call_node_types=["call_expression", "macro_invocation"],
     import_node_types=["use_declaration"],
     inheritance_fields=["trait_bounds"],
+    extract_import=_make_import_dispatcher({
+        "use_declaration": _extract_import_rust,
+    }),
+    collect_type_names=_make_type_collector({
+        "trait_bounds": _collect_types_named_children,
+    }),
 )
 
 
@@ -276,6 +576,14 @@ JAVA_SPEC = LanguageSpec(
     import_node_types=["import_declaration"],
     inheritance_fields=["superclass"],
     implementation_fields=["super_interfaces"],
+    extract_import=_make_import_dispatcher({
+        "import_declaration": _extract_import_java,
+    }),
+    collect_type_names=_make_type_collector({
+        "superclass": _collect_types_superclass,
+        "super_interfaces": _collect_types_super_interfaces,
+        "interfaces": _collect_types_super_interfaces,
+    }),
 )
 
 
@@ -315,6 +623,13 @@ PHP_SPEC = LanguageSpec(
     import_node_types=["namespace_use_declaration"],
     inheritance_fields=["base_clause"],
     implementation_fields=["class_interface_clause"],
+    extract_import=_make_import_dispatcher({
+        "namespace_use_declaration": _extract_import_php,
+    }),
+    collect_type_names=_make_type_collector({
+        "base_clause": _collect_types_named_children,
+        "class_interface_clause": _collect_types_named_children,
+    }),
 )
 
 
@@ -343,6 +658,9 @@ C_SPEC = LanguageSpec(
     type_patterns=["type_definition", "struct_specifier", "enum_specifier"],
     call_node_types=["call_expression"],
     import_node_types=["preproc_include"],
+    extract_import=_make_import_dispatcher({
+        "preproc_include": _extract_import_c_include,
+    }),
 )
 
 
@@ -375,6 +693,13 @@ CPP_SPEC = LanguageSpec(
     call_node_types=["call_expression"],
     import_node_types=["preproc_include", "using_declaration"],
     inheritance_fields=["base_class_clause"],
+    extract_import=_make_import_dispatcher({
+        "preproc_include": _extract_import_c_include,
+        "using_declaration": _extract_import_cpp_using,
+    }),
+    collect_type_names=_make_type_collector({
+        "base_class_clause": _collect_types_named_children,
+    }),
 )
 
 
@@ -415,6 +740,12 @@ CSHARP_SPEC = LanguageSpec(
     import_node_types=["using_directive"],
     inheritance_fields=["base_list"],
     implementation_fields=["base_list"],
+    extract_import=_make_import_dispatcher({
+        "using_directive": _extract_import_csharp_using,
+    }),
+    collect_type_names=_make_type_collector({
+        "base_list": _collect_types_named_children,
+    }),
 )
 
 
@@ -446,6 +777,9 @@ RUBY_SPEC = LanguageSpec(
     call_node_types=["call"],
     import_node_types=[],  # Ruby uses require() calls — not a distinct node type
     inheritance_fields=["superclass"],
+    collect_type_names=_make_type_collector({
+        "superclass": _collect_types_superclass,
+    }),
 )
 
 
@@ -472,6 +806,12 @@ SWIFT_SPEC = LanguageSpec(
     call_node_types=["call_expression"],
     import_node_types=["import_declaration"],
     inheritance_fields=["inheritance_specifier"],
+    extract_import=_make_import_dispatcher({
+        "import_declaration": _extract_import_swift,
+    }),
+    collect_type_names=_make_type_collector({
+        "inheritance_specifier": _collect_types_named_children,
+    }),
 )
 
 
@@ -498,6 +838,12 @@ KOTLIN_SPEC = LanguageSpec(
     call_node_types=["call_expression"],
     import_node_types=["import_header"],
     inheritance_fields=["delegation_specifiers"],
+    extract_import=_make_import_dispatcher({
+        "import_header": _extract_import_kotlin,
+    }),
+    collect_type_names=_make_type_collector({
+        "delegation_specifiers": _collect_types_delegation_specifiers,
+    }),
 )
 
 

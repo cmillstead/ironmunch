@@ -4,10 +4,7 @@ from collections import deque
 from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
-from ..core.errors import sanitize_error, RepoNotFoundError
-from ..parser.graph import CodeGraph
-from ..storage import IndexStore
-from ._common import parse_repo, timed, elapsed_ms
+from ._common import prepare_graph_query, timed, elapsed_ms
 
 
 def get_impact(
@@ -32,31 +29,16 @@ def get_impact(
     """
     start = timed()
 
-    # --- security gate: parse + validate repo identifier ---
-    try:
-        owner, name = parse_repo(repo, storage_path)
-    except RepoNotFoundError as exc:
-        return {"error": str(exc)}
-
-    store = IndexStore(base_path=storage_path)
-    index = store.load_index(owner, name)
-
-    if not index:
-        return {"error": f"Repository not indexed: {owner}/{name}"}
-
-    # Verify target symbol exists
-    target = index.get_symbol(symbol_id)
-    if not target:
-        return {"error": f"Symbol not found: {symbol_id}"}
+    result = prepare_graph_query(repo, symbol_id, storage_path)
+    if isinstance(result, dict):
+        return result
+    owner, name, index, graph, target = result
 
     # Clamp max_depth
     max_depth = min(max(max_depth, 1), 10)
 
     target_name = target.get("name", "")
     target_file = target.get("file", "")
-
-    # Build graph from index
-    graph = CodeGraph.build(index.symbols)
 
     # Multi-relationship BFS using graph adjacency lists
     visited: set[str] = {symbol_id}

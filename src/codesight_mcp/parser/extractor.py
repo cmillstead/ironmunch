@@ -561,125 +561,22 @@ def _collect_calls(node, spec: LanguageSpec, source_bytes: bytes, calls: list):
 
 
 def _extract_imports(root_node, spec: LanguageSpec, source_bytes: bytes) -> list[str]:
-    """Extract file-level imports from the top-level AST nodes."""
+    """Extract file-level imports from the top-level AST nodes.
+
+    Delegates per-node-type extraction to spec.extract_import, which is
+    a callable provided by the LanguageSpec for each language.
+    """
+    if not spec.extract_import:
+        return []
+
     imports = []
 
     for child in root_node.children:
         if child.type not in spec.import_node_types:
-            # PHP wraps code in a program > php_tag + children structure
-            # Go import_declaration can be at top level
             continue
 
-        if child.type == "import_statement":
-            # Python: import foo, import foo.bar
-            # JS/TS: import ... from "source"
-            # Check for source field (JS/TS style)
-            source_node = child.child_by_field_name("source")
-            if source_node:
-                # JS/TS import: extract string literal value
-                text = source_bytes[source_node.start_byte:source_node.end_byte].decode("utf-8")
-                imports.append(_strip_quotes(text))
-            else:
-                # Python import: extract dotted_name children
-                for named_child in child.named_children:
-                    if named_child.type in ("dotted_name", "aliased_import"):
-                        if named_child.type == "aliased_import":
-                            # import foo as bar — get the module name
-                            name_node = named_child.child_by_field_name("name")
-                            if name_node:
-                                imports.append(
-                                    source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
-                                )
-                        else:
-                            imports.append(
-                                source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
-                            )
-
-        elif child.type == "import_from_statement":
-            # Python: from foo.bar import baz
-            module_node = child.child_by_field_name("module_name")
-            if module_node:
-                module_name = source_bytes[module_node.start_byte:module_node.end_byte].decode("utf-8")
-                imports.append(module_name)
-
-        elif child.type == "import_declaration":
-            # Go or Java
-            for named_child in child.named_children:
-                if named_child.type == "import_spec":
-                    # Go: import "fmt" or import alias "path"
-                    path_node = named_child.child_by_field_name("path")
-                    if path_node:
-                        text = source_bytes[path_node.start_byte:path_node.end_byte].decode("utf-8")
-                        imports.append(_strip_quotes(text))
-                elif named_child.type == "import_spec_list":
-                    # Go: grouped imports
-                    for spec_child in named_child.named_children:
-                        if spec_child.type == "import_spec":
-                            path_node = spec_child.child_by_field_name("path")
-                            if path_node:
-                                text = source_bytes[path_node.start_byte:path_node.end_byte].decode("utf-8")
-                                imports.append(_strip_quotes(text))
-                elif named_child.type == "scoped_identifier":
-                    # Java: import java.util.List
-                    imports.append(
-                        source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
-                    )
-
-        elif child.type == "use_declaration":
-            # Rust: use std::collections::HashMap
-            # Extract everything after "use " and before ";"
-            for named_child in child.named_children:
-                if named_child.type not in ("visibility_modifier",):
-                    text = source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
-                    imports.append(text)
-                    break
-
-        elif child.type == "namespace_use_declaration":
-            # PHP: use App\Models\User
-            for named_child in child.named_children:
-                if named_child.type in ("namespace_use_clause", "namespace_use_group"):
-                    text = source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
-                    imports.append(text)
-
-        elif child.type == "preproc_include":
-            # C/C++: #include <stdio.h> or #include "myheader.h"
-            path_node = child.child_by_field_name("path")
-            if path_node:
-                text = source_bytes[path_node.start_byte:path_node.end_byte].decode("utf-8")
-                # Strip < > or " " wrappers
-                text = text.strip('<>"')
-                imports.append(text)
-
-        elif child.type == "using_directive":
-            # C#: using System.Collections.Generic;
-            for named_child in child.named_children:
-                if named_child.type in ("qualified_name", "identifier", "name"):
-                    text = source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
-                    imports.append(text)
-                    break
-
-        elif child.type == "using_declaration":
-            # C++: using namespace std; or using std::string;
-            for named_child in child.named_children:
-                text = source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
-                imports.append(text)
-                break
-
-        elif child.type == "import_declaration":
-            # Swift: import Foundation
-            for named_child in child.named_children:
-                if named_child.type in ("identifier", "simple_identifier"):
-                    text = source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
-                    imports.append(text)
-                    break
-
-        elif child.type == "import_header":
-            # Kotlin: import kotlin.collections.List
-            for named_child in child.named_children:
-                if named_child.type in ("identifier", "qualified_identifier"):
-                    text = source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
-                    imports.append(text)
-                    break
+        names = spec.extract_import(child, source_bytes)
+        imports.extend(names)
 
     # Deduplicate while preserving order
     seen = set()
@@ -704,11 +601,11 @@ def _extract_bases(
 
     # Extract inheritance (superclasses / base classes)
     for field_name in spec.inheritance_fields:
-        _collect_type_names_from_field(node, field_name, source_bytes, inherits_from)
+        _collect_type_names_from_field(node, field_name, source_bytes, inherits_from, spec)
 
     # Extract implementations (interfaces)
     for field_name in spec.implementation_fields:
-        _collect_type_names_from_field(node, field_name, source_bytes, implements)
+        _collect_type_names_from_field(node, field_name, source_bytes, implements, spec)
 
     # Deduplicate
     inherits_from = list(dict.fromkeys(inherits_from))
@@ -718,16 +615,12 @@ def _extract_bases(
 
 
 def _collect_type_names_from_field(
-    node, field_name: str, source_bytes: bytes, result: list
+    node, field_name: str, source_bytes: bytes, result: list, spec: LanguageSpec = None
 ):
     """Collect type/class names from a node's child field.
 
-    Handles various AST structures for inheritance across languages:
-    - Python argument_list: class Foo(Bar, Baz)
-    - JS/TS class_heritage: class Foo extends Bar implements Baz
-    - Java superclass / super_interfaces
-    - PHP base_clause / class_interface_clause
-    - Rust trait_bounds
+    Delegates per-child-type extraction to spec.collect_type_names when available,
+    falling back to extracting identifiers from all named children.
     """
     # Try child_by_field_name first
     child = node.child_by_field_name(field_name)
@@ -742,115 +635,10 @@ def _collect_type_names_from_field(
     if child is None:
         return
 
-    # Python argument_list: contains identifiers and attributes directly
-    if child.type == "argument_list":
-        for arg in child.named_children:
-            name = _extract_type_identifier(arg, source_bytes)
-            if name:
-                result.append(name)
-        return
-
-    # JS/TS class_heritage: contains extends_clause and/or implements_clause
-    if child.type == "class_heritage":
-        for clause in child.named_children:
-            # extends_clause or implements_clause
-            for type_child in clause.named_children:
-                name = _extract_type_identifier(type_child, source_bytes)
-                if name:
-                    result.append(name)
-        return
-
-    # Java superclass: directly contains a type_identifier
-    if child.type == "superclass":
-        for type_child in child.named_children:
-            name = _extract_type_identifier(type_child, source_bytes)
-            if name:
-                result.append(name)
-        return
-
-    # Java super_interfaces / interfaces: contains type_list
-    if child.type in ("super_interfaces", "interfaces"):
-        for type_child in child.named_children:
-            if type_child.type == "type_list":
-                for t in type_child.named_children:
-                    name = _extract_type_identifier(t, source_bytes)
-                    if name:
-                        result.append(name)
-            else:
-                name = _extract_type_identifier(type_child, source_bytes)
-                if name:
-                    result.append(name)
-        return
-
-    # PHP base_clause: class Foo extends Bar
-    if child.type == "base_clause":
-        for type_child in child.named_children:
-            name = _extract_type_identifier(type_child, source_bytes)
-            if name:
-                result.append(name)
-        return
-
-    # PHP class_interface_clause: class Foo implements Bar, Baz
-    if child.type == "class_interface_clause":
-        for type_child in child.named_children:
-            name = _extract_type_identifier(type_child, source_bytes)
-            if name:
-                result.append(name)
-        return
-
-    # Rust trait_bounds
-    if child.type == "trait_bounds":
-        for type_child in child.named_children:
-            name = _extract_type_identifier(type_child, source_bytes)
-            if name:
-                result.append(name)
-        return
-
-    # C++ base_class_clause: class Foo : public Bar, Baz
-    if child.type == "base_class_clause":
-        for type_child in child.named_children:
-            name = _extract_type_identifier(type_child, source_bytes)
-            if name:
-                result.append(name)
-        return
-
-    # C# base_list: class Foo : Bar, IBaz
-    if child.type == "base_list":
-        for type_child in child.named_children:
-            name = _extract_type_identifier(type_child, source_bytes)
-            if name:
-                result.append(name)
-        return
-
-    # Ruby superclass: class Foo < Bar
-    if child.type == "superclass":
-        for type_child in child.named_children:
-            name = _extract_type_identifier(type_child, source_bytes)
-            if name:
-                result.append(name)
-        return
-
-    # Swift inheritance_specifier
-    if child.type == "inheritance_specifier":
-        for type_child in child.named_children:
-            name = _extract_type_identifier(type_child, source_bytes)
-            if name:
-                result.append(name)
-        return
-
-    # Kotlin delegation_specifiers: class Foo : Bar(), Baz
-    if child.type == "delegation_specifiers":
-        for spec_child in child.named_children:
-            if spec_child.type == "delegation_specifier":
-                for type_child in spec_child.named_children:
-                    name = _extract_type_identifier(type_child, source_bytes)
-                    if name:
-                        result.append(name)
-                        break
-            else:
-                name = _extract_type_identifier(spec_child, source_bytes)
-                if name:
-                    result.append(name)
+    # Delegate to per-language collector if available
+    if spec is not None and spec.collect_type_names is not None:
+        names = spec.collect_type_names(child, source_bytes, _extract_type_identifier)
+        result.extend(names)
         return
 
     # Fallback: try to extract identifiers from all named children

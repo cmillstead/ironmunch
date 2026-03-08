@@ -8,6 +8,14 @@ from typing import Optional
 _MAX_DEPTH_LIMIT: int = 50
 
 
+def _symbol_fingerprint(symbols: list[dict]) -> int:
+    """Compute a stable hash from symbol IDs for cache keying.
+
+    Uses a frozenset of symbol IDs so insertion order doesn't matter.
+    """
+    return hash(frozenset(sym.get("id", "") for sym in symbols))
+
+
 def _clamp_depth(depth: int) -> int:
     """Clamp a user-supplied depth to the safe range [1, _MAX_DEPTH_LIMIT]."""
     return max(1, min(depth, _MAX_DEPTH_LIMIT))
@@ -63,6 +71,43 @@ class CodeGraph:
         graph._resolve_imports(symbols)
         graph._resolve_inheritance(symbols)
         return graph
+
+    # Class-level graph cache: fingerprint -> CodeGraph
+    _graph_cache: dict[int, "CodeGraph"] = {}
+    _CACHE_MAX_SIZE: int = 8
+
+    @classmethod
+    def get_or_build(cls, symbols: list[dict]) -> "CodeGraph":
+        """Return a cached CodeGraph, rebuilding only when symbols change.
+
+        Caches up to 8 graphs keyed by a hash of the symbol ID set.
+        When the index changes (symbols added/removed/changed IDs),
+        the fingerprint changes and a fresh graph is built.
+
+        Args:
+            symbols: Flat list of symbol dicts.
+
+        Returns:
+            A cached or freshly built CodeGraph.
+        """
+        fingerprint = _symbol_fingerprint(symbols)
+        graph = cls._graph_cache.get(fingerprint)
+        if graph is not None:
+            return graph
+
+        # Evict oldest entries if cache is full
+        while len(cls._graph_cache) >= cls._CACHE_MAX_SIZE:
+            oldest_key = next(iter(cls._graph_cache))
+            del cls._graph_cache[oldest_key]
+
+        graph = cls.build(symbols)
+        cls._graph_cache[fingerprint] = graph
+        return graph
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """Clear the graph cache. Called after re-indexing or cache invalidation."""
+        cls._graph_cache.clear()
 
     def _index_symbols(self, symbols: list[dict]) -> None:
         """Build lookup tables from raw symbol dicts."""
