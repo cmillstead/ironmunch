@@ -68,6 +68,7 @@ def finalize_index(
     storage_path: str | None,
     source_file_count: int,
     max_file_count: int = MAX_FILE_COUNT,
+    git_head: str = "",
 ) -> dict:
     """Summarize symbols, save to store, and build the result dict.
 
@@ -99,6 +100,7 @@ def finalize_index(
         symbols=all_symbols,
         raw_files=raw_files,
         languages=languages,
+        git_head=git_head,
     )
 
     # Clear the in-memory graph cache so stale graphs aren't reused

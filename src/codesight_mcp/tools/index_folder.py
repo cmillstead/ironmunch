@@ -8,6 +8,7 @@ path traversal) is handled by ``discover_local_files()``.
 import errno
 import hashlib
 import os
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -17,8 +18,83 @@ from ..security import sanitize_repo_identifier
 from ..core.errors import sanitize_error
 from ..core.limits import MAX_FILE_COUNT
 from ..core.validation import validate_path, ValidationError, is_within
+from ..storage import IndexStore
 from .registry import ToolSpec, register
 from ._indexing_common import parse_source_files, finalize_index
+
+
+def _is_git_repo(folder_path: Path) -> bool:
+    """Check if folder_path is inside a git working tree.
+
+    Returns False on any error (not a git repo, git not installed, etc.).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            cwd=str(folder_path),
+            timeout=5,
+        )
+        return result.returncode == 0 and result.stdout.strip() == "true"
+    except Exception:
+        return False
+
+
+def _git_head_commit(folder_path: Path) -> Optional[str]:
+    """Get the current HEAD commit hash. Returns None on any error."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=str(folder_path),
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _git_changed_files(folder_path: Path, since_commit: str) -> Optional[set[str]]:
+    """Get the set of files changed since a commit hash.
+
+    Returns None on any error (invalid commit, git failure, etc.) to signal
+    that the caller should fall back to a full re-index.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", since_commit, "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=str(folder_path),
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return None
+        changed = set()
+        for line in result.stdout.strip().splitlines():
+            line = line.strip()
+            if line:
+                changed.add(line)
+        # Also include untracked files (new files not yet committed)
+        result2 = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            capture_output=True,
+            text=True,
+            cwd=str(folder_path),
+            timeout=10,
+        )
+        if result2.returncode == 0:
+            for line in result2.stdout.strip().splitlines():
+                line = line.strip()
+                if line:
+                    changed.add(line)
+        return changed
+    except Exception:
+        return None
 
 
 def index_folder(
@@ -83,8 +159,43 @@ def index_folder(
         if not source_files:
             return {"success": False, "error": "No source files found"}
 
+        # Create repo identifier from folder path early — needed for diff-aware check.
+        # ADV-HIGH-2: use a short SHA-256 hash of the full resolved path so that
+        # two directories with the same basename (e.g. /projects/myapp and
+        # /tmp/myapp) never collide in storage.
+        resolved = folder_path.resolve()
+        path_hash = hashlib.sha256(str(resolved).encode()).hexdigest()[:12]
+        repo_name = f"{resolved.name}-{path_hash}"
+        owner = "local"
+
+        # --- security gate: validate generated identifiers ---
+        try:
+            sanitize_repo_identifier(owner)
+            sanitize_repo_identifier(repo_name)
+        except Exception as exc:
+            return {"success": False, "error": sanitize_error(exc)}
+
+        # --- Diff-aware indexing: skip unchanged files in git repos ---
+        git_head = ""
+        git_changed_set: Optional[set[str]] = None  # None = full re-index
+
+        if _is_git_repo(folder_path):
+            current_head = _git_head_commit(folder_path)
+            if current_head:
+                git_head = current_head
+                # Check for a previous index with a stored commit hash
+                try:
+                    store = IndexStore(base_path=storage_path)
+                    prev_index = store.load_index(owner, repo_name)
+                    if prev_index and prev_index.git_head and prev_index.git_head != current_head:
+                        changed = _git_changed_files(folder_path, prev_index.git_head)
+                        if changed is not None:
+                            git_changed_set = changed
+                except Exception:
+                    pass  # Fall back to full re-index silently
+
         # Build (rel_path, content) iterator with security gates
-        def _read_files():
+        def _read_files(only_files: Optional[set[str]] = None):
             for file_path in source_files:
                 # --- security gate: re-validate path before reading (defense in depth) ---
                 try:
@@ -93,6 +204,17 @@ def index_folder(
                     if not is_within(resolved_root, resolved):
                         continue
                 except (OSError, ValueError):
+                    continue
+
+                # Get relative path for storage
+                try:
+                    rel_path = file_path.relative_to(folder_path).as_posix()
+                except ValueError:
+                    warnings.append("Skipped file: could not resolve relative path")
+                    continue
+
+                # Diff-aware: skip files not in the changed set
+                if only_files is not None and rel_path not in only_files:
                     continue
 
                 try:
@@ -109,13 +231,6 @@ def index_folder(
                     warnings.append("Failed to read file")
                     continue
 
-                # Get relative path for storage
-                try:
-                    rel_path = file_path.relative_to(folder_path).as_posix()
-                except ValueError:
-                    warnings.append("Skipped file: could not resolve relative path")
-                    continue
-
                 # Only yield files with a known language extension
                 ext = file_path.suffix
                 language = LANGUAGE_EXTENSIONS.get(ext)
@@ -124,7 +239,79 @@ def index_folder(
 
                 yield rel_path, content
 
-        # Parse files using shared pipeline
+        # --- Diff-aware path: incremental update ---
+        if git_changed_set is not None:
+            # Parse only the changed files
+            new_symbols, languages, raw_files, parsed_files, parse_fail_count = (
+                parse_source_files(_read_files(only_files=git_changed_set))
+            )
+
+            if parse_fail_count > 0:
+                warnings.append(f"{parse_fail_count} file(s) failed to parse")
+
+            # Compute which files were deleted (in old index but no longer on disk)
+            try:
+                store = IndexStore(base_path=storage_path)
+                prev_index = store.load_index(owner, repo_name)
+            except Exception:
+                prev_index = None
+
+            if prev_index:
+                # All discovered rel_paths (full set, not just changed)
+                all_rel_paths = set()
+                for fp in source_files:
+                    try:
+                        all_rel_paths.add(fp.relative_to(folder_path).as_posix())
+                    except ValueError:
+                        pass
+
+                old_files = set(prev_index.source_files)
+                deleted_files = list(old_files - all_rel_paths)
+                # changed_files = files that were in old index AND in git_changed_set
+                changed_files = [f for f in parsed_files if f in old_files]
+                new_files = [f for f in parsed_files if f not in old_files]
+
+                from ..summarizer import summarize_symbols
+                from ..parser.graph import CodeGraph
+
+                new_symbols = summarize_symbols(new_symbols, use_ai=use_ai_summaries)
+
+                updated = store.incremental_save(
+                    owner=owner,
+                    name=repo_name,
+                    changed_files=changed_files,
+                    new_files=new_files,
+                    deleted_files=deleted_files,
+                    new_symbols=new_symbols,
+                    raw_files=raw_files,
+                    languages=languages,
+                    git_head=git_head,
+                )
+
+                if updated:
+                    CodeGraph.clear_cache()
+                    result: dict = {
+                        "success": True,
+                        "repo": f"{owner}/{repo_name}",
+                        "indexed_at": updated.indexed_at,
+                        "file_count": len(updated.source_files),
+                        "symbol_count": len(updated.symbols),
+                        "languages": updated.languages,
+                        "files": sorted(updated.source_files)[:20],
+                        "incremental": True,
+                        "changed_files": len(changed_files),
+                        "new_files": len(new_files),
+                        "deleted_files": len(deleted_files),
+                    }
+                    if warnings:
+                        result["warnings"] = warnings
+                    return result
+                # incremental_save returned None (no previous index) — fall through
+
+            # Fall through to full index if incremental failed
+            git_changed_set = None
+
+        # --- Full index path ---
         all_symbols, languages, raw_files, parsed_files, parse_fail_count = (
             parse_source_files(_read_files())
         )
@@ -134,22 +321,6 @@ def index_folder(
 
         if not all_symbols:
             return {"success": False, "error": "No symbols extracted from files"}
-
-        # Create repo identifier from folder path.
-        # ADV-HIGH-2: use a short SHA-256 hash of the full resolved path so that
-        # two directories with the same basename (e.g. /projects/myapp and
-        # /tmp/myapp) never collide in storage.
-        resolved = folder_path.resolve()
-        path_hash = hashlib.sha256(str(resolved).encode()).hexdigest()[:12]
-        repo_name = f"{resolved.name}-{path_hash}"
-        owner = "local"
-
-        # --- security gate: validate generated identifiers ---
-        try:
-            sanitize_repo_identifier(owner)
-            sanitize_repo_identifier(repo_name)
-        except Exception as exc:
-            return {"success": False, "error": sanitize_error(exc)}
 
         return finalize_index(
             owner=owner,
@@ -162,6 +333,7 @@ def index_folder(
             use_ai_summaries=use_ai_summaries,
             storage_path=storage_path,
             source_file_count=len(source_files),
+            git_head=git_head,
         )
 
     except Exception as e:

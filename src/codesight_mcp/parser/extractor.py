@@ -240,62 +240,13 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
                     return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
         return None
 
-    # C/C++: function_definition uses declarator -> function_declarator -> declarator
-    if node.type == "function_definition" and node.type not in spec.name_fields:
-        decl = node.child_by_field_name("declarator")
-        if decl:
-            # May be function_declarator directly, or pointer_declarator wrapping it
-            if decl.type == "function_declarator":
-                name_node = decl.child_by_field_name("declarator")
-                if name_node:
-                    return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
-            elif decl.type == "pointer_declarator":
-                for child in decl.named_children:
-                    if child.type == "function_declarator":
-                        name_node = child.child_by_field_name("declarator")
-                        if name_node:
-                            return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
-        return None
-
-    # C/C++: type_definition uses declarator for the typedef name
-    if node.type == "type_definition" and node.type not in spec.name_fields:
-        decl = node.child_by_field_name("declarator")
-        if decl:
-            return source_bytes[decl.start_byte:decl.end_byte].decode("utf-8")
-        return None
-
-    # Dart: function_signature/method_signature — name is in nested identifier
-    if node.type in ("function_signature", "method_signature") and node.type not in spec.name_fields:
-        # method_signature wraps function_signature
-        sig = node
-        if node.type == "method_signature":
-            for child in node.named_children:
-                if child.type == "function_signature":
-                    sig = child
-                    break
-        name_node = sig.child_by_field_name("name")
-        if name_node:
-            return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
-        # Fallback: find identifier child
-        for child in sig.named_children:
-            if child.type == "identifier":
-                return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
-        return None
-
-    # Perl: subroutine_declaration_statement — name is in bareword child
-    if node.type == "subroutine_declaration_statement" and node.type not in spec.name_fields:
-        for child in node.named_children:
-            if child.type == "bareword":
-                return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
-        return None
-
-    # Perl: package_statement — name is the package child (not the keyword)
-    if node.type == "package_statement" and node.type not in spec.name_fields:
-        packages = [c for c in node.named_children if c.type == "package"]
-        if packages:
-            # Last package child is the name (first might be keyword in some grammars)
-            return source_bytes[packages[-1].start_byte:packages[-1].end_byte].decode("utf-8")
-        return None
+    # Delegate to language-specific name extractor if available
+    if spec.extract_name is not None and node.type not in spec.name_fields:
+        result = spec.extract_name(node, source_bytes)
+        if result is not None:
+            return result
+        # extract_name returned None — node type not handled by this language
+        # Fall through to default logic below
 
     if node.type not in spec.name_fields:
         return None
@@ -563,62 +514,12 @@ def _extract_calls(body_node, spec: LanguageSpec, source_bytes: bytes) -> list[s
 def _collect_calls(node, spec: LanguageSpec, source_bytes: bytes, calls: list):
     """Recursively collect call names from AST nodes."""
     if node.type in spec.call_node_types:
-        # Java method_invocation: name field is the method identifier
-        if node.type == "method_invocation":
-            name_node = node.child_by_field_name("name")
-            if name_node:
-                name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
-                calls.append(name)
-        # Rust macro_invocation: extract macro name
-        elif node.type == "macro_invocation":
-            macro_node = node.child_by_field_name("macro")
-            if macro_node:
-                name = source_bytes[macro_node.start_byte:macro_node.end_byte].decode("utf-8")
-                calls.append(name)
-        # PHP function_call_expression / member_call_expression
-        elif node.type == "member_call_expression":
-            name_node = node.child_by_field_name("name")
-            if name_node:
-                name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
-                calls.append(name)
-        elif node.type == "function_call_expression":
-            func_node = node.child_by_field_name("function")
-            if func_node:
-                name = _extract_callee_name(func_node, source_bytes)
-                if name:
-                    calls.append(name)
-        # C# invocation_expression: func() or obj.Method()
-        elif node.type == "invocation_expression":
-            func_node = node.child_by_field_name("function")
-            if func_node:
-                name = _extract_callee_name(func_node, source_bytes)
-                if name:
-                    calls.append(name)
-            else:
-                # Fallback: first named child is the callee
-                for child in node.named_children:
-                    name = _extract_callee_name(child, source_bytes)
-                    if name:
-                        calls.append(name)
-                        break
-        # Perl method_call_expression: $self->bark()
-        elif node.type == "method_call_expression":
-            method_node = node.child_by_field_name("method")
-            if method_node is None:
-                for child in node.children:
-                    if child.type in ("method", "bareword", "identifier"):
-                        method_node = child
-                        break
-            if method_node:
-                name = source_bytes[method_node.start_byte:method_node.end_byte].decode("utf-8")
-                calls.append(name)
-        # Ruby call: obj.method(args)
-        elif node.type == "call" and "call" in spec.call_node_types:
-            method_node = node.child_by_field_name("method")
-            if method_node:
-                name = source_bytes[method_node.start_byte:method_node.end_byte].decode("utf-8")
-                calls.append(name)
-        else:
+        # Try language-specific call target extraction first
+        handled = False
+        if spec.extract_call_target is not None:
+            handled = spec.extract_call_target(node, spec, source_bytes, calls)
+
+        if not handled:
             # Generic: call / call_expression — extract function child
             func_node = node.child_by_field_name("function")
             if func_node:

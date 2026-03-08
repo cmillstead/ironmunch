@@ -56,6 +56,15 @@ class LanguageSpec:
     # Each language provides its own logic for collecting type names from inheritance fields.
     collect_type_names: Optional[Callable] = None
 
+    # Per-language name extraction: (node, source_bytes) -> Optional[str]
+    # Override default name extraction for specific node types.
+    extract_name: Optional[Callable] = None
+
+    # Per-language call target extraction: (node, spec, source_bytes, calls) -> bool
+    # Override default call collection for specific call node types.
+    # Returns True if the call was handled, False to fall through to default logic.
+    extract_call_target: Optional[Callable] = None
+
 
 def _strip_quotes(text: str) -> str:
     """Strip quotes from a string literal."""
@@ -344,6 +353,178 @@ def _make_type_collector(handlers: dict[str, Callable]) -> Callable:
     return _collect
 
 
+# ---------------------------------------------------------------------------
+# Per-language name extraction functions
+# Each takes (node, source_bytes) and returns Optional[str].
+# ---------------------------------------------------------------------------
+
+def _extract_name_c_cpp(node, source_bytes: bytes):
+    """C/C++: function_definition uses declarator -> function_declarator -> declarator.
+    type_definition uses declarator for the typedef name."""
+    if node.type == "function_definition":
+        decl = node.child_by_field_name("declarator")
+        if decl:
+            if decl.type == "function_declarator":
+                name_node = decl.child_by_field_name("declarator")
+                if name_node:
+                    return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+            elif decl.type == "pointer_declarator":
+                for child in decl.named_children:
+                    if child.type == "function_declarator":
+                        name_node = child.child_by_field_name("declarator")
+                        if name_node:
+                            return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+        return None
+
+    if node.type == "type_definition":
+        decl = node.child_by_field_name("declarator")
+        if decl:
+            return source_bytes[decl.start_byte:decl.end_byte].decode("utf-8")
+        return None
+
+    return None  # Not handled — fall through to default
+
+
+def _extract_name_dart(node, source_bytes: bytes):
+    """Dart: function_signature/method_signature — name is in nested identifier."""
+    if node.type in ("function_signature", "method_signature"):
+        sig = node
+        if node.type == "method_signature":
+            for child in node.named_children:
+                if child.type == "function_signature":
+                    sig = child
+                    break
+        name_node = sig.child_by_field_name("name")
+        if name_node:
+            return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+        for child in sig.named_children:
+            if child.type == "identifier":
+                return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+        return None
+
+    return None  # Not handled — fall through to default
+
+
+def _extract_name_perl(node, source_bytes: bytes):
+    """Perl: subroutine_declaration_statement uses bareword child.
+    package_statement uses the package child."""
+    if node.type == "subroutine_declaration_statement":
+        for child in node.named_children:
+            if child.type == "bareword":
+                return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+        return None
+
+    if node.type == "package_statement":
+        packages = [c for c in node.named_children if c.type == "package"]
+        if packages:
+            return source_bytes[packages[-1].start_byte:packages[-1].end_byte].decode("utf-8")
+        return None
+
+    return None  # Not handled — fall through to default
+
+
+# ---------------------------------------------------------------------------
+# Per-language call target extraction functions
+# Each takes (node, spec, source_bytes, calls) and returns True if handled.
+# ---------------------------------------------------------------------------
+
+def _extract_call_java(node, spec, source_bytes: bytes, calls: list) -> bool:
+    """Java method_invocation: name field is the method identifier."""
+    if node.type == "method_invocation":
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            calls.append(source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8"))
+        return True
+    return False
+
+
+def _extract_call_rust(node, spec, source_bytes: bytes, calls: list) -> bool:
+    """Rust macro_invocation: extract macro name."""
+    if node.type == "macro_invocation":
+        macro_node = node.child_by_field_name("macro")
+        if macro_node:
+            calls.append(source_bytes[macro_node.start_byte:macro_node.end_byte].decode("utf-8"))
+        return True
+    return False
+
+
+def _extract_call_php(node, spec, source_bytes: bytes, calls: list) -> bool:
+    """PHP: member_call_expression and function_call_expression."""
+    if node.type == "member_call_expression":
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            calls.append(source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8"))
+        return True
+    if node.type == "function_call_expression":
+        func_node = node.child_by_field_name("function")
+        if func_node:
+            # PHP function node may be type "name" (simple calls like bar())
+            # or a qualified_name / member_access. Try _extract_callee_name first,
+            # fall back to raw text for "name" nodes.
+            from .extractor import _extract_callee_name
+            name = _extract_callee_name(func_node, source_bytes)
+            if name is None and func_node.type == "name":
+                name = source_bytes[func_node.start_byte:func_node.end_byte].decode("utf-8")
+            if name:
+                calls.append(name)
+        return True
+    return False
+
+
+def _extract_call_csharp(node, spec, source_bytes: bytes, calls: list) -> bool:
+    """C# invocation_expression: func() or obj.Method()."""
+    if node.type == "invocation_expression":
+        from .extractor import _extract_callee_name
+        func_node = node.child_by_field_name("function")
+        if func_node:
+            name = _extract_callee_name(func_node, source_bytes)
+            if name:
+                calls.append(name)
+        else:
+            for child in node.named_children:
+                name = _extract_callee_name(child, source_bytes)
+                if name:
+                    calls.append(name)
+                    break
+        return True
+    return False
+
+
+def _extract_call_perl(node, spec, source_bytes: bytes, calls: list) -> bool:
+    """Perl method_call_expression: $self->bark()."""
+    if node.type == "method_call_expression":
+        method_node = node.child_by_field_name("method")
+        if method_node is None:
+            for child in node.children:
+                if child.type in ("method", "bareword", "identifier"):
+                    method_node = child
+                    break
+        if method_node:
+            calls.append(source_bytes[method_node.start_byte:method_node.end_byte].decode("utf-8"))
+        return True
+    return False
+
+
+def _extract_call_ruby(node, spec, source_bytes: bytes, calls: list) -> bool:
+    """Ruby call: obj.method(args)."""
+    if node.type == "call" and "call" in spec.call_node_types:
+        method_node = node.child_by_field_name("method")
+        if method_node:
+            calls.append(source_bytes[method_node.start_byte:method_node.end_byte].decode("utf-8"))
+        return True
+    return False
+
+
+def _make_call_extractor(handlers: dict[str, Callable]) -> Callable:
+    """Create a single extract_call_target function that dispatches by node type."""
+    def _extract(node, spec, source_bytes: bytes, calls: list) -> bool:
+        handler = handlers.get(node.type)
+        if handler:
+            return handler(node, spec, source_bytes, calls)
+        return False
+    return _extract
+
+
 # File extension to language mapping
 LANGUAGE_EXTENSIONS = {
     ".py": "python",
@@ -566,6 +747,9 @@ RUST_SPEC = LanguageSpec(
     collect_type_names=_make_type_collector({
         "trait_bounds": _collect_types_named_children,
     }),
+    extract_call_target=_make_call_extractor({
+        "macro_invocation": _extract_call_rust,
+    }),
 )
 
 
@@ -609,6 +793,9 @@ JAVA_SPEC = LanguageSpec(
         "superclass": _collect_types_superclass,
         "super_interfaces": _collect_types_super_interfaces,
         "interfaces": _collect_types_super_interfaces,
+    }),
+    extract_call_target=_make_call_extractor({
+        "method_invocation": _extract_call_java,
     }),
 )
 
@@ -656,6 +843,10 @@ PHP_SPEC = LanguageSpec(
         "base_clause": _collect_types_named_children,
         "class_interface_clause": _collect_types_named_children,
     }),
+    extract_call_target=_make_call_extractor({
+        "member_call_expression": _extract_call_php,
+        "function_call_expression": _extract_call_php,
+    }),
 )
 
 
@@ -687,6 +878,7 @@ C_SPEC = LanguageSpec(
     extract_import=_make_import_dispatcher({
         "preproc_include": _extract_import_c_include,
     }),
+    extract_name=_extract_name_c_cpp,
 )
 
 
@@ -726,6 +918,7 @@ CPP_SPEC = LanguageSpec(
     collect_type_names=_make_type_collector({
         "base_class_clause": _collect_types_named_children,
     }),
+    extract_name=_extract_name_c_cpp,
 )
 
 
@@ -772,6 +965,9 @@ CSHARP_SPEC = LanguageSpec(
     collect_type_names=_make_type_collector({
         "base_list": _collect_types_named_children,
     }),
+    extract_call_target=_make_call_extractor({
+        "invocation_expression": _extract_call_csharp,
+    }),
 )
 
 
@@ -805,6 +1001,9 @@ RUBY_SPEC = LanguageSpec(
     inheritance_fields=["superclass"],
     collect_type_names=_make_type_collector({
         "superclass": _collect_types_superclass,
+    }),
+    extract_call_target=_make_call_extractor({
+        "call": _extract_call_ruby,
     }),
 )
 
@@ -910,6 +1109,7 @@ DART_SPEC = LanguageSpec(
         "superclass": _collect_types_superclass,
         "interfaces": _collect_types_named_children,
     }),
+    extract_name=_extract_name_dart,
 )
 
 
@@ -935,6 +1135,10 @@ PERL_SPEC = LanguageSpec(
     import_node_types=["use_statement"],
     extract_import=_make_import_dispatcher({
         "use_statement": _extract_import_perl,
+    }),
+    extract_name=_extract_name_perl,
+    extract_call_target=_make_call_extractor({
+        "method_call_expression": _extract_call_perl,
     }),
 )
 
