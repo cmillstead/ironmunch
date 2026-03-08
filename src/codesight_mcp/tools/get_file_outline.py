@@ -8,6 +8,7 @@ from ..core.validation import ValidationError
 from ..storage import IndexStore
 from ..parser import Symbol, SymbolNode, build_symbol_tree
 from ._common import parse_repo, timed, elapsed_ms
+from .registry import ToolSpec, register
 
 
 def get_file_outline(
@@ -117,3 +118,33 @@ def _node_to_dict(node: SymbolNode) -> dict:
         result["children"] = [_node_to_dict(c) for c in node.children]
 
     return result
+
+
+_spec = register(ToolSpec(
+    name="get_file_outline",
+    description=(
+        "Get all symbols (functions, classes, methods) in a file "
+        "with signatures and summaries."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "repo": {
+                "type": "string",
+                "description": "Repository identifier (owner/repo or just repo name)",
+            },
+            "file_path": {
+                "type": "string",
+                "description": "Path to the file within the repository (e.g., 'src/main.py')",
+            },
+        },
+        "required": ["repo", "file_path"],
+    },
+    handler=lambda args, storage_path: get_file_outline(
+        repo=args["repo"],
+        file_path=args["file_path"],
+        storage_path=storage_path,
+    ),
+    untrusted=True,
+    required_args=["repo", "file_path"],
+))

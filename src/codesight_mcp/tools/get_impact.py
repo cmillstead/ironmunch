@@ -5,6 +5,7 @@ from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
 from ._common import prepare_graph_query, timed, elapsed_ms
+from .registry import ToolSpec, register
 
 
 def get_impact(
@@ -154,3 +155,39 @@ def get_impact(
             "timing_ms": ms,
         },
     }
+
+
+_spec = register(ToolSpec(
+    name="get_impact",
+    description=(
+        "Transitive impact analysis -- find everything affected if a "
+        "symbol changes. Traces callers, inheritors, and importers."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "repo": {
+                "type": "string",
+                "description": "Repository identifier (owner/repo or just repo name)",
+            },
+            "symbol_id": {
+                "type": "string",
+                "description": "Symbol ID to analyze impact for",
+            },
+            "max_depth": {
+                "type": "integer",
+                "description": "Maximum traversal depth (default 3, max 10)",
+                "default": 3,
+            },
+        },
+        "required": ["repo", "symbol_id"],
+    },
+    handler=lambda args, storage_path: get_impact(
+        repo=args["repo"],
+        symbol_id=args["symbol_id"],
+        max_depth=args.get("max_depth", 3),
+        storage_path=storage_path,
+    ),
+    untrusted=True,
+    required_args=["repo", "symbol_id"],
+))

@@ -8,6 +8,7 @@ from ..core.boundaries import make_meta, wrap_untrusted_content
 from ..core.errors import sanitize_error, RepoNotFoundError
 from ..storage import IndexStore
 from ._common import parse_repo, timed, elapsed_ms
+from .registry import ToolSpec, register
 
 
 def get_repo_outline(
@@ -69,3 +70,28 @@ def get_repo_outline(
             "timing_ms": ms,
         },
     }
+
+
+_spec = register(ToolSpec(
+    name="get_repo_outline",
+    description=(
+        "Get a high-level overview of an indexed repository: "
+        "directories, file counts, language breakdown, symbol counts. "
+        "Lighter than get_file_tree."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "repo": {
+                "type": "string",
+                "description": "Repository identifier (owner/repo or just repo name)",
+            },
+        },
+        "required": ["repo"],
+    },
+    handler=lambda args, storage_path: get_repo_outline(
+        repo=args["repo"],
+        storage_path=storage_path,
+    ),
+    required_args=["repo"],
+))

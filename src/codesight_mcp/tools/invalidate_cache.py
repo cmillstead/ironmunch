@@ -7,6 +7,7 @@ from ..core.validation import ValidationError
 from ..parser.graph import CodeGraph
 from ..storage import IndexStore
 from ._common import parse_repo
+from .registry import ToolSpec, register
 
 
 def invalidate_cache(
@@ -61,3 +62,38 @@ def invalidate_cache(
             "success": False,
             "error": f"No index found for {owner}/{name}",
         }
+
+
+_spec = register(ToolSpec(
+    name="invalidate_cache",
+    description=(
+        "Delete the index and cached files for a repository. "
+        "Forces a full re-index on next index_repo or index_folder call. "
+        "Requires confirm=True to prevent accidental deletion."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "repo": {
+                "type": "string",
+                "description": "Repository identifier (owner/repo or just repo name)",
+            },
+            "confirm": {
+                "type": "boolean",
+                "description": (
+                    "Must be true to permanently delete this index. "
+                    "Pass confirm=True to confirm you want to permanently delete this index."
+                ),
+                "default": False,
+            },
+        },
+        "required": ["repo"],
+    },
+    handler=lambda args, storage_path: invalidate_cache(
+        repo=args["repo"],
+        storage_path=storage_path,
+        confirm=args.get("confirm", False),
+    ),
+    destructive=True,
+    required_args=["repo"],
+))

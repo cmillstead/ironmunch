@@ -15,6 +15,7 @@ from ..core.errors import RepoNotFoundError
 from ..core.validation import ValidationError
 from ..storage import IndexStore
 from ._common import parse_repo, timed, elapsed_ms
+from .registry import ToolSpec, register
 
 _REDACTION_SENTINEL = "<REDACTED>"
 
@@ -128,3 +129,52 @@ def search_text(
             "truncated": len(matches) >= max_results,
         },
     }
+
+
+_spec = register(ToolSpec(
+    name="search_text",
+    description=(
+        "Full-text search across indexed file contents. Useful when "
+        "symbol search misses (e.g., string literals, comments, "
+        "config values)."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "repo": {
+                "type": "string",
+                "description": "Repository identifier (owner/repo or just repo name)",
+            },
+            "query": {
+                "type": "string",
+                "description": "Text to search for (case-insensitive substring match)",
+            },
+            "file_pattern": {
+                "type": "string",
+                "description": "Optional glob pattern to filter files (e.g., '*.py')",
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Maximum number of matching lines to return",
+                "default": 20,
+            },
+            "confirm_sensitive_search": {
+                "type": "boolean",
+                "description": "Must be true to acknowledge that full-text search can reveal indexed content.",
+                "default": False,
+            },
+        },
+        "required": ["repo", "query"],
+    },
+    handler=lambda args, storage_path: search_text(
+        repo=args["repo"],
+        query=args["query"],
+        file_pattern=args.get("file_pattern"),
+        max_results=args.get("max_results", 20),
+        confirm_sensitive_search=args.get("confirm_sensitive_search", False),
+        storage_path=storage_path,
+    ),
+    text_search=True,
+    untrusted=True,
+    required_args=["repo", "query"],
+))

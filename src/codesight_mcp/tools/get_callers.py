@@ -5,6 +5,7 @@ from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
 from ._common import prepare_graph_query, timed, elapsed_ms
+from .registry import ToolSpec, register
 
 
 def get_callers(
@@ -77,3 +78,39 @@ def get_callers(
             "timing_ms": ms,
         },
     }
+
+
+_spec = register(ToolSpec(
+    name="get_callers",
+    description=(
+        "Get symbols that call a specified symbol. Supports transitive "
+        "caller traversal up to a configurable depth."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "repo": {
+                "type": "string",
+                "description": "Repository identifier (owner/repo or just repo name)",
+            },
+            "symbol_id": {
+                "type": "string",
+                "description": "Symbol ID to find callers of",
+            },
+            "max_depth": {
+                "type": "integer",
+                "description": "Maximum traversal depth (1 = direct callers only, max 5)",
+                "default": 1,
+            },
+        },
+        "required": ["repo", "symbol_id"],
+    },
+    handler=lambda args, storage_path: get_callers(
+        repo=args["repo"],
+        symbol_id=args["symbol_id"],
+        max_depth=args.get("max_depth", 1),
+        storage_path=storage_path,
+    ),
+    untrusted=True,
+    required_args=["repo", "symbol_id"],
+))

@@ -5,6 +5,7 @@ from typing import Optional
 from ..core.boundaries import make_meta, wrap_untrusted_content
 from ..core.validation import ValidationError
 from ._common import prepare_graph_query, timed, elapsed_ms
+from .registry import ToolSpec, register
 
 
 _VALID_DIRECTIONS = {"imports", "importers"}
@@ -104,3 +105,40 @@ def get_imports(
             "timing_ms": ms,
         },
     }
+
+
+_spec = register(ToolSpec(
+    name="get_imports",
+    description=(
+        "Get import relationships for a file. Shows what a file imports "
+        "or what files import it."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "repo": {
+                "type": "string",
+                "description": "Repository identifier (owner/repo or just repo name)",
+            },
+            "file": {
+                "type": "string",
+                "description": "Path to file within the repository",
+            },
+            "direction": {
+                "type": "string",
+                "description": "Direction of import lookup",
+                "enum": ["imports", "importers"],
+                "default": "imports",
+            },
+        },
+        "required": ["repo", "file"],
+    },
+    handler=lambda args, storage_path: get_imports(
+        repo=args["repo"],
+        file=args["file"],
+        direction=args.get("direction", "imports"),
+        storage_path=storage_path,
+    ),
+    untrusted=True,
+    required_args=["repo", "file"],
+))

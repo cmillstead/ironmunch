@@ -9,6 +9,7 @@ from ..core.errors import sanitize_error, RepoNotFoundError
 from ..storage import IndexStore
 from ..parser import LANGUAGE_EXTENSIONS
 from ._common import parse_repo, timed, elapsed_ms
+from .registry import ToolSpec, register
 
 
 def get_file_tree(
@@ -127,3 +128,30 @@ def _dict_to_list(node_dict: dict) -> list[dict]:
             })
 
     return result
+
+
+_spec = register(ToolSpec(
+    name="get_file_tree",
+    description="Get the file tree of an indexed repository, optionally filtered by path prefix.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "repo": {
+                "type": "string",
+                "description": "Repository identifier (owner/repo or just repo name)",
+            },
+            "path_prefix": {
+                "type": "string",
+                "description": "Optional path prefix to filter (e.g., 'src/utils')",
+                "default": "",
+            },
+        },
+        "required": ["repo"],
+    },
+    handler=lambda args, storage_path: get_file_tree(
+        repo=args["repo"],
+        path_prefix=args.get("path_prefix", ""),
+        storage_path=storage_path,
+    ),
+    required_args=["repo"],
+))

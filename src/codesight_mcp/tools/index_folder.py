@@ -20,6 +20,7 @@ from ..core.validation import validate_path, ValidationError, is_within
 from ..parser.graph import CodeGraph
 from ..storage import IndexStore
 from ..summarizer import summarize_symbols
+from .registry import ToolSpec, register
 
 
 def index_folder(
@@ -200,3 +201,76 @@ def index_folder(
 
     except Exception as e:
         return {"success": False, "error": sanitize_error(e)}
+
+
+def _handle_index_folder(args: dict, storage_path, *, _allowed_roots_fn=None):
+    """Handler that resolves ALLOWED_ROOTS at call time.
+
+    server.py injects ``_allowed_roots_fn`` via :func:`set_allowed_roots_fn`
+    so the tool file never imports from server.py (avoids circular deps).
+    """
+    if _handle_index_folder._allowed_roots_fn is not None:
+        allowed = _handle_index_folder._allowed_roots_fn()
+    else:
+        allowed = None
+    return index_folder(
+        path=args["path"],
+        use_ai_summaries=args.get("use_ai_summaries", True),
+        storage_path=storage_path,
+        extra_ignore_patterns=args.get("extra_ignore_patterns"),
+        follow_symlinks=args.get("follow_symlinks", False),
+        allowed_roots=allowed,
+    )
+
+
+# server.py sets this at import time so we avoid circular imports
+_handle_index_folder._allowed_roots_fn = None
+
+
+def set_allowed_roots_fn(fn):
+    """Set the function that returns ALLOWED_ROOTS. Called by server.py."""
+    _handle_index_folder._allowed_roots_fn = fn
+
+
+_spec = register(ToolSpec(
+    name="index_folder",
+    description=(
+        "Index a local folder containing source code. Walks directory, "
+        "parses ASTs, extracts symbols, and saves to local storage. "
+        "Works with any folder containing supported language files. "
+        "Full file content (including function bodies) is stored locally at ~/.code-index/; "
+        "secrets embedded in function bodies are redacted from API output but stored at rest."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path to local folder (absolute or relative, supports ~ for home directory)",
+            },
+            "use_ai_summaries": {
+                "type": "boolean",
+                "description": (
+                    "Use AI to generate symbol summaries (requires ANTHROPIC_API_KEY). "
+                    "When true, code signatures are sent to the Anthropic API for summarization. "
+                    "When false, uses docstrings or signature fallback."
+                ),
+                "default": True,
+            },
+            "extra_ignore_patterns": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Additional gitignore-style patterns to exclude from indexing",
+            },
+            "follow_symlinks": {
+                "type": "boolean",
+                "description": "Whether to follow symlinks. Default false for security.",
+                "default": False,
+            },
+        },
+        "required": ["path"],
+    },
+    handler=_handle_index_folder,
+    index_gate=True,
+    required_args=["path"],
+))

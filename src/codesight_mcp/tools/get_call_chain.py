@@ -4,6 +4,7 @@ from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
 from ._common import prepare_graph_query, timed, elapsed_ms
+from .registry import ToolSpec, register
 
 
 def get_call_chain(
@@ -82,3 +83,44 @@ def get_call_chain(
             "timing_ms": ms,
         },
     }
+
+
+_spec = register(ToolSpec(
+    name="get_call_chain",
+    description=(
+        "Find call paths between two symbols in the call graph. "
+        "Returns up to 5 shortest paths."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "repo": {
+                "type": "string",
+                "description": "Repository identifier (owner/repo or just repo name)",
+            },
+            "from_symbol": {
+                "type": "string",
+                "description": "Starting symbol ID",
+            },
+            "to_symbol": {
+                "type": "string",
+                "description": "Target symbol ID",
+            },
+            "max_depth": {
+                "type": "integer",
+                "description": "Maximum path length to search (default 10, max 10)",
+                "default": 10,
+            },
+        },
+        "required": ["repo", "from_symbol", "to_symbol"],
+    },
+    handler=lambda args, storage_path: get_call_chain(
+        repo=args["repo"],
+        from_symbol=args["from_symbol"],
+        to_symbol=args["to_symbol"],
+        max_depth=args.get("max_depth", 10),
+        storage_path=storage_path,
+    ),
+    untrusted=True,
+    required_args=["repo", "from_symbol", "to_symbol"],
+))

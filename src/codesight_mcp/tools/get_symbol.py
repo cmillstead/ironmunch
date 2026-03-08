@@ -15,6 +15,7 @@ from ..core.errors import sanitize_error, RepoNotFoundError
 from ..core.validation import ValidationError
 from ..storage import IndexStore
 from ._common import parse_repo, timed, elapsed_ms
+from .registry import ToolSpec, register
 
 
 def get_symbol(
@@ -192,3 +193,76 @@ def get_symbols(
             "symbol_count": len(symbols),
         },
     }
+
+
+_spec_get_symbol = register(ToolSpec(
+    name="get_symbol",
+    description=(
+        "Get the full source code of a specific symbol. Use after "
+        "identifying relevant symbols via get_file_outline or "
+        "search_symbols."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "repo": {
+                "type": "string",
+                "description": "Repository identifier (owner/repo or just repo name)",
+            },
+            "symbol_id": {
+                "type": "string",
+                "description": "Symbol ID from get_file_outline or search_symbols",
+            },
+            "verify": {
+                "type": "boolean",
+                "description": "Verify content hash matches stored hash (detects source drift)",
+                "default": False,
+            },
+            "context_lines": {
+                "type": "integer",
+                "description": "Number of lines before/after symbol to include for context",
+                "default": 0,
+            },
+        },
+        "required": ["repo", "symbol_id"],
+    },
+    handler=lambda args, storage_path: get_symbol(
+        repo=args["repo"],
+        symbol_id=args["symbol_id"],
+        verify=args.get("verify", False),
+        context_lines=args.get("context_lines", 0),
+        storage_path=storage_path,
+    ),
+    untrusted=True,
+    required_args=["repo", "symbol_id"],
+))
+
+_spec_get_symbols = register(ToolSpec(
+    name="get_symbols",
+    description=(
+        "Get full source code of multiple symbols in one call. "
+        "Efficient for loading related symbols."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "repo": {
+                "type": "string",
+                "description": "Repository identifier (owner/repo or just repo name)",
+            },
+            "symbol_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of symbol IDs to retrieve",
+            },
+        },
+        "required": ["repo", "symbol_ids"],
+    },
+    handler=lambda args, storage_path: get_symbols(
+        repo=args["repo"],
+        symbol_ids=args["symbol_ids"],
+        storage_path=storage_path,
+    ),
+    untrusted=True,
+    required_args=["repo", "symbol_ids"],
+))

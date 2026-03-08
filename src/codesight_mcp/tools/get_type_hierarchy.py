@@ -4,6 +4,7 @@ from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
 from ._common import prepare_graph_query, timed, elapsed_ms
+from .registry import ToolSpec, register
 
 
 def get_type_hierarchy(
@@ -147,3 +148,33 @@ def get_type_hierarchy(
             "timing_ms": ms,
         },
     }
+
+
+_spec = register(ToolSpec(
+    name="get_type_hierarchy",
+    description=(
+        "Get the inheritance hierarchy for a class or type. "
+        "Shows parents (ancestors) above and children (descendants) below."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "repo": {
+                "type": "string",
+                "description": "Repository identifier (owner/repo or just repo name)",
+            },
+            "symbol_id": {
+                "type": "string",
+                "description": "Symbol ID of the class or type to inspect",
+            },
+        },
+        "required": ["repo", "symbol_id"],
+    },
+    handler=lambda args, storage_path: get_type_hierarchy(
+        repo=args["repo"],
+        symbol_id=args["symbol_id"],
+        storage_path=storage_path,
+    ),
+    untrusted=True,
+    required_args=["repo", "symbol_id"],
+))

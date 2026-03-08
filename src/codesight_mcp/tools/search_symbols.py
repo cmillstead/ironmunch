@@ -9,6 +9,7 @@ from ..parser.extractor import SUPPORTED_LANGUAGES
 from ..security import sanitize_signature_for_api
 from ..storage import IndexStore
 from ._common import parse_repo, timed, elapsed_ms, calculate_symbol_score
+from .registry import ToolSpec, register
 
 
 def search_symbols(
@@ -108,3 +109,57 @@ def search_symbols(
             "truncated": len(results) > max_results,
         },
     }
+
+
+_spec = register(ToolSpec(
+    name="search_symbols",
+    description=(
+        "Search for symbols matching a query across the entire "
+        "indexed repository. Returns matches with signatures and "
+        "summaries."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "repo": {
+                "type": "string",
+                "description": "Repository identifier (owner/repo or just repo name)",
+            },
+            "query": {
+                "type": "string",
+                "description": "Search query (matches symbol names, signatures, summaries, docstrings)",
+            },
+            "kind": {
+                "type": "string",
+                "description": "Optional filter by symbol kind",
+                "enum": ["function", "class", "method", "constant", "type"],
+            },
+            "file_pattern": {
+                "type": "string",
+                "description": "Optional glob pattern to filter files (e.g., 'src/**/*.py')",
+            },
+            "language": {
+                "type": "string",
+                "description": "Optional filter by language",
+                "enum": sorted(SUPPORTED_LANGUAGES),
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Maximum number of results to return",
+                "default": 10,
+            },
+        },
+        "required": ["repo", "query"],
+    },
+    handler=lambda args, storage_path: search_symbols(
+        repo=args["repo"],
+        query=args["query"],
+        kind=args.get("kind"),
+        file_pattern=args.get("file_pattern"),
+        language=args.get("language"),
+        max_results=args.get("max_results", 10),
+        storage_path=storage_path,
+    ),
+    untrusted=True,
+    required_args=["repo", "query"],
+))

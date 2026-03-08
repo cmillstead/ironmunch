@@ -25,6 +25,7 @@ from ..core.limits import MAX_FILE_COUNT, GITHUB_API_TIMEOUT
 from ..parser.graph import CodeGraph
 from ..storage import IndexStore
 from ..summarizer import summarize_symbols
+from .registry import ToolSpec, register
 
 
 async def index_repo(
@@ -168,3 +169,40 @@ async def index_repo(
 
     except Exception as e:
         return {"success": False, "error": sanitize_error(e)}
+
+
+_spec = register(ToolSpec(
+    name="index_repo",
+    description=(
+        "Index a GitHub repository's source code. Fetches files, "
+        "parses ASTs, extracts symbols, and saves to local storage. "
+        "Full file content (including function bodies) is stored locally at ~/.code-index/; "
+        "secrets embedded in function bodies are redacted from API output but stored at rest."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": "GitHub repository URL or owner/repo string",
+            },
+            "use_ai_summaries": {
+                "type": "boolean",
+                "description": (
+                    "Use AI to generate symbol summaries (requires ANTHROPIC_API_KEY). "
+                    "When true, code signatures are sent to the Anthropic API for summarization. "
+                    "When false, uses docstrings or signature fallback."
+                ),
+                "default": True,
+            },
+        },
+        "required": ["url"],
+    },
+    handler=lambda args, storage_path: index_repo(
+        url=args["url"],
+        use_ai_summaries=args.get("use_ai_summaries", True),
+        storage_path=storage_path,
+    ),
+    index_gate=True,
+    required_args=["url"],
+))
