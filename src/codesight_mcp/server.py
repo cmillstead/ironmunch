@@ -32,6 +32,7 @@ from .tools import (  # noqa: F401
     invalidate_cache, search_text, get_repo_outline,
     get_callers, get_callees, get_call_chain,
     get_type_hierarchy, get_imports, get_impact,
+    get_dead_code, status,
 )
 
 # ADV-LOW-7: Read CODE_INDEX_PATH once at startup so subsequent env mutations

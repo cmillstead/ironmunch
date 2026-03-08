@@ -12,7 +12,7 @@ from codesight_mcp.parser import parse_file, Symbol, make_symbol_id, compute_con
 # Helpers
 # ---------------------------------------------------------------------------
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 
 def _fixture(language: str, filename: str) -> tuple[str, str]:
