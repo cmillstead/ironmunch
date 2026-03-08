@@ -5,11 +5,11 @@
   <b>Security-hardened, token-efficient code intelligence for AI assistants.</b>
   <br><br>
   <a href="LICENSE">
-    <img src="https://img.shields.io/github/license/cevinclein/codesight-mcp?style=flat-square" alt="License">
+    <img src="https://img.shields.io/github/license/cmillstead/codesight-mcp?style=flat-square" alt="License">
   </a>
   <img src="https://img.shields.io/badge/MCP-Compatible-green?style=flat-square" alt="MCP Compatible">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square&logo=python" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-737%2B-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-748-brightgreen?style=flat-square" alt="Tests">
 </p>
 
 An **MCP server** that indexes local and GitHub codebases via tree-sitter AST parsing, then exposes 17 tools for symbol retrieval, code graph traversal, and impact analysis — all with byte-offset precision to cut token costs by ~99% compared to sending full files.
@@ -74,7 +74,7 @@ Each language parser extracts functions, classes, methods, parameters, call rela
 
 ```bash
 # From source (recommended — not published to PyPI)
-git clone https://github.com/cevinclein/codesight-mcp.git
+git clone https://github.com/cmillstead/codesight-mcp.git
 cd codesight-mcp
 pip install -e .
 ```

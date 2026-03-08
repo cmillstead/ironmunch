@@ -17,6 +17,7 @@ from ..security import sanitize_repo_identifier
 from ..core.errors import sanitize_error
 from ..core.limits import MAX_FILE_COUNT
 from ..core.validation import validate_path, ValidationError, is_within
+from ..parser.graph import CodeGraph
 from ..storage import IndexStore
 from ..summarizer import summarize_symbols
 
@@ -175,6 +176,9 @@ def index_folder(
             raw_files=raw_files,
             languages=languages,
         )
+
+        # Clear the in-memory graph cache so stale graphs aren't reused
+        CodeGraph.clear_cache()
 
         result: dict = {
             "success": True,

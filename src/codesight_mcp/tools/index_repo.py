@@ -22,6 +22,7 @@ from ..parser import parse_file, LANGUAGE_EXTENSIONS
 from ..security import sanitize_repo_identifier
 from ..core.errors import sanitize_error
 from ..core.limits import MAX_FILE_COUNT, GITHUB_API_TIMEOUT
+from ..parser.graph import CodeGraph
 from ..storage import IndexStore
 from ..summarizer import summarize_symbols
 
@@ -143,6 +144,9 @@ async def index_repo(
             raw_files=raw_files,
             languages=languages,
         )
+
+        # Clear the in-memory graph cache so stale graphs aren't reused
+        CodeGraph.clear_cache()
 
         result: dict = {
             "success": True,

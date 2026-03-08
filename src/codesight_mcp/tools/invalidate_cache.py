@@ -4,6 +4,7 @@ from typing import Optional
 
 from ..core.errors import sanitize_error, RepoNotFoundError
 from ..core.validation import ValidationError
+from ..parser.graph import CodeGraph
 from ..storage import IndexStore
 from ._common import parse_repo
 
@@ -48,6 +49,8 @@ def invalidate_cache(
         return {"error": sanitize_error(exc)}
 
     if deleted:
+        # Clear the in-memory graph cache so stale graphs aren't reused
+        CodeGraph.clear_cache()
         return {
             "success": True,
             "repo": f"{owner}/{name}",

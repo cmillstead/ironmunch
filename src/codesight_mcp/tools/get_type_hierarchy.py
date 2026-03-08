@@ -3,10 +3,7 @@
 from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
-from ..core.errors import sanitize_error, RepoNotFoundError
-from ..parser.graph import CodeGraph
-from ..storage import IndexStore
-from ._common import parse_repo, timed, elapsed_ms
+from ._common import prepare_graph_query, timed, elapsed_ms
 
 
 def get_type_hierarchy(
@@ -26,27 +23,12 @@ def get_type_hierarchy(
     """
     start = timed()
 
-    # --- security gate: parse + validate repo identifier ---
-    try:
-        owner, name = parse_repo(repo, storage_path)
-    except RepoNotFoundError as exc:
-        return {"error": str(exc)}
-
-    store = IndexStore(base_path=storage_path)
-    index = store.load_index(owner, name)
-
-    if not index:
-        return {"error": f"Repository not indexed: {owner}/{name}"}
-
-    # Verify target symbol exists
-    target = index.get_symbol(symbol_id)
-    if not target:
-        return {"error": f"Symbol not found: {symbol_id}"}
+    result = prepare_graph_query(repo, symbol_id, storage_path)
+    if isinstance(result, dict):
+        return result
+    owner, name, index, graph, target = result
 
     target_name = target.get("name", "")
-
-    # Build graph from index
-    graph = CodeGraph.build(index.symbols)
 
     # Use CodeGraph.get_type_hierarchy for O(1) lookups
     hierarchy = graph.get_type_hierarchy(symbol_id)

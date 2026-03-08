@@ -3,10 +3,7 @@
 from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
-from ..core.errors import sanitize_error, RepoNotFoundError
-from ..parser.graph import CodeGraph
-from ..storage import IndexStore
-from ._common import parse_repo, timed, elapsed_ms
+from ._common import prepare_graph_query, timed, elapsed_ms
 
 
 def get_call_chain(
@@ -30,32 +27,19 @@ def get_call_chain(
     """
     start = timed()
 
-    # --- security gate: parse + validate repo identifier ---
-    try:
-        owner, name = parse_repo(repo, storage_path)
-    except RepoNotFoundError as exc:
-        return {"error": str(exc)}
+    # Validate from_symbol via the shared helper
+    result = prepare_graph_query(repo, from_symbol, storage_path)
+    if isinstance(result, dict):
+        return result
+    owner, name, index, graph, from_sym = result
 
-    store = IndexStore(base_path=storage_path)
-    index = store.load_index(owner, name)
-
-    if not index:
-        return {"error": f"Repository not indexed: {owner}/{name}"}
-
-    # Verify both symbols exist
-    from_sym = index.get_symbol(from_symbol)
-    if not from_sym:
-        return {"error": f"Symbol not found: {from_symbol}"}
-
+    # Verify to_symbol exists
     to_sym = index.get_symbol(to_symbol)
     if not to_sym:
         return {"error": f"Symbol not found: {to_symbol}"}
 
     # Clamp max_depth
     max_depth = min(max(max_depth, 1), 10)
-
-    # Build graph from index
-    graph = CodeGraph.build(index.symbols)
 
     # Use CodeGraph.get_call_chain for path finding
     paths = graph.get_call_chain(from_symbol, to_symbol, max_depth)
