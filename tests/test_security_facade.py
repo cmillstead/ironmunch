@@ -198,6 +198,61 @@ class TestSanitizeSignatureForApi:
         assert "<REDACTED>" in result
 
 
+    def test_azure_connection_string_redacted(self):
+        """SEC-MED-2: Azure connection strings must be redacted."""
+        sig = 'CONN = "DefaultEndpointsProtocol=https;AccountName=myacct;AccountKey=abc123key=="'
+        result = sanitize_signature_for_api(sig)
+        assert "AccountKey" not in result
+        assert "<REDACTED>" in result
+
+    def test_stripe_restricted_live_key_redacted(self):
+        """SEC-MED-2: Stripe restricted live keys must be redacted."""
+        token = "rk_live_" + "a" * 24
+        sig = f'KEY = "{token}"'
+        result = sanitize_signature_for_api(sig)
+        assert token not in result
+        assert "<REDACTED>" in result
+
+    def test_stripe_restricted_test_key_redacted(self):
+        """SEC-MED-2: Stripe restricted test keys must be redacted."""
+        token = "rk_test_" + "b" * 24
+        sig = f'KEY = "{token}"'
+        result = sanitize_signature_for_api(sig)
+        assert token not in result
+        assert "<REDACTED>" in result
+
+    def test_sendgrid_api_key_redacted(self):
+        """SEC-MED-2: SendGrid API keys must be redacted."""
+        token = "SG." + "a" * 22 + "." + "b" * 22
+        sig = f'KEY = "{token}"'
+        result = sanitize_signature_for_api(sig)
+        assert token not in result
+        assert "<REDACTED>" in result
+
+    def test_twilio_account_sid_redacted(self):
+        """SEC-MED-2: Twilio Account SIDs must be redacted."""
+        token = "AC" + "a" * 32
+        sig = f'SID = "{token}"'
+        result = sanitize_signature_for_api(sig)
+        assert token not in result
+        assert "<REDACTED>" in result
+
+    def test_twilio_auth_token_param_redacted(self):
+        """SEC-MED-2: twilio= parameter defaults must be redacted."""
+        sig = 'def init(twilio="secret_token_value")'
+        result = sanitize_signature_for_api(sig)
+        assert "secret_token_value" not in result
+        assert "<REDACTED>" in result
+
+    def test_mailgun_key_redacted(self):
+        """SEC-MED-2: Mailgun keys must be redacted."""
+        token = "key-" + "a" * 32
+        sig = f'KEY = "{token}"'
+        result = sanitize_signature_for_api(sig)
+        assert token not in result
+        assert "<REDACTED>" in result
+
+
 class TestSecretDetectionCaseInsensitive:
     """SEC-MED-3: SECRET_PATTERNS must be case-insensitive."""
 
@@ -375,6 +430,127 @@ class TestContextLinesRedaction:
             ca = result["context_after"]
             assert "sk_live_" not in ca, f"Secret leaked in context_after: {ca!r}"
             assert "REDACTED" in ca, f"Expected REDACTED in context_after: {ca!r}"
+
+
+class TestSourceContentRedaction:
+    """SEC-MED-1: source content returned by get_symbol/get_symbols must redact secrets."""
+
+    def test_get_symbol_redacts_secret_in_source(self, tmp_path):
+        """A secret embedded in a function body must be redacted in get_symbol output."""
+        import tempfile
+        from codesight_mcp.storage.index_store import IndexStore
+        from codesight_mcp.tools.get_symbol import get_symbol
+        from codesight_mcp.parser import parse_file
+
+        src = (
+            "def connect():\n"
+            '    api_key = "sk-abc123def456ghi789jkl012mno"\n'
+            "    return api_key\n"
+        )
+
+        with tempfile.TemporaryDirectory() as storage:
+            store = IndexStore(storage)
+            symbols = parse_file(src, "client.py", "python")
+            func_symbols = [s for s in symbols if s.name == "connect"]
+            assert func_symbols, "connect not parsed"
+
+            store.save_index(
+                owner="local", name="sectest",
+                source_files=["client.py"],
+                symbols=symbols,
+                raw_files={"client.py": src},
+                languages={"python": 1},
+            )
+
+            result = get_symbol(
+                repo="local/sectest",
+                symbol_id=func_symbols[0].id,
+                storage_path=storage,
+            )
+
+            assert "source" in result, f"Expected source in result: {result}"
+            source_val = result["source"]
+            assert "sk-abc123def456ghi789jkl012mno" not in source_val, (
+                f"Secret leaked in source: {source_val!r}"
+            )
+            assert "REDACTED" in source_val, (
+                f"Expected REDACTED in source: {source_val!r}"
+            )
+
+    def test_get_symbols_redacts_secret_in_source(self, tmp_path):
+        """A secret embedded in a function body must be redacted in get_symbols output."""
+        import tempfile
+        from codesight_mcp.storage.index_store import IndexStore
+        from codesight_mcp.tools.get_symbol import get_symbols
+        from codesight_mcp.parser import parse_file
+
+        src = (
+            "def setup():\n"
+            '    token = "ghp_' + "a" * 36 + '"\n'
+            "    return token\n"
+        )
+
+        with tempfile.TemporaryDirectory() as storage:
+            store = IndexStore(storage)
+            symbols = parse_file(src, "auth.py", "python")
+            func_symbols = [s for s in symbols if s.name == "setup"]
+            assert func_symbols, "setup not parsed"
+
+            store.save_index(
+                owner="local", name="sectest2",
+                source_files=["auth.py"],
+                symbols=symbols,
+                raw_files={"auth.py": src},
+                languages={"python": 1},
+            )
+
+            result = get_symbols(
+                repo="local/sectest2",
+                symbol_ids=[func_symbols[0].id],
+                storage_path=storage,
+            )
+
+            assert "symbols" in result
+            assert len(result["symbols"]) == 1
+            source_val = result["symbols"][0]["source"]
+            assert "ghp_" not in source_val, (
+                f"Secret leaked in batch source: {source_val!r}"
+            )
+            assert "REDACTED" in source_val, (
+                f"Expected REDACTED in batch source: {source_val!r}"
+            )
+
+    def test_stored_content_preserves_raw_secret(self, tmp_path):
+        """Raw content on disk must NOT be redacted (preserve byte offsets/hashes)."""
+        import tempfile
+        from codesight_mcp.storage.index_store import IndexStore
+        from codesight_mcp.parser import parse_file
+
+        secret = "sk-abc123def456ghi789jkl012mno"
+        src = (
+            "def connect():\n"
+            f'    api_key = "{secret}"\n'
+            "    return api_key\n"
+        )
+
+        with tempfile.TemporaryDirectory() as storage:
+            store = IndexStore(storage)
+            symbols = parse_file(src, "client.py", "python")
+            store.save_index(
+                owner="local", name="rawtest",
+                source_files=["client.py"],
+                symbols=symbols,
+                raw_files={"client.py": src},
+                languages={"python": 1},
+            )
+
+            # Read raw content file directly — it must still contain the secret
+            from pathlib import Path
+            raw_file = Path(storage) / "local__rawtest" / "client.py"
+            raw_content = raw_file.read_text(encoding="utf-8")
+            assert secret in raw_content, (
+                "Raw stored content must preserve the original secret for byte offset integrity"
+            )
 
 
 class TestQueryEchoSanitization:

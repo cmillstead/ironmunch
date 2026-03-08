@@ -411,9 +411,6 @@ class IndexStore:
 
         file_path = Path(validated_path)
 
-        if not file_path.exists():
-            return None
-
         # ADV-MED-11: cast to int and validate before use in seek/read.
         try:
             byte_offset = int(symbol["byte_offset"])
@@ -432,8 +429,8 @@ class IndexStore:
         try:
             fd = os.open(str(file_path), os.O_RDONLY | os.O_NOFOLLOW)
         except OSError as exc:
-            if exc.errno == errno.ELOOP:
-                return None  # Symlink — reject
+            if exc.errno in (errno.ELOOP, errno.ENOENT):
+                return None  # Symlink or missing file — reject
             raise
         with os.fdopen(fd, "rb") as f:
             # ADV-MED-11: verify byte_offset is within file bounds

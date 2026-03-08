@@ -161,6 +161,28 @@ class TestSearchTextFileSpotlighting:
             assert "error" in result
             assert "confirm_sensitive_search" in result["error"]
 
+    def test_secret_in_result_line_is_redacted(self):
+        """SEC-MED-3: secrets in matching lines must be redacted before returning."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_store_with_file(
+                tmp, "owner", "repo_sec3",
+                file_path="config.py",
+                file_content='TOKEN = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"\nprint(TOKEN)\n',
+            )
+            result = search_text(
+                repo="owner/repo_sec3",
+                query="TOKEN",
+                confirm_sensitive_search=True,
+                storage_path=tmp,
+            )
+
+            assert "error" not in result
+            assert result["result_count"] >= 1
+            for match in result["results"]:
+                assert "ghp_" not in match["text"], (
+                    f"Secret token not redacted in search result: {match['text']!r}"
+                )
+
     def test_redaction_marker_query_rejected(self):
         """search_text must reject queries for the internal redaction sentinel."""
         with tempfile.TemporaryDirectory() as tmp:

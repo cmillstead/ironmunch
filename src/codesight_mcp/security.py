@@ -82,20 +82,28 @@ def safe_read_file(abs_path: str, root: str) -> str:
     """Read a file after validation. Uses errors='replace' for encoding safety."""
     validate_path(abs_path, root)
 
-    size = os.path.getsize(abs_path)
-    if size > MAX_FILE_SIZE:
-        raise ValidationError(
-            f"File exceeds maximum size ({size} > {MAX_FILE_SIZE})"
-        )
-
     try:
         fd = os.open(abs_path, os.O_RDONLY | os.O_NOFOLLOW)
     except OSError as exc:
         if exc.errno == errno.ELOOP:
             raise ValidationError("Path is a symlink (O_NOFOLLOW)") from exc
         raise
-    with os.fdopen(fd, encoding="utf-8", errors="replace") as fh:
-        return fh.read()
+
+    try:
+        size = os.fstat(fd).st_size
+        if size > MAX_FILE_SIZE:
+            raise ValidationError(
+                f"File exceeds maximum size ({size} > {MAX_FILE_SIZE})"
+            )
+        with os.fdopen(fd, encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except Exception:
+        # Close fd only if fdopen was not called (fdopen takes ownership of fd)
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        raise
 
 
 def is_secret_file(file_path: str) -> bool:
@@ -146,6 +154,13 @@ _INLINE_SECRET_RE = re.compile(
     r"|npm_[a-zA-Z0-9]{36,}"
     r"|pypi-[a-zA-Z0-9_\-]{32,}"
     r"|AIza[a-zA-Z0-9\-_]{35}"
+    r"|rk_live_[a-zA-Z0-9]{24,}"
+    r"|rk_test_[a-zA-Z0-9]{24,}"
+    r"|SG\.[a-zA-Z0-9_\-]{22,}\.[a-zA-Z0-9_\-]{22,}"
+    r"|AC[a-f0-9]{32}"
+    r"|key-[a-zA-Z0-9]{32}"
+    # Azure connection strings
+    r"|DefaultEndpointsProtocol=https?;AccountName=[^;]+;AccountKey=[^;\s]+"
     # Connection strings with embedded credentials
     r"|(?:postgres|mysql|mongodb(?:\+srv)?|redis|amqp)://[^:\s]+:[^@\s]+@"
     # Bearer tokens
@@ -153,7 +168,7 @@ _INLINE_SECRET_RE = re.compile(
     # PEM headers
     r"|-----BEGIN [A-Z ]+ KEY-----"
     # Parameter defaults with secrets
-    r"|(?:password|passwd|secret|api_key|apikey|token|auth|aws_secret_access_key|aws_session_token)\s*=\s*[\"'][^\"']{4,}[\"']"
+    r"|(?:password|passwd|secret|api_key|apikey|token|auth|aws_secret_access_key|aws_session_token|twilio)\s*=\s*[\"'][^\"']{4,}[\"']"
     r")",
     re.IGNORECASE,
 )
