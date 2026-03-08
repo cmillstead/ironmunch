@@ -14,7 +14,7 @@
 
 An **MCP server** that indexes local and GitHub codebases via tree-sitter AST parsing, then exposes 17 tools for symbol retrieval, code graph traversal, and impact analysis — all with byte-offset precision to cut token costs by ~99% compared to sending full files.
 
-Based on [jcodemunch-mcp](https://github.com/jgravelle/jcodemunch-mcp) by J. Gravelle, hardened with security patterns from [basalt-mcp](https://github.com/cmillstead/basalt-mcp).
+Based on [jcodemunch-mcp](https://github.com/jgravelle/jcodemunch-mcp) by J. Gravelle, with code graph techniques from [CodeGraphContext](https://github.com/CodeGraphContext/CodeGraphContext) and security patterns from [basalt-mcp](https://github.com/cmillstead/basalt-mcp).
 
 ---
 
@@ -264,7 +264,7 @@ codesight-mcp builds an in-memory code graph from relationships extracted during
 3. At query time, `CodeGraph.build(symbols)` constructs the graph from symbol dicts
 4. Graph tools (callers, callees, call chains, impact) traverse this structure using BFS with cycle detection
 
-**Compared to CodeGraphContext:** codesight-mcp uses no external database (FalkorDB/Neo4j). The trade-off is simplicity and zero-config vs. the ability to handle massive graphs. For most projects (thousands of files), the in-memory approach is fast and sufficient.
+**Compared to [CodeGraphContext](https://github.com/CodeGraphContext/CodeGraphContext):** codesight-mcp uses no external database (FalkorDB/Neo4j). The trade-off is simplicity and zero-config vs. the ability to handle massive graphs. For most projects (thousands of files), the in-memory approach is fast and sufficient.
 
 ---
 
@@ -337,7 +337,7 @@ See [SECURITY.md](SECURITY.md) for the full threat model, defense matrix, and va
 
 ## Attribution
 
-Based on [jcodemunch-mcp](https://github.com/jgravelle/jcodemunch-mcp) by J. Gravelle. Security hardening inspired by [basalt-mcp](https://github.com/cmillstead/basalt-mcp).
+Based on [jcodemunch-mcp](https://github.com/jgravelle/jcodemunch-mcp) by J. Gravelle. Code graph techniques adapted from [CodeGraphContext](https://github.com/CodeGraphContext/CodeGraphContext). Security hardening inspired by [basalt-mcp](https://github.com/cmillstead/basalt-mcp).
 
 ## License
 
