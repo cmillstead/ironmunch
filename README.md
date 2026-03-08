@@ -9,10 +9,10 @@
   </a>
   <img src="https://img.shields.io/badge/MCP-Compatible-green?style=flat-square" alt="MCP Compatible">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square&logo=python" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-748-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-817-brightgreen?style=flat-square" alt="Tests">
 </p>
 
-An **MCP server** that indexes local and GitHub codebases via tree-sitter AST parsing, then exposes 17 tools for symbol retrieval, code graph traversal, and impact analysis — all with byte-offset precision to cut token costs by ~99% compared to sending full files.
+An **MCP server** that indexes local and GitHub codebases via tree-sitter AST parsing, then exposes 17 tools for symbol retrieval, code graph traversal, and impact analysis — all with byte-offset precision to cut token costs by ~99% compared to sending full files. Supports 15 languages.
 
 Based on [jcodemunch-mcp](https://github.com/jgravelle/jcodemunch-mcp) by J. Gravelle, with code graph techniques from [CodeGraphContext](https://github.com/CodeGraphContext/CodeGraphContext) and security patterns from [basalt-mcp](https://github.com/cmillstead/basalt-mcp).
 
@@ -34,7 +34,7 @@ Based on [jcodemunch-mcp](https://github.com/jgravelle/jcodemunch-mcp) by J. Gra
 ## Features
 
 ### Code Indexing & Retrieval
-- **Tree-sitter AST parsing** across 13 languages with byte-offset O(1) symbol retrieval
+- **Tree-sitter AST parsing** across 15 languages with byte-offset O(1) symbol retrieval
 - **Incremental indexing** via content hashing — skip unchanged files on re-index
 - **Local + GitHub repository indexing** — index folders on disk or fetch from GitHub
 - **AI-generated summaries** — optional Anthropic API integration for symbol descriptions
@@ -51,7 +51,7 @@ Based on [jcodemunch-mcp](https://github.com/jgravelle/jcodemunch-mcp) by J. Gra
 - **6-step path validation chain** — null bytes, traversal, limits, resolution, containment, symlinks
 - **Content boundary markers** — indirect prompt injection defense (Microsoft spotlighting research)
 - **Error sanitization** — raw exceptions never reach the AI; system paths are always stripped
-- **737+ tests** — adversarial, security, integration, and unit coverage with real temp directories
+- **817+ tests** — adversarial, security, integration, and unit coverage with real temp directories
 
 ---
 
@@ -63,6 +63,7 @@ Based on [jcodemunch-mcp](https://github.com/jgravelle/jcodemunch-mcp) by J. Gra
 | 🏗️ | **C / C++** | #️⃣ | **C#** | ☕ | **Java** |
 | 🐹 | **Go** | 🦀 | **Rust** | 🐘 | **PHP** |
 | 💎 | **Ruby** | 🍎 | **Swift** | 🎨 | **Kotlin** |
+| 🎯 | **Dart** | 🐪 | **Perl** | | |
 
 Each language parser extracts functions, classes, methods, parameters, call relationships, imports, and inheritance to build a comprehensive code graph.
 

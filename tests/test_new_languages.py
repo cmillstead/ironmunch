@@ -1,4 +1,4 @@
-"""Tests for the 6 new language parsers: C, C++, C#, Ruby, Swift, Kotlin."""
+"""Tests for the 8 new language parsers: C, C++, C#, Ruby, Swift, Kotlin, Dart, Perl."""
 
 import pytest
 
@@ -189,3 +189,110 @@ class TestKotlinParser:
         derived = next((s for s in classes if s.name == "Derived"), None)
         assert derived is not None
         assert "Base" in derived.inherits_from
+
+
+class TestDartParser:
+    def test_function(self):
+        code = "String greet(String name) {\n  return name;\n}\n"
+        symbols = parse_file(code, "test.dart", "dart")
+        funcs = [s for s in symbols if s.kind == "function"]
+        assert any(s.name == "greet" for s in funcs)
+
+    def test_class(self):
+        code = "class User {\n  void save() {}\n}\n"
+        symbols = parse_file(code, "test.dart", "dart")
+        classes = [s for s in symbols if s.kind == "class"]
+        assert any(s.name == "User" for s in classes)
+
+    def test_method_inside_class(self):
+        code = "class Foo {\n  void bar() {}\n  void baz() {}\n}\n"
+        symbols = parse_file(code, "test.dart", "dart")
+        methods = [s for s in symbols if s.kind == "method"]
+        assert any(s.name == "bar" for s in methods)
+        assert any(s.name == "baz" for s in methods)
+
+    def test_enum(self):
+        code = "enum Color { red, green, blue }\n"
+        symbols = parse_file(code, "test.dart", "dart")
+        types = [s for s in symbols if s.kind == "type"]
+        assert any(s.name == "Color" for s in types)
+
+    def test_mixin(self):
+        code = "mixin Flyable {\n  void fly() {}\n}\n"
+        symbols = parse_file(code, "test.dart", "dart")
+        types = [s for s in symbols if s.kind == "type"]
+        assert any(s.name == "Flyable" for s in types)
+
+    def test_inheritance(self):
+        code = "class Dog extends Animal {\n  void speak() {}\n}\n"
+        symbols = parse_file(code, "test.dart", "dart")
+        classes = [s for s in symbols if s.kind == "class"]
+        dog = next((s for s in classes if s.name == "Dog"), None)
+        assert dog is not None
+        assert "Animal" in dog.inherits_from
+
+    def test_implements(self):
+        code = "class Dog implements Speakable {\n  void speak() {}\n}\n"
+        symbols = parse_file(code, "test.dart", "dart")
+        classes = [s for s in symbols if s.kind == "class"]
+        dog = next((s for s in classes if s.name == "Dog"), None)
+        assert dog is not None
+        assert "Speakable" in dog.implements
+
+    def test_import(self):
+        code = "import 'dart:core';\n\nString greet(String name) {\n  return name;\n}\n"
+        symbols = parse_file(code, "test.dart", "dart")
+        funcs = [s for s in symbols if s.kind == "function"]
+        assert len(funcs) >= 1
+        assert "dart:core" in funcs[0].imports
+
+    def test_byte_range_includes_body(self):
+        code = "void foo() {\n  print('hello');\n}\n"
+        symbols = parse_file(code, "test.dart", "dart")
+        funcs = [s for s in symbols if s.kind == "function"]
+        assert len(funcs) >= 1
+        # Byte range should include the function body
+        assert funcs[0].byte_length > len("void foo()")
+
+
+class TestPerlParser:
+    def test_subroutine(self):
+        code = "sub greet {\n    my ($name) = @_;\n    return \"Hello $name\";\n}\n"
+        symbols = parse_file(code, "test.pl", "perl")
+        funcs = [s for s in symbols if s.kind == "function"]
+        assert any(s.name == "greet" for s in funcs)
+
+    def test_package(self):
+        code = "package Animal;\n\nsub new {\n    my ($class) = @_;\n    return bless {}, $class;\n}\n"
+        symbols = parse_file(code, "test.pl", "perl")
+        types = [s for s in symbols if s.kind == "type"]
+        assert any(s.name == "Animal" for s in types)
+
+    def test_import(self):
+        code = "use Data::Dumper;\n\nsub foo {\n    print 'hi';\n}\n"
+        symbols = parse_file(code, "test.pl", "perl")
+        funcs = [s for s in symbols if s.kind == "function"]
+        assert len(funcs) >= 1
+        assert "Data::Dumper" in funcs[0].imports
+
+    def test_call_extraction(self):
+        code = 'sub foo {\n    greet("world");\n    my_func(1, 2);\n}\n'
+        symbols = parse_file(code, "test.pl", "perl")
+        funcs = [s for s in symbols if s.kind == "function" and s.name == "foo"]
+        assert len(funcs) == 1
+        assert "greet" in funcs[0].calls
+
+    def test_method_call_extraction(self):
+        code = 'sub speak {\n    my ($self) = @_;\n    $self->bark();\n}\n'
+        symbols = parse_file(code, "test.pl", "perl")
+        funcs = [s for s in symbols if s.kind == "function" and s.name == "speak"]
+        assert len(funcs) == 1
+        assert "bark" in funcs[0].calls
+
+    def test_multiple_subs(self):
+        code = "sub foo {\n    bar();\n}\n\nsub bar {\n    return 1;\n}\n"
+        symbols = parse_file(code, "test.pl", "perl")
+        funcs = [s for s in symbols if s.kind == "function"]
+        names = [f.name for f in funcs]
+        assert "foo" in names
+        assert "bar" in names

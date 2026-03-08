@@ -212,6 +212,29 @@ def _extract_import_kotlin(node, source_bytes: bytes) -> list[str]:
     return []
 
 
+def _extract_import_dart(node, source_bytes: bytes) -> list[str]:
+    """Dart: import 'dart:core'; or import 'package:foo/bar.dart';"""
+    # import_or_export -> library_import -> import_specification -> configurable_uri
+    for child in node.named_children:
+        if child.type == "library_import":
+            for sub in child.named_children:
+                if sub.type == "import_specification":
+                    for spec_child in sub.named_children:
+                        if spec_child.type == "configurable_uri":
+                            text = source_bytes[spec_child.start_byte:spec_child.end_byte].decode("utf-8")
+                            return [_strip_quotes(text)]
+    return []
+
+
+def _extract_import_perl(node, source_bytes: bytes) -> list[str]:
+    """Perl: use Data::Dumper;"""
+    for named_child in node.named_children:
+        if named_child.type == "package":
+            text = source_bytes[named_child.start_byte:named_child.end_byte].decode("utf-8")
+            return [text]
+    return []
+
+
 def _make_import_dispatcher(handlers: dict[str, Callable]) -> Callable:
     """Create a single extract_import function that dispatches by node type."""
     def _extract(node, source_bytes: bytes) -> list[str]:
@@ -344,6 +367,9 @@ LANGUAGE_EXTENSIONS = {
     ".swift": "swift",
     ".kt": "kotlin",
     ".kts": "kotlin",
+    ".dart": "dart",
+    ".pl": "perl",
+    ".pm": "perl",
 }
 
 
@@ -847,6 +873,72 @@ KOTLIN_SPEC = LanguageSpec(
 )
 
 
+# Dart specification
+# NOTE: Dart AST splits functions into sibling function_signature + function_body
+# nodes rather than a single wrapper. The extractor handles this via
+# _find_dart_body_sibling() to extend byte ranges and extract calls.
+DART_SPEC = LanguageSpec(
+    ts_language="dart",
+    symbol_node_types={
+        "function_signature": "function",
+        "method_signature": "method",
+        "class_definition": "class",
+        "enum_declaration": "type",
+        "mixin_declaration": "type",
+    },
+    name_fields={
+        "class_definition": "name",
+        "enum_declaration": "name",
+        "mixin_declaration": "name",
+        # function_signature/method_signature use identifier child — handled in extractor
+    },
+    param_fields={},  # Dart params are inside formal_parameter_list child of function_signature
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type="annotation",
+    container_node_types=["class_definition", "mixin_declaration"],
+    constant_patterns=[],
+    type_patterns=["enum_declaration", "mixin_declaration"],
+    call_node_types=[],  # Dart uses identifier + selector siblings, not call_expression nodes
+    import_node_types=["import_or_export"],
+    inheritance_fields=["superclass", "interfaces"],
+    implementation_fields=["interfaces"],
+    extract_import=_make_import_dispatcher({
+        "import_or_export": _extract_import_dart,
+    }),
+    collect_type_names=_make_type_collector({
+        "superclass": _collect_types_superclass,
+        "interfaces": _collect_types_named_children,
+    }),
+)
+
+
+# Perl specification
+PERL_SPEC = LanguageSpec(
+    ts_language="perl",
+    symbol_node_types={
+        "subroutine_declaration_statement": "function",
+        "package_statement": "type",
+    },
+    name_fields={
+        # subroutine uses bareword child — handled in extractor
+        # package_statement uses second package child — handled in extractor
+    },
+    param_fields={},  # Perl params are extracted from @_ in body, not AST
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=["package_statement"],
+    constant_patterns=[],
+    type_patterns=[],
+    call_node_types=["function_call_expression", "method_call_expression"],
+    import_node_types=["use_statement"],
+    extract_import=_make_import_dispatcher({
+        "use_statement": _extract_import_perl,
+    }),
+)
+
+
 # Language registry
 LANGUAGE_REGISTRY = {
     "python": PYTHON_SPEC,
@@ -862,4 +954,6 @@ LANGUAGE_REGISTRY = {
     "ruby": RUBY_SPEC,
     "swift": SWIFT_SPEC,
     "kotlin": KOTLIN_SPEC,
+    "dart": DART_SPEC,
+    "perl": PERL_SPEC,
 }

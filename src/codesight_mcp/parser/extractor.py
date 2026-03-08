@@ -9,12 +9,12 @@
 from typing import Optional
 from tree_sitter import Language, Parser
 
-# Individual language bindings — only the 7 languages codesight-mcp supports
+# Individual language bindings cache
 _LANGUAGE_BINDINGS = {}
 
 _ALLOWED_LANGUAGES = {
     "python", "javascript", "typescript", "go", "rust", "java", "php",
-    "c", "cpp", "c_sharp", "ruby", "swift", "kotlin",
+    "c", "cpp", "c_sharp", "ruby", "swift", "kotlin", "dart", "perl",
 }
 
 # Some tree-sitter packages use language_<name>() instead of language()
@@ -25,25 +25,39 @@ _LANGUAGE_FUNC_MAP = {
     "c_sharp": ("tree_sitter_c_sharp", "language"),
 }
 
+# Languages only available via tree-sitter-language-pack (no standalone PyPI package)
+_LANGUAGE_PACK_LANGUAGES = {"dart", "perl"}
+
 def _get_parser(lang_name: str) -> Parser:
     """Get a tree-sitter parser for a language, loading binding on first use."""
     if lang_name not in _ALLOWED_LANGUAGES:
         raise ValueError(f"Unsupported language: {lang_name}")
     if lang_name not in _LANGUAGE_BINDINGS:
         import importlib
-        if lang_name in _LANGUAGE_FUNC_MAP:
-            mod_name, func_name = _LANGUAGE_FUNC_MAP[lang_name]
+        if lang_name in _LANGUAGE_PACK_LANGUAGES:
+            # Use tree-sitter-language-pack for languages without standalone packages
+            try:
+                from tree_sitter_language_pack import get_language
+                _LANGUAGE_BINDINGS[lang_name] = get_language(lang_name)
+            except ImportError:
+                raise ImportError(
+                    f"tree-sitter-language-pack not installed. "
+                    f"Install: pip install tree-sitter-language-pack"
+                )
         else:
-            mod_name = f"tree_sitter_{lang_name}"
-            func_name = "language"
-        try:
-            mod = importlib.import_module(mod_name)
-        except ImportError:
-            raise ImportError(
-                f"tree-sitter binding for '{lang_name}' not installed. "
-                f"Install: pip install tree-sitter-{lang_name}"
-            )
-        _LANGUAGE_BINDINGS[lang_name] = Language(getattr(mod, func_name)())
+            if lang_name in _LANGUAGE_FUNC_MAP:
+                mod_name, func_name = _LANGUAGE_FUNC_MAP[lang_name]
+            else:
+                mod_name = f"tree_sitter_{lang_name}"
+                func_name = "language"
+            try:
+                mod = importlib.import_module(mod_name)
+            except ImportError:
+                raise ImportError(
+                    f"tree-sitter binding for '{lang_name}' not installed. "
+                    f"Install: pip install tree-sitter-{lang_name}"
+                )
+            _LANGUAGE_BINDINGS[lang_name] = Language(getattr(mod, func_name)())
     parser = Parser(_LANGUAGE_BINDINGS[lang_name])
     return parser
 
@@ -156,14 +170,23 @@ def _extract_symbol(
     # Extract decorators
     decorators = _extract_decorators(node, spec, source_bytes)
 
+    # Dart: extend byte range to include sibling function_body
+    end_byte = node.end_byte
+    dart_body = _find_dart_body_sibling(node) if node.type in ("function_signature", "method_signature") else None
+    if dart_body:
+        end_byte = dart_body.end_byte
+
     # Compute content hash
-    symbol_bytes = source_bytes[node.start_byte:node.end_byte]
+    symbol_bytes = source_bytes[node.start_byte:end_byte]
     c_hash = compute_content_hash(symbol_bytes)
 
     # Extract function calls from function/method bodies
     calls = []
     if kind in ("function", "method") and spec.call_node_types:
         body = node.child_by_field_name("body")
+        # Dart: body is a sibling function_body, not a child
+        if body is None:
+            body = _find_dart_body_sibling(node)
         if body:
             calls = _extract_calls(body, spec, source_bytes)
 
@@ -186,9 +209,9 @@ def _extract_symbol(
         decorators=decorators,
         parent=parent_symbol.id if parent_symbol else None,
         line=node.start_point[0] + 1,
-        end_line=node.end_point[0] + 1,
+        end_line=(dart_body.end_point[0] + 1) if dart_body else (node.end_point[0] + 1),
         byte_offset=node.start_byte,
-        byte_length=node.end_byte - node.start_byte,
+        byte_length=end_byte - node.start_byte,
         content_hash=c_hash,
         calls=calls,
         inherits_from=inherits_from,
@@ -238,6 +261,39 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
             return source_bytes[decl.start_byte:decl.end_byte].decode("utf-8")
         return None
 
+    # Dart: function_signature/method_signature — name is in nested identifier
+    if node.type in ("function_signature", "method_signature") and node.type not in spec.name_fields:
+        # method_signature wraps function_signature
+        sig = node
+        if node.type == "method_signature":
+            for child in node.named_children:
+                if child.type == "function_signature":
+                    sig = child
+                    break
+        name_node = sig.child_by_field_name("name")
+        if name_node:
+            return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+        # Fallback: find identifier child
+        for child in sig.named_children:
+            if child.type == "identifier":
+                return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+        return None
+
+    # Perl: subroutine_declaration_statement — name is in bareword child
+    if node.type == "subroutine_declaration_statement" and node.type not in spec.name_fields:
+        for child in node.named_children:
+            if child.type == "bareword":
+                return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+        return None
+
+    # Perl: package_statement — name is the package child (not the keyword)
+    if node.type == "package_statement" and node.type not in spec.name_fields:
+        packages = [c for c in node.named_children if c.type == "package"]
+        if packages:
+            # Last package child is the name (first might be keyword in some grammars)
+            return source_bytes[packages[-1].start_byte:packages[-1].end_byte].decode("utf-8")
+        return None
+
     if node.type not in spec.name_fields:
         return None
 
@@ -246,6 +302,11 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
 
     if name_node:
         return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+
+    # Fallback: find identifier child (for nodes where tree-sitter doesn't expose a name field)
+    for child in node.named_children:
+        if child.type == "identifier":
+            return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
 
     return None
 
@@ -479,10 +540,20 @@ def _extract_callee_name(node, source_bytes: bytes) -> Optional[str]:
             if child.type in ("simple_identifier", "identifier"):
                 return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
 
-    # Simple identifier fallback (Swift, Kotlin, Ruby)
-    if node.type in ("simple_identifier", "constant"):
+    # Simple identifier fallback (Swift, Kotlin, Ruby, Perl)
+    if node.type in ("simple_identifier", "constant", "function", "bareword"):
         return source_bytes[node.start_byte:node.end_byte].decode("utf-8")
 
+    return None
+
+
+def _find_dart_body_sibling(node) -> Optional["Node"]:
+    """Find the function_body sibling that follows a Dart function/method_signature."""
+    if node.type not in ("function_signature", "method_signature"):
+        return None
+    sibling = node.next_named_sibling
+    if sibling and sibling.type == "function_body":
+        return sibling
     return None
 
 
@@ -541,6 +612,17 @@ def _collect_calls(node, spec: LanguageSpec, source_bytes: bytes, calls: list):
                     if name:
                         calls.append(name)
                         break
+        # Perl method_call_expression: $self->bark()
+        elif node.type == "method_call_expression":
+            method_node = node.child_by_field_name("method")
+            if method_node is None:
+                for child in node.children:
+                    if child.type in ("method", "bareword", "identifier"):
+                        method_node = child
+                        break
+            if method_node:
+                name = source_bytes[method_node.start_byte:method_node.end_byte].decode("utf-8")
+                calls.append(name)
         # Ruby call: obj.method(args)
         elif node.type == "call" and "call" in spec.call_node_types:
             method_node = node.child_by_field_name("method")
