@@ -689,7 +689,8 @@ class TestMakedirs0o700EnforcesPermissions:
         """If a directory exists with 0o755, _makedirs_0o700 must chmod it to 0o700."""
         with tempfile.TemporaryDirectory() as tmp:
             target = os.path.join(tmp, "existingdir")
-            os.mkdir(target, mode=0o755)
+            os.mkdir(target)
+            os.chmod(target, 0o755)  # Explicit chmod — immune to umask leaks
             # Confirm starting state is permissive
             assert (os.stat(target).st_mode & 0o777) == 0o755
 
@@ -705,7 +706,8 @@ class TestMakedirs0o700EnforcesPermissions:
         """IndexStore.__init__ must enforce 0o700 on a pre-existing permissive base_path."""
         with tempfile.TemporaryDirectory() as tmp:
             base = os.path.join(tmp, "store")
-            os.mkdir(base, mode=0o755)
+            os.mkdir(base)
+            os.chmod(base, 0o755)  # Explicit chmod — immune to umask leaks
             assert (os.stat(base).st_mode & 0o777) == 0o755
 
             IndexStore(base_path=base)
@@ -721,7 +723,8 @@ class TestMakedirs0o700EnforcesPermissions:
         with tempfile.TemporaryDirectory() as tmp:
             # Pre-create the content dir at 0o755
             content_dir = os.path.join(tmp, "owner__repo")
-            os.mkdir(content_dir, mode=0o755)
+            os.mkdir(content_dir)
+            os.chmod(content_dir, 0o755)  # Explicit chmod — immune to umask leaks
             assert (os.stat(content_dir).st_mode & 0o777) == 0o755
 
             store = IndexStore(base_path=tmp)

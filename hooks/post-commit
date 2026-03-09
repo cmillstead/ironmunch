@@ -6,11 +6,23 @@
 # Git hooks don't inherit your shell environment. Create ~/.config/codesight-mcp/env with:
 #   CODESIGHT_BIN=/path/to/.venv/bin/codesight-mcp
 
-# Load codesight-mcp env file if present
+# Load codesight-mcp env file if present (safe KEY=VALUE only — no shell execution)
 CODESIGHT_ENV="$HOME/.config/codesight-mcp/env"
 if [ -f "$CODESIGHT_ENV" ]; then
-    # shellcheck disable=SC1090
-    . "$CODESIGHT_ENV"
+    # ADV-HIGH-2: Validate env file permissions (must be owner-only) and load
+    # only KEY=VALUE lines — never source the file directly.
+    ENV_PERMS=$(stat -f '%Lp' "$CODESIGHT_ENV" 2>/dev/null || stat -c '%a' "$CODESIGHT_ENV" 2>/dev/null)
+    case "$ENV_PERMS" in
+        600|400)
+            # Safe: load only lines matching KEY=VALUE (no shell commands)
+            # shellcheck disable=SC2046
+            export $(grep -v '^#' "$CODESIGHT_ENV" | grep -E '^[A-Z_][A-Z0-9_]*=.*$' | xargs)
+            ;;
+        *)
+            printf "codesight-mcp: WARNING: %s has unsafe permissions (%s), skipping. Fix with: chmod 600 %s\n" \
+                "$CODESIGHT_ENV" "$ENV_PERMS" "$CODESIGHT_ENV" >&2
+            ;;
+    esac
 fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"

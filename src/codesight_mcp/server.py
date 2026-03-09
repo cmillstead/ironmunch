@@ -41,8 +41,20 @@ _CODE_INDEX_PATH: str = os.environ.get("CODE_INDEX_PATH", "")
 
 # ADV-LOW-6: Resolve CODESIGHT_ALLOWED_ROOTS to absolute paths at startup so
 # callers always receive fully-resolved paths regardless of cwd changes.
+# ADV-MED-5: Reject entries that resolve to a filesystem root (/ or C:\).
 _raw_roots = os.environ.get("CODESIGHT_ALLOWED_ROOTS", "").split(":")
-ALLOWED_ROOTS: list[str] = [str(Path(r).resolve()) for r in _raw_roots if r]
+ALLOWED_ROOTS: list[str] = []
+for _r in _raw_roots:
+    if not _r:
+        continue
+    _resolved = Path(_r).resolve()
+    if _resolved == Path(_resolved.anchor):
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "ADV-MED-5: Rejecting filesystem root %r in CODESIGHT_ALLOWED_ROOTS", _r
+        )
+        continue
+    ALLOWED_ROOTS.append(str(_resolved))
 
 # Wire the ALLOWED_ROOTS provider into the index_folder handler so it
 # never needs to import from server.py (avoids circular deps).
@@ -178,14 +190,29 @@ def _sanitize_arguments(name: str, arguments: dict) -> dict | str:
 
 
 def _validate_storage_path(storage_path: str | None) -> str | None:
-    """Validate CODE_INDEX_PATH is absolute. Raises ValueError if not."""
+    """Validate CODE_INDEX_PATH is absolute, owned by current user, and not world-writable.
+
+    ADV-MED-6: Rejects shared/world-writable directories to prevent index poisoning.
+    """
     if storage_path is not None:
         p = Path(storage_path)
         if not p.is_absolute():
             raise ValueError(
                 f"CODE_INDEX_PATH must be an absolute path: {storage_path!r}"
             )
-        return str(p.resolve())
+        resolved = p.resolve()
+        # ADV-MED-6: If the directory already exists, verify ownership and permissions
+        if resolved.exists():
+            st = resolved.stat()
+            if st.st_uid != os.getuid():
+                raise ValueError(
+                    f"CODE_INDEX_PATH {storage_path!r} is not owned by the current user"
+                )
+            if st.st_mode & 0o002:  # world-writable
+                raise ValueError(
+                    f"CODE_INDEX_PATH {storage_path!r} is world-writable — refusing to use"
+                )
+        return str(resolved)
     return None
 
 

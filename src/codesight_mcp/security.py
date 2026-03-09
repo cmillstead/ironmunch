@@ -13,6 +13,7 @@ Tools call this module, not core/ directly. Provides:
 import errno
 import os
 import re
+import unicodedata
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -175,47 +176,47 @@ _INLINE_SECRET_RE = re.compile(
 )
 
 
-_NO_REDACT_WARNED = False
+# ADV-MED-2: Freeze at startup — a compromised in-process dependency cannot
+# toggle redaction off after import by mutating os.environ.
+_NO_REDACT: bool = os.environ.get("CODESIGHT_NO_REDACT", "") == "1"
+
+if _NO_REDACT:
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "CODESIGHT_NO_REDACT=1 is set — inline secret redaction is DISABLED. "
+        "Secrets in code may be sent to external APIs."
+    )
 
 
 def _no_redact() -> bool:
     """Check if redaction is disabled via CODESIGHT_NO_REDACT=1.
 
-    Checked at runtime on every call (not cached) so the env var
-    can be toggled mid-process if needed.
-    ADV-MED-1: Logs a warning on first detection so silent misconfiguration
-    is surfaced.
+    ADV-MED-2: Frozen at module import time — runtime env mutations are ignored.
     """
-    global _NO_REDACT_WARNED
-    if os.environ.get("CODESIGHT_NO_REDACT", "") == "1":
-        if not _NO_REDACT_WARNED:
-            import logging
-            logging.getLogger(__name__).warning(
-                "CODESIGHT_NO_REDACT=1 is set — inline secret redaction is DISABLED. "
-                "Secrets in code may be sent to external APIs."
-            )
-            _NO_REDACT_WARNED = True
-        return True
-    return False
+    return _NO_REDACT
 
 
 def sanitize_signature_for_api(signature: str) -> str:
     """Redact inline secrets from a code signature before sending to external APIs.
 
-    Strips DEL (0x7F) and C1 control characters (0x80–0x9F) before applying the
-    inline secret regex. These characters could be injected to break the
-    continuous-ASCII assumption that _INLINE_SECRET_RE patterns rely on (e.g.
-    "sk_live_\\x7f123" would not match without this strip step).
+    ADV-MED-1: Strips DEL (0x7F), C1 controls (0x80-0x9F), and all Unicode
+    category Cf (format) characters — including zero-width chars (U+200B-200F,
+    U+FEFF, U+00AD, U+2060-2063) and bidi overrides (U+202A-202E, U+2066-2069).
+    Also applies NFKD normalization so confusable characters (e.g. fullwidth
+    letters) are reduced to their ASCII equivalents before regex matching.
 
     When CODESIGHT_NO_REDACT=1 is set, returns the signature unchanged
     (opt-in for trusted local usage).
     """
     if _no_redact():
         return signature
-    # Strip DEL and C1 controls that could break continuous-ASCII regex matching
+    # ADV-MED-1: Strip DEL, C1 controls, and Unicode format chars (category Cf)
     cleaned = "".join(
-        c for c in signature if not (ord(c) == 127 or 128 <= ord(c) <= 159)
+        c for c in signature
+        if not (ord(c) == 127 or 128 <= ord(c) <= 159 or unicodedata.category(c) == "Cf")
     )
+    # ADV-MED-1: NFKD normalization reduces confusables to ASCII equivalents
+    cleaned = unicodedata.normalize("NFKD", cleaned)
     return _INLINE_SECRET_RE.sub("<REDACTED>", cleaned)
 
 
