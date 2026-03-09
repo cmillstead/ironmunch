@@ -29,18 +29,27 @@ The threat model assumes:
 | Information leakage | Error sanitization: ValidationError messages are pre-approved safe strings, known errnos map to safe messages, unknown errors return a generic fallback, system paths stripped, parse failure warnings aggregate counts (not paths) |
 | Indirect prompt injection | Content boundary markers with cryptographic random tokens (Microsoft spotlighting) on all untrusted fields; injection phrase detection in summaries; tool descriptions carry explicit warnings |
 | Secret exposure in index | Pattern detection at index time: files matching secret patterns excluded; inline secret regex redacts supported token formats from signatures/docstrings/source |
-| Secret exposure via control chars | assert_no_control_chars rejects bytes 0x01–0x1F, 0x7F (DEL), and 0x80–0x9F (C1) |
+| Secret exposure via control chars | `assert_no_control_chars` rejects bytes 0x01–0x1F, 0x7F (DEL), and 0x80–0x9F (C1) |
 | Binary confusion | Dual-stage detection: extension-based filtering plus null-byte content sniffing |
-| Credential logging | _RedactAuthFilter suppresses httpx log records containing auth headers at all log levels |
-| Supply chain | `uv.lock` pinned with hashes; CI uses `uv sync --frozen --verify-hashes`; GitHub Actions are SHA-pinned |
+| Credential logging | `_RedactAuthFilter` suppresses httpx log records containing auth headers at all log levels |
+| Supply chain | `uv.lock` pinned with hashes; CI uses `uv sync --frozen --verify-hashes`; GitHub Actions are SHA-pinned; dependency upper bounds prevent surprise major upgrades |
 | Summarizer injection | Injection phrases stripped from summaries (full substring scan, not prefix-only); degraded-mode parse returns empty on missing nonce delimiters; symbol kind validated against allowlist before prompt interpolation; system/user prompt split uses per-batch nonce marker |
-| Env var redirection | `ANTHROPIC_BASE_URL` and `GITHUB_TOKEN` frozen at module import time; runtime mutation cannot redirect API calls |
+| Env var redirection | `ANTHROPIC_BASE_URL`, `GITHUB_TOKEN`, `CODE_INDEX_PATH`, `CODESIGHT_NO_REDACT`, and `ALLOWED_ROOTS` frozen at module import time; runtime mutation cannot redirect API calls or bypass restrictions |
 | Graph traversal DoS | BFS call-chain capped at 5 paths; all traversal depths clamped to [1, 50]; SHA-256 fingerprint for cache keys |
-| Index poisoning | `load_index()` rejects source_files with traversal sequences or control characters |
+| Index poisoning | `load_index()` rejects source_files with traversal sequences or control characters; validates owner/name as strings; validates kind against allowlist; re-sanitizes all text fields; validates content_hash format |
 | Gitignore ReDoS | Per-pattern length cap (200 chars) in both local and GitHub gitignore parsing; pattern count capped at 2000 |
 | fd leak on validation failure | `safe_read_file()` transfers fd ownership to fdopen immediately; explicit close on fdopen failure |
 | Double-close fd | `_safe_write_content()` separates fdopen failure (caller closes fd) from write failure (file object owns fd) |
-| Silent redaction bypass | `CODESIGHT_NO_REDACT=1` logs a warning on first detection |
+| Silent redaction bypass | `CODESIGHT_NO_REDACT=1` logs a warning on first detection; `[REDACTION DISABLED]` suffix added to tool descriptions |
+| Unicode/homoglyph bypass | NFKD normalization + Unicode Cf (format character) stripping before injection phrase checks; NFC normalization in path validation |
+| TOCTOU race conditions | Double-load elimination via pre-loaded index passthrough; per-repo advisory file locks serialize save/incremental_save/delete operations; O_NOFOLLOW prevents symlink swap races |
+| Gzip decompression bomb | Streaming decompression with size cap at `MAX_INDEX_SIZE`; reject oversized payloads before JSON parse |
+| HTTP/network hardening | `trust_env=False` on all httpx clients (blocks proxy hijacking); `follow_redirects=False` prevents redirect-based attacks; HTTPS enforced for GitHub URLs |
+| Git subprocess hardening | Minimal env dict (`PATH`, `HOME`, `GIT_TERMINAL_PROMPT=0`, `GIT_CONFIG_NOSYSTEM=1`); 5-second timeout prevents hanging on corrupted repos |
+| Git hook code execution | Hook env files loaded via safe `grep KEY=VALUE` pattern instead of shell source; permission check (0o600) before loading |
+| Input type coercion | Dispatcher-level `_sanitize_arguments()` validates types: integers reject dicts, lists reject strings, booleans explicitly coerced; argument length capped at 10,000 chars |
+| Atomic write integrity | 3-phase write: content files first, JSON to `.tmp`, then atomic rename; prevents partial/corrupt indexes on crash |
+| Predictable temp path DoS | Rate limiter fallback temp directory retries with random suffix on `PermissionError` from pre-created directories |
 
 ## Validation Chain
 
@@ -177,7 +186,7 @@ The test suite contains **1031 tests** across adversarial, security, integration
 - Control character and DEL byte injection in paths, repo IDs, and queries
 - `../` traversal in direct arguments and via poisoned index entries
 - Symlink escape (file symlinks, directory symlinks, parent chain symlinks)
-- Unicode normalization attacks
+- Unicode normalization and homoglyph bypass attacks
 - Double-encoding attacks
 - Oversized paths and deeply nested paths
 - Repository identifier injection (slashes, dots, shell metacharacters, trailing newlines)
@@ -187,9 +196,16 @@ The test suite contains **1031 tests** across adversarial, security, integration
 - Secret file detection and inline secret redaction
 - Binary file detection
 - Atomic write and O_NOFOLLOW enforcement
-- Schema validation in load_index
-- Rate limit enforcement
-- Combined attack vectors
+- Schema validation in load_index (type checks, kind validation, hash format)
+- Rate limit enforcement and symlink-resistant state file handling
+- Gzip decompression bomb rejection
+- Injection phrase blocklist (20 phrases, positive and negative cases)
+- Env var freezing (ANTHROPIC_BASE_URL, GITHUB_TOKEN mutation after import)
+- Nonce-based prompt splitting and delimiter protection
+- Double-close fd prevention in safe_write_content
+- Temp directory fallback hardening
+- Git subprocess environment isolation
+- Combined attack chains
 
 All security-critical tests use real temporary directories and real filesystem operations. No mocking of security-critical code paths.
 
