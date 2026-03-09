@@ -9,6 +9,7 @@
 from typing import Optional
 from tree_sitter import Language, Parser
 
+from .complexity import compute_complexity
 from .languages import _strip_quotes
 
 # Individual language bindings cache
@@ -183,6 +184,12 @@ def _extract_symbol(
     symbol_bytes = source_bytes[node.start_byte:end_byte]
     c_hash = compute_content_hash(symbol_bytes)
 
+    # Compute complexity for executable symbols
+    cx = {}
+    if kind in ("function", "method"):
+        cx = compute_complexity(node, language)
+        cx["loc"] = (dart_body.end_point[0] + 1 if dart_body else node.end_point[0] + 1) - (node.start_point[0] + 1) + 1
+
     # Extract function calls from function/method bodies
     calls = []
     if kind in ("function", "method") and spec.call_node_types:
@@ -219,6 +226,7 @@ def _extract_symbol(
         calls=calls,
         inherits_from=inherits_from,
         implements=implements,
+        complexity=cx,
     )
 
     return symbol
@@ -417,6 +425,7 @@ def _extract_constant(
                     byte_offset=node.start_byte,
                     byte_length=node.end_byte - node.start_byte,
                     content_hash=c_hash,
+                    complexity={},
                 )
 
     return None

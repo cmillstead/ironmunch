@@ -236,3 +236,40 @@ class TestBranchNodes:
         assert "if_statement" in _BRANCH_NODES
         assert "for_statement" in _BRANCH_NODES
         assert "while_statement" in _BRANCH_NODES
+
+
+class TestComplexityIntegration:
+    """Verify complexity is populated during extraction."""
+
+    def test_extracted_symbol_has_complexity(self):
+        from codesight_mcp.parser.extractor import parse_file
+        code = "def f(x):\n    if x:\n        return 1\n    return 0\n"
+        symbols = parse_file(code, "test.py", "python")
+        assert len(symbols) >= 1
+        sym = symbols[0]
+        assert sym.complexity != {}
+        assert sym.complexity["cyclomatic"] == 2
+        assert sym.complexity["param_count"] == 1
+
+    def test_class_has_empty_complexity(self):
+        from codesight_mcp.parser.extractor import parse_file
+        code = "class Foo:\n    pass\n"
+        symbols = parse_file(code, "test.py", "python")
+        cls = [s for s in symbols if s.kind == "class"]
+        assert len(cls) == 1
+        assert cls[0].complexity == {}
+
+    def test_method_has_complexity(self):
+        from codesight_mcp.parser.extractor import parse_file
+        code = (
+            "class Foo:\n"
+            "    def bar(self, x):\n"
+            "        for i in range(x):\n"
+            "            if i > 0:\n"
+            "                print(i)\n"
+        )
+        symbols = parse_file(code, "test.py", "python")
+        method = [s for s in symbols if s.kind == "method"]
+        assert len(method) == 1
+        assert method[0].complexity["cyclomatic"] >= 3
+        assert method[0].complexity["max_nesting"] >= 2
