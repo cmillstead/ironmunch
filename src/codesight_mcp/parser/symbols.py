@@ -29,6 +29,7 @@ class Symbol:
     imports: list[str] = field(default_factory=list)       # Module/file imports found in this file (file-level)
     inherits_from: list[str] = field(default_factory=list) # Parent class/trait names (for classes)
     implements: list[str] = field(default_factory=list)    # Interface/protocol names (where applicable)
+    complexity: dict = field(default_factory=dict)           # Cyclomatic, cognitive, nesting, params, LOC
 
 
 def make_symbol_id(file_path: str, qualified_name: str, kind: str = "") -> str:
