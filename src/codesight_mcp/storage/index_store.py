@@ -14,6 +14,7 @@ from typing import Optional
 
 from ..parser.symbols import Symbol
 from ..security import sanitize_repo_identifier, sanitize_signature_for_api
+from ..summarizer.batch_summarize import _contains_injection_phrase, _VALID_KINDS
 from ..core.limits import MAX_INDEX_SIZE, MAX_FILE_SIZE
 from ..core.locking import exclusive_file_lock
 from ..core.validation import validate_path, ValidationError, is_within
@@ -28,10 +29,15 @@ def _open_nofollow_text(path: "Path") -> "io.TextIOWrapper":
     """Open a file for reading with O_NOFOLLOW to prevent symlink attacks.
 
     Raises OSError with errno.ELOOP if the path is a symlink.
+    ADV-LOW-2: Wraps io.open in try/except to close fd on failure.
     """
     import io
     fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW)
-    return io.open(fd, "r", encoding="utf-8")
+    try:
+        return io.open(fd, "r", encoding="utf-8")
+    except Exception:
+        os.close(fd)
+        raise
 
 
 def _file_hash(content: str) -> str:
@@ -342,9 +348,13 @@ class IndexStore:
         if not all(isinstance(f, str) for f in data["source_files"]):
             return None
         # ADV-LOW-5: filter source_files containing traversal or control characters
+        # ADV-LOW-3: also filter C1 control range (128-159) for consistency with validation.py
         data["source_files"] = [
             f for f in data["source_files"]
-            if ".." not in f and not any(ord(c) < 32 or ord(c) == 127 for c in f)
+            if ".." not in f and not any(
+                ord(c) < 32 or ord(c) == 127 or 128 <= ord(c) <= 159
+                for c in f
+            )
         ]
         if not all(
             isinstance(k, str) and isinstance(v, int) and v >= 0
@@ -354,18 +364,26 @@ class IndexStore:
 
         # SEC-LOW-5: Re-sanitize symbol text fields on load to catch secrets
         # written before current redaction rules or tampered on disk.
+        # ADV-MED-3: Also check summaries for injection phrases.
+        # ADV-LOW-5: Validate kind against _VALID_KINDS.
         # ADV-LOW-6: Validate content_hash format — must be a 64-char lowercase hex
         # string (SHA-256). Discard malformed hashes to prevent verify=True from
         # reporting a spurious mismatch against an arbitrary attacker-controlled string.
         for sym in data["symbols"]:
-            for field in ("signature", "docstring", "summary"):
-                if field in sym and isinstance(sym[field], str):
-                    sym[field] = sanitize_signature_for_api(sym[field])
+            for fld in ("signature", "docstring", "summary"):
+                if fld in sym and isinstance(sym[fld], str):
+                    sym[fld] = sanitize_signature_for_api(sym[fld])
+            # ADV-MED-3: Clear summaries containing injection phrases
+            if isinstance(sym.get("summary"), str) and _contains_injection_phrase(sym["summary"]):
+                sym["summary"] = ""
             if "decorators" in sym and isinstance(sym["decorators"], list):
                 sym["decorators"] = [
                     sanitize_signature_for_api(d) if isinstance(d, str) else d
                     for d in sym["decorators"]
                 ]
+            # ADV-LOW-5: Validate kind against known set
+            if sym.get("kind") not in _VALID_KINDS:
+                sym["kind"] = "symbol"
             # ADV-LOW-6: strip malformed content_hash values
             hash_val = sym.get("content_hash")
             if hash_val is not None:
@@ -446,8 +464,8 @@ class IndexStore:
                 return None  # Symlink or missing file — reject
             raise
         with os.fdopen(fd, "rb") as f:
-            # ADV-MED-11: verify byte_offset is within file bounds
-            file_size = os.path.getsize(str(file_path))
+            # ADV-LOW-1: use os.fstat on open fd (not path-based getsize) to avoid TOCTOU
+            file_size = os.fstat(f.fileno()).st_size
             if byte_offset >= file_size:
                 raise ValidationError("byte_offset out of bounds")
             f.seek(byte_offset)
@@ -530,6 +548,15 @@ class IndexStore:
             # Remove symbols for deleted and changed files
             files_to_remove = set(deleted_files) | set(changed_files)
             kept_symbols = [s for s in index.symbols if s.get("file") not in files_to_remove]
+
+            # ADV-LOW-8: Re-sanitize kept symbols' text fields in case redaction
+            # rules have been updated since they were last indexed.
+            for sym in kept_symbols:
+                for fld in ("signature", "docstring", "summary"):
+                    if fld in sym and isinstance(sym[fld], str):
+                        sym[fld] = sanitize_signature_for_api(sym[fld])
+                if isinstance(sym.get("summary"), str) and _contains_injection_phrase(sym["summary"]):
+                    sym["summary"] = ""
 
             # Add new symbols
             all_symbols_dicts = kept_symbols + [self._symbol_to_dict(s) for s in new_symbols]

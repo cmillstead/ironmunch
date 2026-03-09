@@ -37,7 +37,8 @@ class TestStatusHappyPath:
         assert result["total_symbols"] == 0
         assert result["storage_path"] == str(tmp_path)
         assert result["version"] == INDEX_VERSION
-        assert isinstance(result["has_api_key"], bool)
+        # ADV-LOW-7: has_api_key removed — must not leak API key presence
+        assert "has_api_key" not in result
         assert "_meta" in result
 
     def test_with_repos(self, tmp_path):
@@ -69,19 +70,13 @@ class TestStatusHappyPath:
 
 
 class TestStatusApiKey:
-    """Tests for has_api_key detection."""
+    """ADV-LOW-7: has_api_key removed — status must not leak API key presence."""
 
-    def test_api_key_present(self, tmp_path, monkeypatch):
-        """has_api_key should be True when ANTHROPIC_API_KEY is set."""
+    def test_has_api_key_not_in_response(self, tmp_path, monkeypatch):
+        """has_api_key must not appear in the status response."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
         result = status(storage_path=str(tmp_path))
-        assert result["has_api_key"] is True
-
-    def test_api_key_absent(self, tmp_path, monkeypatch):
-        """has_api_key should be False when ANTHROPIC_API_KEY is unset."""
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        result = status(storage_path=str(tmp_path))
-        assert result["has_api_key"] is False
+        assert "has_api_key" not in result
 
     def test_api_key_not_exposed(self, tmp_path, monkeypatch):
         """The actual API key value must never appear in the response."""
@@ -89,7 +84,6 @@ class TestStatusApiKey:
         monkeypatch.setenv("ANTHROPIC_API_KEY", secret)
         result = status(storage_path=str(tmp_path))
 
-        # Serialize entire response and check the secret isn't in it
         import json
         serialized = json.dumps(result)
         assert secret not in serialized

@@ -77,7 +77,8 @@ Each language parser extracts functions, classes, methods, parameters, call rela
 # From source (recommended — not published to PyPI)
 git clone https://github.com/cmillstead/codesight-mcp.git
 cd codesight-mcp
-pip install -e .
+uv sync            # recommended — uses lockfile with pinned versions
+# or: pip install -e .  (uses version ranges, not the lockfile)
 ```
 
 ### Step 2: Configure your MCP client
