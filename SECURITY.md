@@ -2,18 +2,20 @@
 
 ## Threat Model
 
-codesight-mcp is an MCP server -- it runs locally and exposes tools to a connected AI model. **The connected AI is the attacker.** It can call any tool with any arguments, and it processes untrusted source code that may contain adversarial content designed to manipulate its behavior.
+codesight-mcp is an MCP server -- it runs locally and exposes tools to a connected AI model. There are multiple threat vectors: the connected AI may be manipulated via prompt injection (from source code, docstrings, or human input) into making malicious tool calls, a human actor may craft adversarial inputs directly, and indexed repositories may contain content designed to exploit the system. All tool inputs are treated as untrusted regardless of source.
 
 The threat model assumes:
 
-- The AI will attempt path traversal via tool arguments
-- The AI will attempt path traversal via poisoned index data
-- Source code may contain instructions aimed at the AI (indirect prompt injection)
+- Tool arguments may attempt path traversal (from AI or direct callers)
+- Indexed data may be poisoned with traversal sequences or injection payloads
+- Source code may contain prompt injection targeting the AI (indirect injection via repositories)
+- Human users may craft inputs containing injection phrases or adversarial content
 - Docstrings or summaries may contain injection phrases targeting the host LLM
 - Error messages may leak filesystem structure
 - Symlinks in indexed directories may point outside the expected root
 - Secrets embedded in source code may be exfiltrated if not redacted
 - Crafted file/directory names may carry injection content through tool responses
+- Compromised dependencies may manipulate environment variables at runtime
 
 ## Defense Matrix
 
