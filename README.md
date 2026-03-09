@@ -319,7 +319,10 @@ codesight-mcp treats the connected AI as an untrusted principal. Every tool argu
 | **Content boundaries** | Microsoft-style spotlighting markers to resist indirect prompt injection |
 | **Error sanitization** | No raw exceptions or system paths in tool responses |
 | **Allowed roots** | `CODESIGHT_ALLOWED_ROOTS` restricts which directories can be indexed |
-| **Secret redaction** | Secrets in function bodies are redacted from API output (stored at rest in `~/.code-index/`) |
+| **Secret redaction** | Secrets in function bodies are redacted from API output; `CODESIGHT_NO_REDACT=1` disables with a logged warning |
+| **Secrets at rest** | Index files in `~/.code-index/` contain raw source code including any embedded secrets. Store on an encrypted volume and restrict filesystem permissions. Override with `CODE_INDEX_PATH`. |
+| **Prompt injection defense** | Nonce-based delimiters for AI summarization, injection phrase blocklist, kind-validated prompt interpolation |
+| **Graph traversal limits** | BFS call-chain search capped at 5 paths and depth 50 to prevent resource exhaustion |
 
 See [SECURITY.md](SECURITY.md) for the full threat model, defense matrix, and validation chain details.
 

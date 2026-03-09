@@ -22,6 +22,7 @@ MAX_BATCHES_PER_INDEX = 50
 # Injection phrases that, if found ANYWHERE in a summary (case-insensitive),
 # indicate an attempted prompt injection — replace with empty string.
 # ADV-HIGH-4: full substring scan, not prefix-only.
+# ADV-LOW-11: expanded injection phrase blocklist (defense-in-depth).
 _INJECTION_PHRASES = (
     "ignore ",
     "system:",
@@ -30,7 +31,18 @@ _INJECTION_PHRASES = (
     "assistant:",
     "user:",
     "important:",
+    "disregard ",
+    "forget ",
+    "override ",
+    "new instruction",
 )
+
+# ADV-MED-2: Valid symbol kinds — only these are interpolated into prompts.
+_VALID_KINDS = frozenset({
+    "function", "class", "method", "constant", "type", "variable",
+    "interface", "enum", "struct", "trait", "module", "namespace",
+    "property", "constructor", "field",
+})
 
 
 def _contains_injection_phrase(text: str) -> bool:
@@ -211,7 +223,9 @@ class BatchSummarizer:
         for i, sym in enumerate(symbols, 1):
             safe_sig = sym.signature.replace("\n", " ").replace("\r", " ")[:200]
             safe_sig = sanitize_signature_for_api(safe_sig)
-            lines.append(f"  [{i}] {sym.kind}: {sig_open}{safe_sig}{sig_close}")
+            # ADV-MED-2: validate sym.kind against known set before interpolation
+            kind = sym.kind if sym.kind in _VALID_KINDS else "symbol"
+            lines.append(f"  [{i}] {kind}: {sig_open}{safe_sig}{sig_close}")
 
         resp_start = f"RESP_{nonce}_START"
         resp_end = f"RESP_{nonce}_END"
@@ -259,12 +273,14 @@ class BatchSummarizer:
             )
             return [""] * expected_count
         else:
-            # Degraded mode: nonce delimiters missing, warn and parse full text
+            # ADV-LOW-8: Degraded mode — nonce delimiters missing entirely.
+            # Return empty summaries rather than parsing untrusted full response,
+            # which could contain injection payloads outside the blocklist.
             logger.warning(
                 "ADV-HIGH-3: Response nonce delimiters missing; "
-                "falling back to full-text parse (degraded mode)"
+                "returning empty summaries to prevent injection"
             )
-            parse_text = text
+            return [""] * expected_count
 
         summaries = [""] * expected_count
 

@@ -1,5 +1,6 @@
 """In-memory code graph for relationship queries."""
 
+import hashlib
 from collections import defaultdict, deque
 from typing import Optional
 
@@ -8,12 +9,14 @@ from typing import Optional
 _MAX_DEPTH_LIMIT: int = 50
 
 
-def _symbol_fingerprint(symbols: list[dict]) -> int:
-    """Compute a stable hash from symbol IDs for cache keying.
+def _symbol_fingerprint(symbols: list[dict]) -> str:
+    """Compute a collision-resistant fingerprint from symbol IDs for cache keying.
 
-    Uses a frozenset of symbol IDs so insertion order doesn't matter.
+    ADV-LOW-4: Uses SHA-256 instead of Python's hash() to avoid collisions
+    that could return stale cached graphs.
     """
-    return hash(frozenset(sym.get("id", "") for sym in symbols))
+    ids = sorted(sym.get("id", "") for sym in symbols)
+    return hashlib.sha256("\n".join(ids).encode()).hexdigest()
 
 
 def _clamp_depth(depth: int) -> int:
@@ -73,7 +76,7 @@ class CodeGraph:
         return graph
 
     # Class-level graph cache: fingerprint -> CodeGraph
-    _graph_cache: dict[int, "CodeGraph"] = {}
+    _graph_cache: dict[str, "CodeGraph"] = {}
     _CACHE_MAX_SIZE: int = 8
 
     @classmethod
@@ -192,13 +195,17 @@ class CodeGraph:
         """Return symbol IDs that *symbol_id* calls (forward call graph)."""
         return sorted(self._calls_fwd.get(symbol_id, set()))
 
+    # ADV-LOW-3: maximum paths returned by get_call_chain to prevent
+    # exponential BFS expansion in highly connected graphs.
+    _MAX_CALL_CHAIN_PATHS: int = 5
+
     def get_call_chain(
         self,
         from_id: str,
         to_id: str,
         max_depth: int = 10,
     ) -> list[list[str]]:
-        """Find all call paths from *from_id* to *to_id* via BFS.
+        """Find call paths from *from_id* to *to_id* via BFS.
 
         Args:
             from_id: Starting symbol ID.
@@ -206,7 +213,8 @@ class CodeGraph:
             max_depth: Maximum path length (clamped to 50).
 
         Returns:
-            List of paths, where each path is a list of symbol IDs.
+            List of paths (up to _MAX_CALL_CHAIN_PATHS), where each path
+            is a list of symbol IDs.
         """
         max_depth = _clamp_depth(max_depth)
         if from_id not in self._symbols_by_id or to_id not in self._symbols_by_id:
@@ -216,6 +224,9 @@ class CodeGraph:
         queue: deque[list[str]] = deque([[from_id]])
 
         while queue:
+            # ADV-LOW-3: early termination once enough paths are found
+            if len(paths) >= self._MAX_CALL_CHAIN_PATHS:
+                break
             path = queue.popleft()
             if len(path) - 1 >= max_depth:
                 continue
@@ -226,6 +237,8 @@ class CodeGraph:
                 new_path = path + [neighbour]
                 if neighbour == to_id:
                     paths.append(new_path)
+                    if len(paths) >= self._MAX_CALL_CHAIN_PATHS:
+                        break
                 else:
                     queue.append(new_path)
         return paths

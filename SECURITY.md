@@ -31,7 +31,12 @@ The threat model assumes:
 | Binary confusion | Dual-stage detection: extension-based filtering plus null-byte content sniffing |
 | Credential logging | _RedactAuthFilter suppresses httpx log records containing auth headers at all log levels |
 | Supply chain | `uv.lock` pinned with hashes; CI uses `uv sync --frozen --verify-hashes`; GitHub Actions are SHA-pinned |
-| Summarizer injection | Injection phrases stripped from summaries (full substring scan, not prefix-only); degraded-mode parse returns empty on missing end marker |
+| Summarizer injection | Injection phrases stripped from summaries (full substring scan, not prefix-only); degraded-mode parse returns empty on missing nonce delimiters; symbol kind validated against allowlist before prompt interpolation |
+| Graph traversal DoS | BFS call-chain capped at 5 paths; all traversal depths clamped to [1, 50]; SHA-256 fingerprint for cache keys |
+| Index poisoning | `load_index()` rejects source_files with traversal sequences or control characters |
+| Gitignore ReDoS | Per-pattern length cap (200 chars) in both local and GitHub gitignore parsing; pattern count capped at 2000 |
+| fd leak on validation failure | `safe_read_file()` transfers fd ownership to fdopen immediately; explicit close on fdopen failure |
+| Silent redaction bypass | `CODESIGHT_NO_REDACT=1` logs a warning on first detection |
 
 ## Validation Chain
 
@@ -123,7 +128,7 @@ All tools are rate-limited at 60 calls per minute per tool and 300 calls per min
 - Directory permissions: `0o700` (owner-only access)
 - Index writes use 3-phase atomic write: content files first, then JSON `.tmp`, then rename
 - `O_NOFOLLOW` on all file reads and writes to prevent symlink races
-- `load_index()` validates schema: required fields, type checks, element-level type checks on symbol arrays
+- `load_index()` validates schema: required fields, type checks, element-level type checks on symbol arrays, source_files path sanitization (rejects traversal sequences and control characters)
 - `CODESIGHT_ALLOWED_ROOTS`: colon-separated allowlist; colons within paths are rejected
 - Per-repository advisory lock files serialize `save_index()`, `incremental_save()`, and `delete_index()`
 - Auxiliary state directories reject symlinks and are forced to `0o700`
@@ -133,7 +138,10 @@ All tools are rate-limited at 60 calls per minute per tool and 300 calls per min
 
 - Nonces enforced in `_parse_response`: response must begin with `RESP_{nonce}_START` and end with `RESP_{nonce}_END`
 - Missing end marker treated as parse failure (empty result), not degraded success
+- Missing nonce delimiters entirely: returns empty summaries (no degraded-mode parsing of untrusted text)
 - Batch size capped at `MAX_BATCHES_PER_INDEX=50`
+- Symbol `kind` validated against `_VALID_KINDS` allowlist before prompt interpolation (prevents kind-injection attacks)
+- Injection phrase blocklist expanded: "disregard", "forget", "override", "new instruction" added to existing set
 - Signatures sanitized (newlines stripped, length capped) before inclusion in prompts
 - `trust_env=False` on both httpx and Anthropic SDK clients
 
@@ -151,7 +159,8 @@ All tools are rate-limited at 60 calls per minute per tool and 300 calls per min
 | Scan-04e | 2026-03-04e | 16 fixed | +25 |
 | Adversarial (2nd round) | 2026-03-04 | 30 fixed | +49 |
 | Adversarial (3rd round) | 2026-03-04b | 23 findings (fixes pending) | — |
-| **Total** | | | **664 tests** |
+| Adversarial (4th round) | 2026-03-08 | 18 findings, 11 fixed | pending |
+| **Total** | | | **664+ tests** |
 
 ## Testing
 

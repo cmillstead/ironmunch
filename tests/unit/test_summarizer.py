@@ -327,8 +327,10 @@ def test_parse_response_redacts_inline_secret():
     summarizer = BatchSummarizer()
     # Use concatenation to avoid GitHub push protection matching literal token patterns
     secret = "sk_live_" + "x" * 24
-    response_text = f"1. A function that uses key={secret} for auth"
-    nonce = "0" * 8
+    nonce = "testnonceabc12345"
+    resp_start = f"RESP_{nonce}_START"
+    resp_end = f"RESP_{nonce}_END"
+    response_text = f"{resp_start}\n1. A function that uses key={secret} for auth\n{resp_end}"
     summaries = summarizer._parse_response(response_text, 1, nonce=nonce)
     assert summaries[0] is not None
     assert secret not in summaries[0], f"Secret leaked in summary: {summaries[0]!r}"
@@ -538,15 +540,15 @@ def test_parse_response_nonce_ignores_injected_line_between_markers():
     assert len(summaries) == 2
 
 
-def test_parse_response_nonce_missing_falls_back_gracefully():
-    """ADV-HIGH-3: A response without nonce delimiters must not raise; it falls back to full-text parse."""
+def test_parse_response_nonce_missing_returns_empty():
+    """ADV-HIGH-3 / ADV-LOW-8: A response without nonce delimiters must return empty summaries (no degraded parsing)."""
     summarizer = BatchSummarizer()
     nonce = "deadbeef"
     # No RESP_<nonce>_START / END markers in response
     response_text = "1. Does something useful."
     summaries = summarizer._parse_response(response_text, 1, nonce=nonce)
-    # Should still parse the one summary via fallback path
-    assert summaries[0] == "Does something useful."
+    # ADV-LOW-8: degraded mode disabled — returns empty to prevent injection
+    assert summaries[0] == "", f"Expected empty summary without nonce delimiters, got: {summaries[0]!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -748,19 +750,17 @@ def test_parse_response_start_only_correct_length():
     )
 
 
-def test_parse_response_end_only_falls_back_gracefully():
-    """ADV-HIGH-5 boundary: Response with only end marker (no start) falls back to degraded full-text parse."""
+def test_parse_response_end_only_returns_empty():
+    """ADV-HIGH-5 / ADV-LOW-8: Response with only end marker (no start) returns empty summaries."""
     summarizer = BatchSummarizer()
     nonce = "cafebabe12345678"
     resp_end = f"RESP_{nonce}_END"
-    # No start marker — degraded mode (full-text parse), not a parse failure.
-    # The summary and end marker are on separate lines so the parser reads only
-    # the summary line (the end marker line has no "N." prefix so is skipped).
+    # No start marker — ADV-LOW-8: no degraded mode, returns empty
     response_text = f"1. Validates user input.\n{resp_end}"
     summaries = summarizer._parse_response(response_text, 1, nonce=nonce)
-    # Degraded parse should still extract the summary
-    assert summaries[0] == "Validates user input.", (
-        f"Degraded parse with end-only marker returned: {summaries[0]!r}"
+    # No nonce delimiters present (end-only doesn't count) — empty summaries
+    assert summaries[0] == "", (
+        f"Expected empty summary without start marker, got: {summaries[0]!r}"
     )
 
 

@@ -19,6 +19,7 @@ import pathspec
 
 from .security import is_secret_file, is_binary_file, is_binary_content
 from .core.limits import MAX_FILE_SIZE, MAX_FILE_COUNT, MAX_DIRECTORY_DEPTH, GITHUB_API_TIMEOUT
+from .core.validation import is_within
 from .parser.languages import LANGUAGE_EXTENSIONS
 
 
@@ -98,11 +99,14 @@ def _load_gitignore(folder_path: Path) -> Optional[pathspec.PathSpec]:
 
 
 def _is_symlink_escape(root: Path, file_path: Path) -> bool:
-    """Check if a symlink resolves outside the root directory."""
+    """Check if a symlink resolves outside the root directory.
+
+    ADV-LOW-9: delegates to is_within() to centralize containment logic.
+    """
     try:
         resolved = file_path.resolve()
         resolved_root = root.resolve()
-        return not str(resolved).startswith(str(resolved_root) + os.sep)
+        return not is_within(resolved_root, resolved)
     except (OSError, ValueError):
         return True
 
@@ -209,10 +213,10 @@ def discover_local_files(
             except ValueError:
                 continue
 
-            # Path containment check
+            # ADV-LOW-9: Path containment check via centralized is_within()
             try:
                 resolved = file_path.resolve()
-                if not str(resolved).startswith(str(root) + os.sep):
+                if not is_within(root, resolved):
                     skipped_path_traversal_count += 1
                     continue
             except (OSError, ValueError):
@@ -450,6 +454,8 @@ def discover_source_files(
             # SEC-LOW-3: cap pattern count to prevent pathspec regex DoS
             if len(lines) > 2000:
                 lines = lines[:2000]
+            # ADV-LOW-2: drop overlong patterns to prevent ReDoS (matches local _load_gitignore)
+            lines = [p for p in lines if len(p) <= MAX_GITIGNORE_PATTERN_LEN]
             gitignore_spec = pathspec.PathSpec.from_lines(
                 "gitignore",
                 lines,

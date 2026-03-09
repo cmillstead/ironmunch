@@ -89,21 +89,22 @@ def safe_read_file(abs_path: str, root: str) -> str:
             raise ValidationError("Path is a symlink (O_NOFOLLOW)") from exc
         raise
 
+    # ADV-LOW-1: Transfer fd ownership to fdopen immediately. If fdopen
+    # fails, close fd explicitly; once fdopen succeeds, the file object
+    # owns the fd and we use a with-block for cleanup.
     try:
-        size = os.fstat(fd).st_size
+        fh = os.fdopen(fd, encoding="utf-8", errors="replace")
+    except Exception:
+        os.close(fd)
+        raise
+
+    with fh:
+        size = os.fstat(fh.fileno()).st_size
         if size > MAX_FILE_SIZE:
             raise ValidationError(
                 f"File exceeds maximum size ({size} > {MAX_FILE_SIZE})"
             )
-        with os.fdopen(fd, encoding="utf-8", errors="replace") as fh:
-            return fh.read()
-    except Exception:
-        # Close fd only if fdopen was not called (fdopen takes ownership of fd)
-        try:
-            os.close(fd)
-        except OSError:
-            pass
-        raise
+        return fh.read()
 
 
 def is_secret_file(file_path: str) -> bool:
@@ -174,13 +175,28 @@ _INLINE_SECRET_RE = re.compile(
 )
 
 
+_NO_REDACT_WARNED = False
+
+
 def _no_redact() -> bool:
     """Check if redaction is disabled via CODESIGHT_NO_REDACT=1.
 
     Checked at runtime on every call (not cached) so the env var
     can be toggled mid-process if needed.
+    ADV-MED-1: Logs a warning on first detection so silent misconfiguration
+    is surfaced.
     """
-    return os.environ.get("CODESIGHT_NO_REDACT", "") == "1"
+    global _NO_REDACT_WARNED
+    if os.environ.get("CODESIGHT_NO_REDACT", "") == "1":
+        if not _NO_REDACT_WARNED:
+            import logging
+            logging.getLogger(__name__).warning(
+                "CODESIGHT_NO_REDACT=1 is set — inline secret redaction is DISABLED. "
+                "Secrets in code may be sent to external APIs."
+            )
+            _NO_REDACT_WARNED = True
+        return True
+    return False
 
 
 def sanitize_signature_for_api(signature: str) -> str:
