@@ -39,7 +39,7 @@ jobs:
         with:
           max_attempts: 3
           timeout_minutes: 30
-          command: uv run pytest --splits 4 --group ${{ matrix.group }} --splitting-algorithm least_duration --tb=short -q
+          command: uv run pytest --splits 4 --group ${{ matrix.group }} --splitting-algorithm least_duration --cov=codesight_mcp --cov-report=term-missing --tb=short -q
 
       - name: Upload test results
         if: failure()
