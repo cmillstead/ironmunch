@@ -65,17 +65,17 @@ The server communicates via MCP protocol (stdio). It's typically configured in a
 # Install test dependencies
 uv sync --extra test
 
-# Run all tests (1,073 tests)
+# Run all tests (1,253 tests)
 uv run pytest --tb=short -q
 
 # Run specific test categories
-uv run pytest tests/unit/              # Parser & analysis (276 tests)
-uv run pytest tests/security/          # Adversarial & security (417 tests)
-uv run pytest tests/tools/             # Tool functions (201 tests)
+uv run pytest tests/unit/              # Parser & analysis (337 tests)
+uv run pytest tests/security/          # Adversarial & security (433 tests)
+uv run pytest tests/tools/             # Tool functions (198 tests)
 uv run pytest tests/server/            # Server & registry (76 tests)
-uv run pytest tests/core/              # Core infrastructure (79 tests)
-uv run pytest tests/storage/           # Storage persistence (15 tests)
-uv run pytest tests/integration/       # End-to-end pipeline (9 tests)
+uv run pytest tests/core/              # Core infrastructure (82 tests)
+uv run pytest tests/storage/           # Storage persistence (33 tests)
+uv run pytest tests/integration/       # End-to-end pipeline (55 tests)
 
 # Run with verbose output
 uv run pytest -v

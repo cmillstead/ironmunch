@@ -30,3 +30,13 @@ This repo is indexed in codesight-mcp. Use codesight-mcp MCP tools for code expl
 - `get_impact` — analyze impact of changing a symbol (callers + inheritors + importers)
 
 Use `Read` only when you need content that isn't a named symbol (e.g. config files, pyproject.toml).
+
+## Running Tests
+
+Always use the project venv to run tests:
+
+```bash
+.venv/bin/pytest --tb=short -q
+```
+
+Do NOT use bare `pytest` or `python -m pytest` — the package must be installed in the venv for imports to resolve.
