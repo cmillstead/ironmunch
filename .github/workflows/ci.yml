@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "0 0 * * 0"  # Weekly on Sunday at midnight UTC
 
 permissions:
   contents: read
@@ -12,11 +14,19 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
 
       - name: Install uv
         uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
       - name: Set up Python
         run: uv python install 3.12
@@ -25,4 +35,16 @@ jobs:
         run: uv sync --frozen --extra test
 
       - name: Run tests
-        run: uv run pytest --tb=short -q
+        uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e  # v3
+        with:
+          max_attempts: 3
+          timeout_minutes: 30
+          command: uv run pytest --splits 4 --group ${{ matrix.group }} --splitting-algorithm least_duration --tb=short -q
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: test-results-shard-${{ matrix.group }}
+          path: test-results/
+          retention-days: 30
