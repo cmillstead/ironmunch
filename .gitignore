@@ -9,3 +9,4 @@ docs/plans/
 .env
 .env.*
 .worktrees/
+_bmad-output/

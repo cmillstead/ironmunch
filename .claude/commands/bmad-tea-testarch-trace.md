@@ -1,0 +1,1 @@
+Load and execute the BMAD TEA testarch-trace workflow from `_bmad/tea/workflows/testarch/trace/workflow.yaml`. Follow its instructions exactly.

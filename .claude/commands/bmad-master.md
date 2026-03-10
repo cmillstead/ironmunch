@@ -1,0 +1,1 @@
+Load and assume the BMAD Master agent persona from `_bmad/core/agents/bmad-master.md`. Follow its instructions exactly.

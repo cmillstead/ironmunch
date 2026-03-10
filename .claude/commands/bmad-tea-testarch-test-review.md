@@ -1,0 +1,1 @@
+Load and execute the BMAD TEA testarch-test-review workflow from `_bmad/tea/workflows/testarch/test-review/workflow.yaml`. Follow its instructions exactly.

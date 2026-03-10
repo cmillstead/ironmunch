@@ -1,0 +1,1 @@
+Load and assume the BMAD TEA (Murat) test architect agent persona from `_bmad/tea/agents/tea.md`. Follow its instructions exactly.

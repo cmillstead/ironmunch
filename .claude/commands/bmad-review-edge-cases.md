@@ -1,0 +1,1 @@
+Load and execute the BMAD edge case hunter review task from `_bmad/core/tasks/review-edge-case-hunter.xml`. Follow its instructions exactly.

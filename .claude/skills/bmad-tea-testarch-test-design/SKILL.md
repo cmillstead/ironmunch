@@ -1,0 +1,1 @@
+Load and execute the BMAD TEA testarch-test-design workflow from `_bmad/tea/workflows/testarch/test-design/workflow.yaml`. Follow its instructions exactly.

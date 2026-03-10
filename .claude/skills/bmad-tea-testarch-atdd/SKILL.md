@@ -1,0 +1,1 @@
+Load and execute the BMAD TEA testarch-atdd workflow from `_bmad/tea/workflows/testarch/atdd/workflow.yaml`. Follow its instructions exactly.

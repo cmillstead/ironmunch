@@ -1,0 +1,1 @@
+Load and execute the BMAD brainstorming workflow from `_bmad/core/workflows/brainstorming/workflow.md`. Follow its instructions exactly.

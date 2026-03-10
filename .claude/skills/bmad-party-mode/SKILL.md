@@ -1,0 +1,1 @@
+Load and execute the BMAD party-mode workflow from `_bmad/core/workflows/party-mode/workflow.md`. Follow its instructions exactly.

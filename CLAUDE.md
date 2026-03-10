@@ -40,3 +40,13 @@ Always use the project venv to run tests:
 ```
 
 Do NOT use bare `pytest` or `python -m pytest` — the package must be installed in the venv for imports to resolve.
+
+## Dependencies
+
+After changing dependencies in `pyproject.toml`, always regenerate the lockfile:
+
+```bash
+uv lock
+```
+
+CI uses `uv sync --frozen` which only installs what's in `uv.lock` — if the lockfile is stale, CI will fail.
