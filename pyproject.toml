@@ -49,3 +49,9 @@ packages = ["src/codesight_mcp"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "benchmark: token efficiency and performance benchmarks",
+    "ci: CI workflow configuration validation tests",
+    "fuzz: fuzzing / property-based tests with random inputs",
+    "stress: stress and load tests (rate limiting, large codebases)",
+]
