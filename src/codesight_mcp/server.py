@@ -11,6 +11,7 @@ Ported from jcodemunch-mcp with three hardening layers:
 
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -276,6 +277,15 @@ def main():
     root to the target path itself so the CLI is usable outside an MCP session.
     """
     import sys
+
+    logging.basicConfig(
+        level=getattr(
+            logging,
+            os.environ.get("LOG_LEVEL", "WARNING").upper(),
+            logging.WARNING,
+        ),
+        format="%(levelname)s %(name)s: %(message)s",
+    )
 
     from .tools.index_folder import index_folder as _index_folder
     from .tools.index_repo import index_repo as _index_repo
