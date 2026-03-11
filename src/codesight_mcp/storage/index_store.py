@@ -234,7 +234,9 @@ class IndexStore:
         for pattern in ("*.json.tmp", "*.json.gz.tmp"):
             for tmp_file in self.base_path.glob(pattern):
                 try:
-                    if (now - tmp_file.stat().st_mtime) < 60:
+                    if tmp_file.is_symlink():
+                        continue  # skip symlinks — don't follow or delete
+                    if (now - tmp_file.lstat().st_mtime) < 60:
                         continue  # skip recent files — may be active write
                     tmp_file.unlink()
                 except OSError:
