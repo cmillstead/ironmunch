@@ -224,7 +224,7 @@ def _validate_storage_path(storage_path: str | None) -> str | None:
         resolved = p.resolve()
         # ADV-MED-6: If the directory already exists, verify ownership and permissions
         if resolved.exists():
-            st = resolved.stat()
+            st = resolved.lstat()
             if st.st_uid != os.getuid():
                 raise ValueError(
                     f"CODE_INDEX_PATH {storage_path!r} is not owned by the current user"
