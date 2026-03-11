@@ -50,7 +50,9 @@ def ensure_private_dir(path: str | Path) -> Path:
 def atomic_write_nofollow(path: str | Path, data: str) -> None:
     """Atomically write text data without following symlinks at the temp path."""
     target = Path(path)
-    tmp_path = target.with_suffix(target.suffix + ".tmp")
+    tmp_path = target.with_name(
+        f"{target.name}.tmp.{os.getpid()}.{threading.get_ident()}"
+    )
     fd = os.open(
         str(tmp_path),
         os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,

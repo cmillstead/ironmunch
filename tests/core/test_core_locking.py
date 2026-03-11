@@ -98,11 +98,13 @@ class TestAtomicWriteNofollow:
         real.write_text("original")
         link = tmp_path / "link.txt"
         link.symlink_to(real)
-        # The temp file (link.txt.tmp) is what gets O_NOFOLLOW, but if link.txt
-        # itself is a symlink, replace() will follow it. The key security
-        # property is that O_NOFOLLOW prevents opening a symlinked temp path.
-        # Creating a symlink at the .tmp path would trigger the error.
-        tmp_file = tmp_path / "link.txt.tmp"
+        # The temp file uses PID/thread in the name: link.txt.tmp.<pid>.<tid>
+        # We must create the symlink at the exact path atomic_write_nofollow will use.
+        import os
+        import threading
+
+        tmp_name = f"link.txt.tmp.{os.getpid()}.{threading.get_ident()}"
+        tmp_file = tmp_path / tmp_name
         tmp_file.symlink_to(real)
         with pytest.raises(OSError):
             atomic_write_nofollow(link, "evil")
@@ -111,6 +113,16 @@ class TestAtomicWriteNofollow:
         target = str(tmp_path / "strfile.txt")
         atomic_write_nofollow(target, "content")
         assert Path(target).read_text() == "content"
+
+    def test_uses_unique_tmp_suffix(self, tmp_path):
+        """atomic_write_nofollow should include PID/thread in temp filename."""
+        import inspect
+        from codesight_mcp.core.locking import atomic_write_nofollow as awn
+
+        source = inspect.getsource(awn)
+        assert "getpid" in source or "get_ident" in source, (
+            "tmp path should include PID/thread for thread safety"
+        )
 
 
 class TestExclusiveFileLock:
