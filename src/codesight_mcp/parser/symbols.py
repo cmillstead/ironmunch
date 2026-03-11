@@ -51,9 +51,10 @@ def make_symbol_id(file_path: str, qualified_name: str, kind: str = "") -> str:
         A human-readable symbol ID.
     """
     # Prevent ambiguous IDs: '::' in file_path or '#' in qualified_name
-    # would break the ID parsing convention file_path::qualified_name#kind
-    safe_path = file_path.replace("::", "__")
-    safe_name = qualified_name.replace("#", "_")
+    # would break the ID parsing convention file_path::qualified_name#kind.
+    # Use percent-encoding to avoid collision (e.g. 'foo::bar.py' vs 'foo__bar.py').
+    safe_path = file_path.replace("::", "%3A%3A")
+    safe_name = qualified_name.replace("#", "%23")
     if kind:
         return f"{safe_path}::{safe_name}#{kind}"
     return f"{safe_path}::{safe_name}"

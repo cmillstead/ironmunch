@@ -200,3 +200,38 @@ class TestSearchTextFileSpotlighting:
 
             assert "error" in result
             assert "redaction" in result["error"].lower()
+
+    def test_redaction_sentinel_substring_rejected(self):
+        """Substrings of the redaction sentinel (>= 4 chars) must also be blocked."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_store_with_file(
+                tmp, "owner", "repo_sub",
+                file_path="x.py",
+                file_content="placeholder\n",
+            )
+            # "<REDA" is a prefix of "<REDACTED>" with length >= 4
+            result = search_text(
+                repo="owner/repo_sub",
+                query="<REDA",
+                confirm_sensitive_search=True,
+                storage_path=tmp,
+            )
+            assert "error" in result
+            assert "redaction" in result["error"].lower()
+
+    def test_redaction_sentinel_short_prefix_allowed(self):
+        """Very short prefixes (< 4 chars) of the sentinel should be allowed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_store_with_file(
+                tmp, "owner", "repo_short",
+                file_path="x.py",
+                file_content="<RE is fine\n",
+            )
+            result = search_text(
+                repo="owner/repo_short",
+                query="<RE",
+                confirm_sensitive_search=True,
+                storage_path=tmp,
+            )
+            # Should not be blocked (only 3 chars)
+            assert "error" not in result

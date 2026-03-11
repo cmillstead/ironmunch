@@ -57,7 +57,6 @@ def _is_test_file(file_path: str) -> bool:
         or filename.endswith("_spec.rb")
         or filename.endswith("Test.java")
         or filename.endswith("Test.kt")
-        or "/test/" in file_path
         or "/tests/" in file_path
         or "/__tests__/" in file_path
         or file_path.startswith("test/")

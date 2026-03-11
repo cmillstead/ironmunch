@@ -8,6 +8,50 @@ from codesight_mcp.storage import IndexStore, CodeIndex
 from codesight_mcp.parser import Symbol
 
 
+def test_save_index_logs_skipped_content_files(tmp_path, caplog):
+    """Verify warnings are logged when content files are skipped due to path validation."""
+    import logging
+
+    store = IndexStore(base_path=str(tmp_path))
+
+    symbols = [
+        Symbol(
+            id="test-py::foo",
+            file="test.py",
+            name="foo",
+            qualified_name="foo",
+            kind="function",
+            language="python",
+            signature="def foo():",
+            summary="Does foo",
+            byte_offset=0,
+            byte_length=100,
+        )
+    ]
+
+    # Include a file with path traversal that should be skipped
+    raw_files = {
+        "test.py": "def foo(): pass",
+        "../escape.py": "# malicious",
+    }
+
+    with caplog.at_level(logging.WARNING, logger="codesight_mcp.storage.index_store"):
+        index = store.save_index(
+            owner="testowner",
+            name="testrepo",
+            source_files=["test.py"],
+            symbols=symbols,
+            raw_files=raw_files,
+            languages={"python": 1},
+        )
+
+    # Should have logged a warning about skipped file
+    assert any("skipped" in record.message.lower() or "traversal" in record.message.lower()
+               for record in caplog.records), (
+        f"Expected a warning about skipped content file, got: {[r.message for r in caplog.records]}"
+    )
+
+
 def test_save_and_load_index(tmp_path):
     """Test saving and loading an index."""
     store = IndexStore(base_path=str(tmp_path))

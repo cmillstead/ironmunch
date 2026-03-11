@@ -56,7 +56,7 @@ def get_call_chain(
     for path in paths:
         formatted_path = []
         for sid in path:
-            sym = graph._symbols_by_id.get(sid)
+            sym = graph.get_symbol(sid)
             if sym:
                 formatted_path.append({
                     "id": wrap_untrusted_content(sid),

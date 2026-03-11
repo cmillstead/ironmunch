@@ -11,13 +11,24 @@ _MAX_DEPTH_LIMIT: int = 50
 
 
 def _symbol_fingerprint(symbols: list[dict]) -> str:
-    """Compute a collision-resistant fingerprint from symbol IDs for cache keying.
+    """Compute a collision-resistant fingerprint from symbol data for cache keying.
 
     ADV-LOW-4: Uses SHA-256 instead of Python's hash() to avoid collisions
     that could return stale cached graphs.
+
+    Includes symbol IDs, call lists, inherits_from, imports, and implements
+    so that changes to function bodies (adding/removing calls) invalidate
+    the cached graph.
     """
-    ids = sorted(sym.get("id", "") for sym in symbols)
-    return hashlib.sha256("\n".join(ids).encode()).hexdigest()
+    parts = []
+    for sym in sorted(symbols, key=lambda s: s.get("id", "")):
+        sid = sym.get("id", "")
+        calls = ",".join(sorted(sym.get("calls", [])))
+        inherits = ",".join(sorted(sym.get("inherits_from", [])))
+        imports = ",".join(sorted(sym.get("imports", [])))
+        implements = ",".join(sorted(sym.get("implements", [])))
+        parts.append(f"{sid}|{calls}|{inherits}|{imports}|{implements}")
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
 def _clamp_depth(depth: int) -> int:
@@ -198,6 +209,10 @@ class CodeGraph:
     # Call-graph queries
     # ------------------------------------------------------------------
 
+    def get_symbol(self, symbol_id: str) -> dict | None:
+        """Look up a symbol dict by ID, or return None if not found."""
+        return self._symbols_by_id.get(symbol_id)
+
     def get_callers(self, symbol_id: str) -> list[str]:
         """Return symbol IDs that call *symbol_id* (reverse call graph)."""
         return sorted(self._calls_rev.get(symbol_id, set()))
@@ -343,6 +358,10 @@ class CodeGraph:
         Returns:
             Dict mapping symbol_id -> rank score. Ranks sum to N (node count).
         """
+        damping = max(0.1, min(damping, 0.99))
+        max_iterations = max(1, min(max_iterations, 1000))
+        tolerance = max(1e-10, min(tolerance, 1.0))
+
         nodes = list(self._symbols_by_id.keys())
         n = len(nodes)
         if n == 0:

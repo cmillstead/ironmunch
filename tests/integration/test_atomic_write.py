@@ -69,7 +69,7 @@ class TestCrashDuringSecondSave:
         original_replace = Path.replace
 
         def failing_replace(self_path, target):
-            if str(self_path).endswith(".json.gz.tmp"):
+            if ".json.gz.tmp" in str(self_path):
                 raise OSError("Simulated disk failure during rename")
             return original_replace(self_path, target)
 
@@ -110,7 +110,7 @@ class TestCrashDuringSecondSave:
         original_replace = Path.replace
 
         def failing_replace(self_path, target):
-            if str(self_path).endswith(".json.gz.tmp"):
+            if ".json.gz.tmp" in str(self_path):
                 raise OSError("Simulated write failure")
             return original_replace(self_path, target)
 
@@ -146,7 +146,7 @@ class TestTmpFileCleanup:
         original_replace = Path.replace
 
         def failing_replace(self_path, target):
-            if str(self_path).endswith(".json.gz.tmp"):
+            if ".json.gz.tmp" in str(self_path):
                 raise OSError("Simulated failure")
             return original_replace(self_path, target)
 
@@ -177,7 +177,7 @@ class TestTmpFileCleanup:
 
         def failing_on_index_replace(self_path, target):
             nonlocal call_count
-            if str(self_path).endswith(".json.gz.tmp"):
+            if ".json.gz.tmp" in str(self_path):
                 raise OSError("Simulated index write failure")
             # Allow content .tmp renames in Phase 1 — but those haven't
             # happened yet since Phase 2 comes before Phase 3.

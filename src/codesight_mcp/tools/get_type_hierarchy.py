@@ -6,6 +6,8 @@ from ..core.boundaries import make_meta, wrap_untrusted_content
 from ._common import prepare_graph_query, timed, elapsed_ms
 from .registry import ToolSpec, register
 
+_MAX_HIERARCHY_DEPTH = 100
+
 
 def get_type_hierarchy(
     repo: str,
@@ -38,7 +40,9 @@ def get_type_hierarchy(
     parents: list[dict] = []
     visited_parents: set[str] = {symbol_id}
 
-    def _collect_parents(sid: str) -> None:
+    def _collect_parents(sid: str, _depth: int = 0) -> None:
+        if _depth >= _MAX_HIERARCHY_DEPTH:
+            return
         h = graph.get_type_hierarchy(sid)
         for parent_key in h["parents"]:
             if parent_key in visited_parents:
@@ -55,7 +59,7 @@ def get_type_hierarchy(
                     "relationship": "inherits",
                 })
                 # Recurse to find grandparents
-                _collect_parents(parent_key)
+                _collect_parents(parent_key, _depth + 1)
             else:
                 # Unresolved parent (external type) -- include with name only
                 parents.append({
@@ -80,7 +84,7 @@ def get_type_hierarchy(
                     "line": sym.get("line", 0),
                     "relationship": "implements",
                 })
-                _collect_parents(iface_key)
+                _collect_parents(iface_key, _depth + 1)
             else:
                 parents.append({
                     "id": wrap_untrusted_content(iface_key),
@@ -97,7 +101,9 @@ def get_type_hierarchy(
     children: list[dict] = []
     visited_children: set[str] = {symbol_id}
 
-    def _collect_children(sid: str) -> None:
+    def _collect_children(sid: str, _depth: int = 0) -> None:
+        if _depth >= _MAX_HIERARCHY_DEPTH:
+            return
         h = graph.get_type_hierarchy(sid)
         for child_key in h["children"]:
             if child_key in visited_children:
@@ -113,7 +119,7 @@ def get_type_hierarchy(
                     "line": sym.get("line", 0),
                     "relationship": "inherits",
                 })
-                _collect_children(child_key)
+                _collect_children(child_key, _depth + 1)
         for impl_key in h["implemented_by"]:
             if impl_key in visited_children:
                 continue
@@ -128,7 +134,7 @@ def get_type_hierarchy(
                     "line": sym.get("line", 0),
                     "relationship": "implements",
                 })
-                _collect_children(impl_key)
+                _collect_children(impl_key, _depth + 1)
 
     _collect_children(symbol_id)
 

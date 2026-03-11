@@ -51,12 +51,12 @@ def test_invalidate_cache_removes_content_dir(tmp_path):
     assert len(remaining_dirs) == 0, "Content directory should be gone after invalidation"
 
 
-def test_invalidate_cache_without_confirm_raises_validation_error(tmp_path):
-    """ADV-MED-13: invalidate_cache without confirm=True must raise ValidationError."""
-    from codesight_mcp.core.validation import ValidationError
+def test_invalidate_cache_without_confirm_returns_error_dict(tmp_path):
+    """ADV-MED-13: invalidate_cache without confirm=True must return error dict."""
     _make_store_with_repo(str(tmp_path))
-    with pytest.raises(ValidationError, match="confirm=True"):
-        invalidate_cache("test/repo", storage_path=str(tmp_path))
+    result = invalidate_cache("test/repo", storage_path=str(tmp_path))
+    assert "error" in result
+    assert "confirm=True" in result["error"]
 
 
 def test_invalidate_cache_with_confirm_true_deletes_index(tmp_path):

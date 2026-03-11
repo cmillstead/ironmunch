@@ -90,10 +90,10 @@ class TestListReposMeta:
         result = list_repos(storage_path=str(tmp_path))
         assert "timing_ms" in result["_meta"]
 
-    def test_meta_trusted_is_true(self, tmp_path):
-        """list_repos returns index metadata, so contentTrust should be trusted."""
+    def test_meta_trusted_is_untrusted(self, tmp_path):
+        """list_repos wraps disk-derived repo names, so contentTrust should be untrusted."""
         result = list_repos(storage_path=str(tmp_path))
-        assert result["_meta"]["contentTrust"] == "trusted"
+        assert result["_meta"]["contentTrust"] == "untrusted"
 
 
 class TestListReposEdgeCases:

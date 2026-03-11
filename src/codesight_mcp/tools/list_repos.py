@@ -29,7 +29,7 @@ def list_repos(storage_path: Optional[str] = None) -> dict:
         "count": len(repos),
         "repos": repos,
         "_meta": {
-            **make_meta(source="index_list", trusted=True),
+            **make_meta(source="index_list", trusted=False),
             "timing_ms": ms,
         },
     }

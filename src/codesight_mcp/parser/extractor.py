@@ -90,6 +90,13 @@ def parse_file(content: str, filename: str, language: str) -> list[Symbol]:
 
     spec = LANGUAGE_REGISTRY[language]
     source_bytes = content.encode("utf-8", errors="replace")
+    # Warn if replacement characters were injected — byte offsets stored in
+    # the index may not correspond to the original file's byte positions.
+    if b"\xef\xbf\xbd" in source_bytes and "\ufffd" not in content:
+        logging.getLogger(__name__).warning(
+            "File contains non-UTF-8 bytes; byte offsets may be inaccurate: %s",
+            filename,
+        )
 
     # Get parser for this language
     parser = _get_parser(spec.ts_language)
@@ -536,8 +543,10 @@ def _extract_calls(body_node, spec: LanguageSpec, source_bytes: bytes) -> list[s
     return deduped
 
 
-def _collect_calls(node, spec: LanguageSpec, source_bytes: bytes, calls: list):
+def _collect_calls(node, spec: LanguageSpec, source_bytes: bytes, calls: list, _depth: int = 0):
     """Recursively collect call names from AST nodes."""
+    if _depth > 200:
+        return
     if node.type in spec.call_node_types:
         # Try language-specific call target extraction first
         handled = False
@@ -554,7 +563,7 @@ def _collect_calls(node, spec: LanguageSpec, source_bytes: bytes, calls: list):
 
     # Recurse into children
     for child in node.children:
-        _collect_calls(child, spec, source_bytes, calls)
+        _collect_calls(child, spec, source_bytes, calls, _depth + 1)
 
 
 def _extract_imports(root_node, spec: LanguageSpec, source_bytes: bytes) -> list[str]:

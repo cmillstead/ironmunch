@@ -4,7 +4,6 @@ from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
 from ..core.errors import sanitize_error, RepoNotFoundError
-from ..core.validation import ValidationError
 from ..parser import Symbol, SymbolNode, build_symbol_tree
 from ._common import RepoContext, timed, elapsed_ms
 from .registry import ToolSpec, register
@@ -34,7 +33,7 @@ def get_file_outline(
 
     # --- security gate: validate file_path is tracked by the index ---
     if file_path not in index.source_files:
-        raise ValidationError("File not found in index")
+        return {"error": "File not found in index"}
 
     # Filter symbols to this file
     file_symbols = [s for s in index.symbols if s.get("file") == file_path]

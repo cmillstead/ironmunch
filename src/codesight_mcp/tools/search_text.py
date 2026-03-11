@@ -122,9 +122,10 @@ def search_text(
                 "full-text search can reveal indexed content."
             )
         }
-    if query.strip().upper() == _REDACTION_SENTINEL:
+    q_upper = query.strip().upper()
+    if len(q_upper) >= 4 and _REDACTION_SENTINEL.startswith(q_upper):
         return {
-            "error": "Query targets internal redaction markers and is not allowed"
+            "error": "Query matches redaction sentinel pattern; not allowed"
         }
 
     # Determine which repos to search

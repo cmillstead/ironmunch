@@ -214,14 +214,14 @@ class TestNonceSplitMarker:
         assert system == "system instructions"
         assert user == "user data"
 
-    def test_static_split_backward_compat(self):
-        """Static <<<SPLIT>>> still works for backward compatibility."""
+    def test_static_split_no_longer_honored(self):
+        """Static <<<SPLIT>>> must NOT split (removed as exploitable by attacker-controlled signatures)."""
         from codesight_mcp.summarizer.batch_summarize import BatchSummarizer
 
         prompt = "system instructions\n<<<SPLIT>>>\nuser data"
-        system, user = BatchSummarizer._split_prompt(prompt)
-        assert system == "system instructions"
-        assert user == "user data"
+        system, user = BatchSummarizer._split_prompt(prompt, nonce="somerealnonce")
+        # Without a matching nonce marker, the static fallback should NOT split.
+        assert system == "", "Static <<<SPLIT>>> should no longer be honored"
 
 
 # ---------------------------------------------------------------------------

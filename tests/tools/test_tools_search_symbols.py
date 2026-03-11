@@ -117,16 +117,17 @@ class TestSearchSymbolsScoreRounding:
 class TestGetFileOutlineFileValidation:
     """ADV-MED-9: get_file_outline must reject file paths not tracked by the index."""
 
-    def test_unknown_file_raises_validation_error(self):
-        """file_path not in index.source_files must raise ValidationError."""
+    def test_unknown_file_returns_error_dict(self):
+        """file_path not in index.source_files must return an error dict."""
         with tempfile.TemporaryDirectory() as tmp:
             _make_store_with_symbol(tmp)
-            with pytest.raises(ValidationError, match="File not found in index"):
-                get_file_outline(
-                    repo="owner/myrepo",
-                    file_path="src/nonexistent.py",
-                    storage_path=tmp,
-                )
+            result = get_file_outline(
+                repo="owner/myrepo",
+                file_path="src/nonexistent.py",
+                storage_path=tmp,
+            )
+            assert "error" in result
+            assert "File not found in index" in result["error"]
 
     def test_known_file_returns_result(self):
         """file_path present in index.source_files must return a result dict."""

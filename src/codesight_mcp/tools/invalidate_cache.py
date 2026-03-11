@@ -3,7 +3,6 @@
 from typing import Optional
 
 from ..core.errors import sanitize_error, RepoNotFoundError
-from ..core.validation import ValidationError
 from ..parser.graph import CodeGraph
 from ..storage import IndexStore
 from ._common import parse_repo
@@ -33,7 +32,7 @@ def invalidate_cache(
     """
     # --- ADV-MED-13: require explicit confirmation before deleting ---
     if not confirm:
-        raise ValidationError("Pass confirm=True to permanently delete this index")
+        return {"error": "Pass confirm=True to permanently delete this index"}
 
     # --- security gate: parse + validate repo identifier ---
     try:

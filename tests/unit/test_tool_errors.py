@@ -97,8 +97,8 @@ class TestGetFileOutlineErrors:
         _assert_error(result)
 
     def test_file_not_found(self, indexed_store):
-        with pytest.raises(ValidationError, match="not found"):
-            get_file_outline(repo="test/errors", file_path="missing.py", storage_path=indexed_store)
+        result = get_file_outline(repo="test/errors", file_path="missing.py", storage_path=indexed_store)
+        _assert_error(result)
 
 
 # ---------------------------------------------------------------------------

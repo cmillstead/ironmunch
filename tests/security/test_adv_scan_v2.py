@@ -296,9 +296,11 @@ class TestSystemUserSeparation:
     """ADV-MED-4: API calls must use system parameter for instructions."""
 
     def test_split_prompt_separates_system_and_user(self):
-        """_split_prompt correctly splits on <<<SPLIT>>> marker."""
+        """_split_prompt correctly splits on nonce-based <<<SPLIT_{nonce}>>> marker."""
+        nonce = "abc123"
         system, user = BatchSummarizer._split_prompt(
-            "system instructions\n<<<SPLIT>>>\nuser data"
+            f"system instructions\n<<<SPLIT_{nonce}>>>\nuser data",
+            nonce=nonce,
         )
         assert system == "system instructions"
         assert user == "user data"

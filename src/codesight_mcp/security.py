@@ -53,6 +53,8 @@ SECRET_PATTERNS = [
     "*.p8", "*.asc",
 ]
 
+assert all(p == p.lower() for p in SECRET_PATTERNS), "SECRET_PATTERNS must be lowercase"
+
 # --- Binary extensions (ported from jcodemunch) ---
 
 BINARY_EXTENSIONS = {
@@ -80,7 +82,12 @@ def validate_file_access(path: str, root: str) -> str:
 
 
 def safe_read_file(abs_path: str, root: str) -> str:
-    """Read a file after validation. Uses errors='replace' for encoding safety."""
+    """Read a file after validation. Uses errors='replace' for encoding safety.
+
+    Note: validate_path() is called with abs_path (an absolute path) and root.
+    When abs_path is absolute, os.path.join(root, abs_path) returns abs_path
+    unchanged — this is intentional POSIX behavior and the expected code path.
+    """
     validate_path(abs_path, root)
 
     try:
@@ -210,9 +217,9 @@ def sanitize_signature_for_api(signature: str) -> str:
     """
     if not isinstance(signature, str):
         return ""
-    if len(signature) > 10000:
-        signature = signature[:10000]
     if _no_redact():
+        if len(signature) > 10000:
+            signature = signature[:10000]
         return signature
     # ADV-MED-1: Strip DEL, C1 controls, and Unicode format chars (category Cf)
     cleaned = "".join(
@@ -221,7 +228,12 @@ def sanitize_signature_for_api(signature: str) -> str:
     )
     # ADV-MED-1: NFKD normalization reduces confusables to ASCII equivalents
     cleaned = unicodedata.normalize("NFKD", cleaned)
-    return _INLINE_SECRET_RE.sub("<REDACTED>", cleaned)
+    # Redact secrets BEFORE truncation so a secret at the boundary is
+    # not split in half and left partially visible.
+    cleaned = _INLINE_SECRET_RE.sub("<REDACTED>", cleaned)
+    if len(cleaned) > 10000:
+        cleaned = cleaned[:10000]
+    return cleaned
 
 
 def sanitize_repo_identifier(identifier: str) -> str:

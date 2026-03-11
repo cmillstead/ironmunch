@@ -118,15 +118,16 @@ class TestGetFileOutlineHappyPath:
 class TestGetFileOutlineErrors:
     """Error-handling tests for get_file_outline."""
 
-    def test_unknown_file_raises_validation_error(self, tmp_path):
-        """A file not in the index should raise ValidationError."""
+    def test_unknown_file_returns_error_dict(self, tmp_path):
+        """A file not in the index should return an error dict."""
         _index_with_class(tmp_path)
-        with pytest.raises(ValidationError, match="File not found in index"):
-            get_file_outline(
-                repo="local/myproject",
-                file_path="nonexistent.py",
-                storage_path=str(tmp_path),
-            )
+        result = get_file_outline(
+            repo="local/myproject",
+            file_path="nonexistent.py",
+            storage_path=str(tmp_path),
+        )
+        assert "error" in result
+        assert "File not found in index" in result["error"]
 
     def test_unknown_repo_returns_error(self, tmp_path):
         """A repo that does not exist should return an error dict."""

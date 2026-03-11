@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import random
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -10,6 +12,10 @@ from typing import Iterator
 
 _LOCK_TIMEOUT_SECONDS: float = 30.0
 _LOCK_RETRY_INTERVAL: float = 0.1
+
+# Process-wide lock for umask manipulation.  os.umask() is process-global,
+# so every call site that temporarily changes umask must hold this lock.
+_UMASK_LOCK = threading.Lock()
 
 
 def ensure_private_dir(path: str | Path) -> Path:
@@ -21,11 +27,12 @@ def ensure_private_dir(path: str | Path) -> Path:
         raise OSError("refusing to operate on filesystem root")
     if target.is_symlink():
         raise OSError("Refusing to use symlinked directory")
-    old_umask = os.umask(0o077)
-    try:
-        target.mkdir(parents=True, exist_ok=True, mode=0o700)
-    finally:
-        os.umask(old_umask)
+    with _UMASK_LOCK:
+        old_umask = os.umask(0o077)
+        try:
+            target.mkdir(parents=True, exist_ok=True, mode=0o700)
+        finally:
+            os.umask(old_umask)
     if not target.is_dir():
         raise OSError("Path is not a directory")
     os.chmod(target, 0o700)
@@ -66,6 +73,7 @@ def exclusive_file_lock(lock_path: str | Path) -> Iterator[None]:
     fd = os.open(str(path), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+        attempt = 0
         while True:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -78,7 +86,9 @@ def exclusive_file_lock(lock_path: str | Path) -> Iterator[None]:
                         f"Could not acquire lock on {lock_path} "
                         f"within {_LOCK_TIMEOUT_SECONDS}s"
                     )
-                time.sleep(_LOCK_RETRY_INTERVAL)
+                attempt += 1
+                base = min(0.05 * (1.5 ** min(attempt, 10)), 1.0)
+                time.sleep(base + random.uniform(0, base * 0.5))
         yield
     finally:
         if fd >= 0:

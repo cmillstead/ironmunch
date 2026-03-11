@@ -297,14 +297,22 @@ class TestTempFileONofollow:
     """SEC-LOW-8: temp-file writes must refuse to follow symlinks."""
 
     def test_save_index_rejects_symlink_at_tmp_path(self, tmp_path):
-        """save_index must raise OSError if a symlink exists at the .json.tmp path."""
+        """save_index must raise OSError if a symlink exists at the .tmp path.
+
+        The tmp file name now includes PID and thread ident for uniqueness.
+        We plant the symlink at the exact expected tmp filename.
+        """
         import sys
+        import threading
 
         if sys.platform == "win32":
             pytest.skip("O_NOFOLLOW not available on Windows")
 
         store = IndexStore(base_path=str(tmp_path))
-        tmp_file = tmp_path / "local__testrepo.json.gz.tmp"
+        # Construct the exact tmp filename that _atomic_write will use
+        pid = os.getpid()
+        tid = threading.get_ident()
+        tmp_file = tmp_path / f"local__testrepo.json.gz.tmp.{pid}.{tid}"
         decoy = tmp_path / "decoy.txt"
         decoy.write_text("decoy content")
         tmp_file.symlink_to(decoy)
