@@ -36,6 +36,7 @@ from .tools import (  # noqa: F401
     get_dead_code, status,
     get_hotspots, get_key_symbols, get_diagram,
     get_context, search_references, get_dependencies,
+    compare_symbols, get_changes,
 )
 
 # ADV-LOW-7: Read CODE_INDEX_PATH once at startup so subsequent env mutations

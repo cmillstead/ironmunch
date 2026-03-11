@@ -12,7 +12,7 @@ from codesight_mcp.server import server, call_tool, list_tools
 from codesight_mcp.tools.registry import get_all_specs
 
 
-# The 25 expected tool names.
+# The 27 expected tool names.
 EXPECTED_TOOLS = sorted([
     "index_repo",
     "index_folder",
@@ -39,17 +39,19 @@ EXPECTED_TOOLS = sorted([
     "get_context",
     "search_references",
     "get_dependencies",
+    "compare_symbols",
+    "get_changes",
 ])
 
 
 class TestToolRegistration:
-    """Verify all 25 tools are present in the registry."""
+    """Verify all 27 tools are present in the registry."""
 
     def test_all_22_tools_registered(self):
-        """The registry must contain exactly 25 tools."""
+        """The registry must contain exactly 27 tools."""
         specs = get_all_specs()
-        assert len(specs) == 25, (
-            f"Expected 25 tools, got {len(specs)}: {sorted(specs.keys())}"
+        assert len(specs) == 27, (
+            f"Expected 27 tools, got {len(specs)}: {sorted(specs.keys())}"
         )
 
     def test_all_expected_tool_names_present(self):
@@ -95,8 +97,8 @@ class TestListToolsHandler:
     async def test_list_tools_returns_all_22(self):
         """The list_tools handler returns exactly 25 Tool objects."""
         tools = await list_tools()
-        assert len(tools) == 25, (
-            f"Expected 25 tools from list_tools(), got {len(tools)}: "
+        assert len(tools) == 27, (
+            f"Expected 27 tools from list_tools(), got {len(tools)}: "
             f"{[t.name for t in tools]}"
         )
 
