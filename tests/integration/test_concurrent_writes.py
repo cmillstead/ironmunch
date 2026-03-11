@@ -244,3 +244,76 @@ class TestLockContentionTimeout:
         assert sym["file"] in idx.source_files
         assert sym["kind"] == "function"
         assert sym["language"] == "python"
+
+
+class TestConcurrentReadWrite:
+    """GAP-3: Concurrent reads during writes must not crash or return partial data."""
+
+    def test_read_during_write_never_crashes(self, tmp_path):
+        """Spawn writers and readers concurrently. Readers must never crash
+        or return partially-written data."""
+        store = IndexStore(base_path=str(tmp_path))
+
+        # Seed initial index
+        sym, src = _make_symbol("initial")
+        store.save_index(
+            owner="local", name="rw",
+            source_files=["test.py"],
+            symbols=[sym],
+            raw_files={"test.py": src},
+            languages={"python": 1},
+        )
+
+        write_errors: list[Exception] = []
+        read_errors: list[Exception] = []
+        read_results: list = []
+        stop_flag = threading.Event()
+        lock = threading.Lock()
+
+        def writer(thread_id: int):
+            try:
+                for i in range(5):
+                    s, content = _make_symbol(f"w{thread_id}_iter{i}")
+                    store.save_index(
+                        owner="local", name="rw",
+                        source_files=["test.py"],
+                        symbols=[s],
+                        raw_files={"test.py": content},
+                        languages={"python": 1},
+                    )
+            except Exception as exc:
+                with lock:
+                    write_errors.append(exc)
+            finally:
+                stop_flag.set()
+
+        def reader():
+            try:
+                while not stop_flag.is_set():
+                    idx = store.load_index("local", "rw")
+                    if idx is not None:
+                        # Must be internally consistent
+                        assert isinstance(idx.symbols, list)
+                        assert len(idx.symbols) >= 0
+                        assert idx.owner == "local"
+                        assert idx.name == "rw"
+                        with lock:
+                            read_results.append(len(idx.symbols))
+            except Exception as exc:
+                with lock:
+                    read_errors.append(exc)
+
+        writers = [threading.Thread(target=writer, args=(i,)) for i in range(2)]
+        readers = [threading.Thread(target=reader) for _ in range(3)]
+
+        for t in readers + writers:
+            t.start()
+        for t in writers:
+            t.join(timeout=30)
+        stop_flag.set()
+        for t in readers:
+            t.join(timeout=5)
+
+        assert not write_errors, f"Writer errors: {write_errors}"
+        assert not read_errors, f"Reader errors: {read_errors}"
+        assert len(read_results) > 0, "Readers should have completed at least one read"

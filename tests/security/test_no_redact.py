@@ -79,3 +79,38 @@ class TestNoRedactEnvVar:
         assert sanitize_signature_for_api(sig) == sig
         with patch.object(security_mod, "_NO_REDACT", True):
             assert sanitize_signature_for_api(sig) == sig
+
+
+class TestNoRedactToolInteraction:
+    """CHAIN-3: search_text must refuse when NO_REDACT is enabled."""
+
+    def test_search_text_refuses_when_no_redact_enabled(self):
+        """search_text returns an error when CODESIGHT_NO_REDACT=1."""
+        from codesight_mcp.tools.search_text import search_text
+        with patch.object(security_mod, "_NO_REDACT", True):
+            result = search_text(
+                repo="test/repo",
+                query="password",
+                confirm_sensitive_search=True,
+            )
+        assert "error" in result
+        assert "NO_REDACT" in result["error"] or "redaction disabled" in result["error"].lower()
+
+    def test_search_text_works_when_no_redact_disabled(self, tmp_path):
+        """search_text proceeds normally when NO_REDACT is off (default)."""
+        from codesight_mcp.tools.search_text import search_text
+        # Will fail with repo-not-found, but NOT with the NO_REDACT error
+        result = search_text(
+            repo="nonexistent/repo",
+            query="hello",
+            confirm_sensitive_search=True,
+            storage_path=str(tmp_path),
+        )
+        # Should get a repo-not-found error, not a redaction error
+        assert "error" not in result or "NO_REDACT" not in result.get("error", "")
+
+    def test_get_symbol_still_works_under_no_redact(self):
+        """get_symbol is acceptable under NO_REDACT (single symbol, not bulk search)."""
+        # This is a documentation test — get_symbol returns one symbol at a time,
+        # which is the intended NO_REDACT use case. No code change needed.
+        pass

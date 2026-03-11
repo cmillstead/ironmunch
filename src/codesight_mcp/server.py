@@ -271,6 +271,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if asyncio.iscoroutine(result):
             result = await result
 
+        # CHAIN-6: Strip timing from error responses to prevent timing side-channel
+        if isinstance(result, dict) and "error" in result and "_meta" in result:
+            result["_meta"].pop("timing_ms", None)
+
         text = json.dumps(result, indent=2)
         if len(text.encode("utf-8")) > MAX_RESPONSE_BYTES:
             return [TextContent(type="text", text=json.dumps({

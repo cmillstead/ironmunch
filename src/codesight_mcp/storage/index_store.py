@@ -769,6 +769,20 @@ class IndexStore:
             # Add new symbols
             all_symbols_dicts = kept_symbols + [self._symbol_to_dict(s) for s in new_symbols]
 
+            # CHAIN-2: Prune phantom graph edges — remove calls/imports/
+            # inherits_from/implements entries that reference names not
+            # present in the merged symbol set.
+            all_symbol_names = {s.get("name", "") for s in all_symbols_dicts if s.get("name")}
+            all_symbol_ids = {s.get("id", "") for s in all_symbols_dicts if s.get("id")}
+            valid_refs = all_symbol_names | all_symbol_ids
+            for sym in all_symbols_dicts:
+                for list_field in ("calls", "imports", "inherits_from", "implements"):
+                    if list_field in sym and isinstance(sym[list_field], list):
+                        sym[list_field] = [
+                            item for item in sym[list_field]
+                            if item in valid_refs
+                        ]
+
             # Update source files list
             old_files = set(index.source_files)
             for f in deleted_files:
@@ -912,6 +926,12 @@ class IndexStore:
                 continue
             data = self._read_metadata_sidecar(meta_file)
             if data is None:
+                continue
+            # CHAIN-4: Validate a corresponding index file exists.
+            # Without this, a crafted .meta.json creates a phantom repo listing.
+            stem = meta_file.name.removesuffix(".meta.json")
+            if not (self.base_path / f"{stem}.json.gz").exists() and \
+               not (self.base_path / f"{stem}.json").exists():
                 continue
             repo_key = data["repo"]
             if repo_key in seen_repos:

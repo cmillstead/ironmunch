@@ -304,6 +304,9 @@ class BatchSummarizer:
         user_lines = ["Input:"]
         for i, sym in enumerate(symbols, 1):
             safe_sig = sanitize_signature_for_api(sym.signature.replace("\n", " ").replace("\r", " "))[:200]
+            # CHAIN-8: Escape <<< sequences to prevent crafted split markers
+            # from interfering with _split_prompt's nonce-based splitting.
+            safe_sig = safe_sig.replace("<<<", "\\u003c\\u003c\\u003c")
             kind = sym.kind if sym.kind in _VALID_KINDS else "symbol"
             user_lines.append(f"  [{i}:{sub_nonces[i-1]}] {kind}: {sig_open}{safe_sig}{sig_close}")
 

@@ -5,6 +5,7 @@ from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
 from ..parser.graph import CodeGraph
+from ..security import sanitize_signature_for_api
 from ._common import RepoContext, prepare_graph_query, timed, elapsed_ms
 from .registry import ToolSpec, register
 
@@ -43,8 +44,12 @@ def _node_id(index: int) -> str:
 
 
 def _node_label(sym: dict) -> str:
-    """Build a display label for a symbol."""
-    name = sym.get("name", sym.get("id", "?"))
+    """Build a display label for a symbol.
+
+    CHAIN-7: Apply sanitize_signature_for_api before Mermaid escaping
+    to strip secrets and control characters from node labels.
+    """
+    name = sanitize_signature_for_api(sym.get("name", sym.get("id", "?")))
     kind = sym.get("kind", "")
     if kind in ("function", "method"):
         return f"{name}()"

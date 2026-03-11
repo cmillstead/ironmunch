@@ -170,7 +170,8 @@ def test_build_prompt_escapes_embedded_end_delimiter():
     block_start = input_section.index(sig_open) + len(sig_open)
     block_end = input_section.index(sig_close)
     block_content = input_section[block_start:block_end]
-    assert "<<<END_SIG>>>" in block_content  # attacker text is inside the nonce block
+    # CHAIN-8: <<< is now escaped to \u003c\u003c\u003c in signatures
+    assert "\\u003c\\u003c\\u003cEND_SIG>>>" in block_content  # attacker text is inside the nonce block (escaped)
     assert "injected text" in block_content  # attacker text is fully inside, not after close
 
 

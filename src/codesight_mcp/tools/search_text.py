@@ -8,7 +8,7 @@ via crafted entries in the index's source_files list.
 import fnmatch
 from typing import Optional
 
-from ..security import validate_file_access, sanitize_signature_for_api, safe_read_file
+from ..security import validate_file_access, sanitize_signature_for_api, safe_read_file, _no_redact
 from ..core.limits import MAX_SEARCH_RESULTS
 from ..core.boundaries import wrap_untrusted_content, make_meta
 from ..core.errors import RepoNotFoundError
@@ -18,6 +18,7 @@ from .registry import ToolSpec, register
 
 _REDACTION_SENTINEL = "<REDACTED>"
 _MAX_CROSS_REPO = 5
+_MAX_SEARCH_CONTENT_SIZE = 2_000_000  # 2 MB cap before sanitization
 
 
 def _search_text_single_repo(
@@ -59,6 +60,7 @@ def _search_text_single_repo(
             continue
 
         files_searched += 1
+        content = content[:_MAX_SEARCH_CONTENT_SIZE]
         lines = sanitize_signature_for_api(content).split("\n")
         for line_num, line in enumerate(lines, 1):
             if query_lower in line.lower():
@@ -122,6 +124,14 @@ def search_text(
                 "full-text search can reveal indexed content."
             )
         }
+    if _no_redact():
+        return {
+            "error": (
+                "search_text is disabled when CODESIGHT_NO_REDACT=1 is set. "
+                "Full-text search with redaction disabled would expose secrets."
+            )
+        }
+
     q_upper = query.strip().upper()
     if len(q_upper) >= 4 and (
         _REDACTION_SENTINEL.startswith(q_upper) or q_upper in _REDACTION_SENTINEL
