@@ -52,6 +52,22 @@ class TestEnsurePrivateDir:
         assert result == Path(target)
         assert Path(target).is_dir()
 
+    def test_uses_fchmod_not_chmod(self, tmp_path, monkeypatch):
+        """ensure_private_dir should not call path-following os.chmod."""
+        import codesight_mcp.core.locking as locking_mod
+
+        chmod_calls = []
+        original_chmod = os.chmod
+
+        def tracking_chmod(path, mode, **kwargs):
+            chmod_calls.append(("chmod", path, mode))
+            return original_chmod(path, mode, **kwargs)
+
+        monkeypatch.setattr(os, "chmod", tracking_chmod)
+        target = tmp_path / "secure_dir"
+        locking_mod.ensure_private_dir(target)
+        assert len(chmod_calls) == 0, "ensure_private_dir should use fchmod, not chmod"
+
 
 class TestAtomicWriteNofollow:
     def test_writes_content(self, tmp_path):

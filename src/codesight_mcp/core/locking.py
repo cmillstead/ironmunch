@@ -35,7 +35,15 @@ def ensure_private_dir(path: str | Path) -> Path:
             os.umask(old_umask)
     if not target.is_dir():
         raise OSError("Path is not a directory")
-    os.chmod(target, 0o700)
+    # TOCTOU-safe permission enforcement via fd (matches _makedirs_0o700 pattern)
+    try:
+        _fd = os.open(str(target), os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY)
+    except OSError:
+        raise OSError(f"refusing to chmod symlink or inaccessible directory: {target}")
+    try:
+        os.fchmod(_fd, 0o700)
+    finally:
+        os.close(_fd)
     return target
 
 
