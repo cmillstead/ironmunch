@@ -501,3 +501,20 @@ def test_detect_changes_file_deleted(tmp_path):
     assert changed == []
     assert new_files == []
     assert "utils.py" in deleted
+
+
+def test_cleanup_stale_temps_matches_pid_suffixed_files(tmp_path):
+    """_cleanup_stale_temps should clean up tmp files with PID/thread suffixes."""
+    from codesight_mcp.storage.index_store import IndexStore
+
+    store = IndexStore(str(tmp_path))
+    # Create a PID-suffixed temp file that's old enough to clean
+    stale_tmp = tmp_path / "owner__repo.json.gz.tmp.12345.140234567890"
+    stale_tmp.write_bytes(b"stale")
+    # Backdate mtime by 120 seconds
+    import os, time
+    os.utime(stale_tmp, (time.time() - 120, time.time() - 120))
+
+    store._cleanup_stale_temps()
+
+    assert not stale_tmp.exists(), "PID-suffixed temp file should be cleaned up"

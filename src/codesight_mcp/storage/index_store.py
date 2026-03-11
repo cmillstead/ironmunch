@@ -228,14 +228,17 @@ class IndexStore:
         self._cleanup_stale_temps()
 
     def _cleanup_stale_temps(self):
-        """Remove stale .json.tmp files left by crashed writes.
+        """Remove stale .tmp files left by crashed writes.
 
         ADV-MED-2: Skip files newer than 60 seconds — they may belong to an
         active save_index() Phase-2 write.  Removing them would corrupt an
         ongoing write.
+
+        Patterns cover both fixed-suffix (*.tmp) and PID/thread-suffixed
+        (*.tmp.<pid>.<thread_ident>) temp files produced by _atomic_write.
         """
         now = time.time()
-        for pattern in ("*.json.tmp", "*.json.gz.tmp"):
+        for pattern in ("*.tmp", "*.tmp.*"):
             for tmp_file in self.base_path.glob(pattern):
                 try:
                     if tmp_file.is_symlink():
