@@ -5,6 +5,7 @@ share a single implementation.
 """
 
 import os
+from datetime import datetime
 from typing import Iterable
 
 from ..core.limits import MAX_FILE_COUNT
@@ -91,6 +92,9 @@ def finalize_index(
     # Generate summaries
     all_symbols = summarize_symbols(all_symbols, use_ai=use_ai_summaries)
 
+    # Generate indexed_at timestamp before saving to avoid re-loading the index
+    indexed_at = datetime.utcnow().isoformat()
+
     # Save index
     store = IndexStore(base_path=storage_path)
     store.save_index(
@@ -109,7 +113,7 @@ def finalize_index(
     result: dict = {
         "success": True,
         "repo": f"{owner}/{name}",
-        "indexed_at": getattr(store.load_index(owner, name), "indexed_at", None) or "unknown",
+        "indexed_at": indexed_at,
         "file_count": len(parsed_files),
         "symbol_count": len(all_symbols),
         "languages": languages,

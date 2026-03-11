@@ -178,6 +178,7 @@ def index_folder(
         # --- Diff-aware indexing: skip unchanged files in git repos ---
         git_head = ""
         git_changed_set: Optional[set[str]] = None  # None = full re-index
+        prev_index = None  # loaded once, reused for incremental merge
 
         if _is_git_repo(folder_path):
             current_head = _git_head_commit(folder_path)
@@ -249,13 +250,7 @@ def index_folder(
             if parse_fail_count > 0:
                 warnings.append(f"{parse_fail_count} file(s) failed to parse")
 
-            # Compute which files were deleted (in old index but no longer on disk)
-            try:
-                store = IndexStore(base_path=storage_path)
-                prev_index = store.load_index(owner, repo_name)
-            except Exception:
-                prev_index = None
-
+            # Reuse prev_index loaded during git_head check (avoids TOCTOU double load)
             if prev_index:
                 # All discovered rel_paths (full set, not just changed)
                 all_rel_paths = set()
