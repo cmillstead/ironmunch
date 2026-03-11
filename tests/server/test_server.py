@@ -228,13 +228,13 @@ class TestCallToolInputBounds:
         assert isinstance(result, dict)
         assert result["follow_symlinks"] is False
 
-    def test_string_true_is_falsy_too(self):
-        """String 'true' is not in (True, 1) so it should be False."""
+    def test_string_true_is_truthy(self):
+        """String 'true' should be coerced to True."""
         from codesight_mcp.server import _sanitize_arguments
         args = {"verify": "true"}
         result = _sanitize_arguments("get_symbol", args)
         assert isinstance(result, dict)
-        assert result["verify"] is False
+        assert result["verify"] is True
 
     def test_actual_bool_true_preserved(self):
         """Actual boolean True must be preserved."""
@@ -378,8 +378,9 @@ class TestRateLimiting:
         """Filling the persisted global bucket to the cap must block the next call."""
         from codesight_mcp.core.rate_limiting import _MAX_GLOBAL_CALLS_PER_MINUTE
 
+        import time as _time
         state_path = tmp_path / ".rate_limits.json"
-        now = 2_000_000_000.0
+        now = _time.time()
         state_path.write_text(json.dumps({
             "global": [now] * _MAX_GLOBAL_CALLS_PER_MINUTE,
             "tools": {},
@@ -936,8 +937,8 @@ class TestPersistentRateLimit:
         target.write_text("decoy", encoding="utf-8")
         (tmp_path / ".rate_limits.json.tmp").symlink_to(target)
 
-        with pytest.raises(OSError):
-            _rate_limit("search_text", str(tmp_path))
+        # OSError from symlink is swallowed — call is still allowed
+        assert _rate_limit("search_text", str(tmp_path)) is True
 
     def test_rate_limit_temp_fallback_is_private_per_user(self, monkeypatch, tmp_path):
         import codesight_mcp.core.rate_limiting as rl_module

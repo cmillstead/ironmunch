@@ -6,6 +6,7 @@
 # grammars are well-tested; in-process parsing is required for performance.
 """
 
+import threading
 from typing import Optional
 from tree_sitter import Language, Parser
 
@@ -14,6 +15,7 @@ from .languages import _strip_quotes
 
 # Individual language bindings cache
 _LANGUAGE_BINDINGS = {}
+_LANGUAGE_BINDINGS_LOCK = threading.Lock()
 
 SUPPORTED_LANGUAGES = frozenset({
     "python", "javascript", "typescript", "go", "rust", "java", "php",
@@ -36,33 +38,35 @@ def _get_parser(lang_name: str) -> Parser:
     """Get a tree-sitter parser for a language, loading binding on first use."""
     if lang_name not in _ALLOWED_LANGUAGES:
         raise ValueError(f"Unsupported language: {lang_name}")
-    if lang_name not in _LANGUAGE_BINDINGS:
-        import importlib
-        if lang_name in _LANGUAGE_PACK_LANGUAGES:
-            # Use tree-sitter-language-pack for languages without standalone packages
-            try:
-                from tree_sitter_language_pack import get_language
-                _LANGUAGE_BINDINGS[lang_name] = get_language(lang_name)
-            except ImportError:
-                raise ImportError(
-                    f"tree-sitter-language-pack not installed. "
-                    f"Install: pip install tree-sitter-language-pack"
-                )
-        else:
-            if lang_name in _LANGUAGE_FUNC_MAP:
-                mod_name, func_name = _LANGUAGE_FUNC_MAP[lang_name]
+    with _LANGUAGE_BINDINGS_LOCK:
+        if lang_name not in _LANGUAGE_BINDINGS:
+            import importlib
+            if lang_name in _LANGUAGE_PACK_LANGUAGES:
+                # Use tree-sitter-language-pack for languages without standalone packages
+                try:
+                    from tree_sitter_language_pack import get_language
+                    _LANGUAGE_BINDINGS[lang_name] = get_language(lang_name)
+                except ImportError:
+                    raise ImportError(
+                        f"tree-sitter-language-pack not installed. "
+                        f"Install: pip install tree-sitter-language-pack"
+                    )
             else:
-                mod_name = f"tree_sitter_{lang_name}"
-                func_name = "language"
-            try:
-                mod = importlib.import_module(mod_name)
-            except ImportError:
-                raise ImportError(
-                    f"tree-sitter binding for '{lang_name}' not installed. "
-                    f"Install: pip install tree-sitter-{lang_name}"
-                )
-            _LANGUAGE_BINDINGS[lang_name] = Language(getattr(mod, func_name)())
-    parser = Parser(_LANGUAGE_BINDINGS[lang_name])
+                if lang_name in _LANGUAGE_FUNC_MAP:
+                    mod_name, func_name = _LANGUAGE_FUNC_MAP[lang_name]
+                else:
+                    mod_name = f"tree_sitter_{lang_name}"
+                    func_name = "language"
+                try:
+                    mod = importlib.import_module(mod_name)
+                except ImportError:
+                    raise ImportError(
+                        f"tree-sitter binding for '{lang_name}' not installed. "
+                        f"Install: pip install tree-sitter-{lang_name}"
+                    )
+                _LANGUAGE_BINDINGS[lang_name] = Language(getattr(mod, func_name)())
+        binding = _LANGUAGE_BINDINGS[lang_name]
+    parser = Parser(binding)
     return parser
 
 from .symbols import Symbol, make_symbol_id, compute_content_hash
@@ -85,7 +89,7 @@ def parse_file(content: str, filename: str, language: str) -> list[Symbol]:
         return []
 
     spec = LANGUAGE_REGISTRY[language]
-    source_bytes = content.encode("utf-8")
+    source_bytes = content.encode("utf-8", errors="replace")
 
     # Get parser for this language
     parser = _get_parser(spec.ts_language)
@@ -115,9 +119,12 @@ def _walk_tree(
     filename: str,
     language: str,
     symbols: list,
-    parent_symbol: Optional[Symbol] = None
+    parent_symbol: Optional[Symbol] = None,
+    _depth: int = 0,
 ):
     """Recursively walk the AST and extract symbols."""
+    if _depth > 500:
+        return
     # Check if this node is a symbol
     if node.type in spec.symbol_node_types:
         symbol = _extract_symbol(
@@ -135,7 +142,7 @@ def _walk_tree(
 
     # Recurse into children
     for child in node.children:
-        _walk_tree(child, spec, source_bytes, filename, language, symbols, parent_symbol)
+        _walk_tree(child, spec, source_bytes, filename, language, symbols, parent_symbol, _depth + 1)
 
 
 def _extract_symbol(
@@ -387,10 +394,16 @@ def _extract_decorators(node, spec: LanguageSpec, source_bytes: bytes) -> list[s
 
     # Walk backwards through siblings to find decorators
     prev = node.prev_named_sibling
+    node_start_line = node.start_point[0]
+    expected_end_line = node_start_line  # decorators must be adjacent
     while prev and prev.type == spec.decorator_node_type:
+        # Stop if there's a gap (> 1 line) between this decorator and what follows
+        if expected_end_line - prev.end_point[0] > 1:
+            break
         decorator_text = source_bytes[prev.start_byte:prev.end_byte].decode("utf-8")
         # Sanitize secrets in decorator arguments at parse time (SEC-MED-1)
         decorators.insert(0, sanitize_signature_for_api(decorator_text.strip()))
+        expected_end_line = prev.start_point[0]
         prev = prev.prev_named_sibling
 
     return decorators
@@ -695,9 +708,21 @@ def _disambiguate_overloads(symbols: list[Symbol]) -> list[Symbol]:
     # Track ordinals per duplicate ID
     ordinals: dict[str, int] = {}
     result = []
+    # Collect old_id -> new_id mappings so we can fix parent references
+    id_renames: dict[str, list[str]] = {}
     for sym in symbols:
         if sym.id in duplicated:
-            ordinals[sym.id] = ordinals.get(sym.id, 0) + 1
-            sym.id = f"{sym.id}~{ordinals[sym.id]}"
+            old_id = sym.id
+            ordinals[old_id] = ordinals.get(old_id, 0) + 1
+            sym.id = f"{old_id}~{ordinals[old_id]}"
+            id_renames.setdefault(old_id, []).append(sym.id)
         result.append(sym)
+
+    # Fix parent references that point to renamed IDs
+    if id_renames:
+        for sym in result:
+            if sym.parent in id_renames:
+                # Point to the first disambiguation (the parent class/container)
+                sym.parent = id_renames[sym.parent][0]
+
     return result

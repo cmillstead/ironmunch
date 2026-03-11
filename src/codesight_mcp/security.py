@@ -208,6 +208,8 @@ def sanitize_signature_for_api(signature: str) -> str:
     When CODESIGHT_NO_REDACT=1 is set, returns the signature unchanged
     (opt-in for trusted local usage).
     """
+    if len(signature) > 10000:
+        signature = signature[:10000]
     if _no_redact():
         return signature
     # ADV-MED-1: Strip DEL, C1 controls, and Unicode format chars (category Cf)
@@ -226,6 +228,8 @@ def sanitize_repo_identifier(identifier: str) -> str:
     Allows: alphanumeric, dash, underscore, dot.
     Rejects: empty, too-long, slashes, null bytes, traversal sequences (..).
     """
+    if not isinstance(identifier, str):
+        raise ValidationError("Identifier must be a string")
     if not identifier:
         raise ValidationError("Repository identifier is empty")
     if len(identifier) > 100:
@@ -240,4 +244,6 @@ def sanitize_repo_identifier(identifier: str) -> str:
         raise ValidationError(
             f"Repository identifier contains unsafe characters"
         )
+    if identifier in (".", ".."):
+        raise ValidationError("Reserved path name")
     return identifier

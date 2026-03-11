@@ -81,7 +81,7 @@ def _is_entry_point(sym: dict) -> bool:
     # Decorated entry points (e.g., @app.route, @pytest.fixture)
     decorators = sym.get("decorators", [])
     for dec in decorators:
-        dec_lower = dec.lower()
+        dec_lower = str(dec).lower() if dec else ""
         if any(kw in dec_lower for kw in (
             "route", "endpoint", "fixture", "hook",
             "export", "main", "cli", "command",
@@ -126,7 +126,7 @@ def get_dead_code(
             continue
 
         # Language filter
-        if language and sym.get("language", "") != language:
+        if language and sym.get("language", "").lower() != language.lower():
             continue
 
         # Exclude test files unless requested

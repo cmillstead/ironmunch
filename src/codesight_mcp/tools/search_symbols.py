@@ -85,6 +85,9 @@ def search_symbols(
     Returns:
         Dict with search results and _meta envelope.
     """
+    if not query.strip():
+        return {"error": "query must not be empty or whitespace-only"}
+
     # --- security gate: validate kind and language allowlists ---
     _VALID_KINDS = {"function", "class", "method", "constant", "type"}
     _VALID_LANGUAGES = SUPPORTED_LANGUAGES

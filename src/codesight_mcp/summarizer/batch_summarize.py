@@ -127,7 +127,7 @@ def signature_fallback(symbol: Symbol) -> str:
         candidate = f"Type definition {name}"
     else:
         # For functions/methods, include parameter hint
-        candidate = sanitize_signature_for_api(sig[:120]) if sig else f"{kind} {name}"
+        candidate = sanitize_signature_for_api((sig or "")[:120]) if sig else f"{kind} {name}"
 
     # ADV-MED-4: if the candidate summary contains an injection phrase, fall
     # back to a safe generic label so the raw injection text is never stored.
@@ -181,6 +181,9 @@ class BatchSummarizer:
         if not to_summarize:
             return symbols
 
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+
         # ADV-HIGH-1: Reject symbol lists that would require more than
         # MAX_BATCHES_PER_INDEX batches to prevent runaway API usage.
         n_batches = math.ceil(len(to_summarize) / batch_size)
@@ -213,6 +216,9 @@ class BatchSummarizer:
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}]
             )
+
+            if not response.content:
+                raise ValueError("empty API response content")
 
             # Parse response using the same nonce
             summaries = self._parse_response(response.content[0].text, len(batch), nonce=nonce)
@@ -282,7 +288,7 @@ class BatchSummarizer:
         keeping trusted instructions separate from untrusted signature data.
         ADV-INFO-4: Uses nonce-based <<<SPLIT_{nonce}>>> marker via regex.
         """
-        m = re.search(r"<<<SPLIT_[0-9a-zA-Z]+>>>", prompt)
+        m = re.search(r"^<<<SPLIT_[0-9a-zA-Z]+>>>$", prompt, re.MULTILINE)
         if m:
             system_part = prompt[:m.start()].strip()
             user_part = prompt[m.end():].strip()

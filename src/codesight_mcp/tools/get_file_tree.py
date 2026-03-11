@@ -84,7 +84,11 @@ def _build_tree(files: list[str], index, path_prefix: str) -> list[dict]:
             is_last = i == len(parts) - 1
 
             if is_last:
-                # File node
+                # File node — don't overwrite a directory node that has children
+                existing = current.get(part)
+                if existing and existing.get("type") == "dir" and existing.get("children"):
+                    continue
+
                 symbol_count = symbol_counts[file_path]
 
                 _, ext = os.path.splitext(file_path)
@@ -97,8 +101,11 @@ def _build_tree(files: list[str], index, path_prefix: str) -> list[dict]:
                     "symbol_count": symbol_count,
                 }
             else:
-                # Directory node
-                if part not in current:
+                # Directory node — don't overwrite a file node; prefer dir (has children)
+                existing = current.get(part)
+                if existing and existing.get("type") == "file":
+                    current[part] = {"type": "dir", "children": {}}
+                elif part not in current:
                     current[part] = {"type": "dir", "children": {}}
                 current = current[part]["children"]
 

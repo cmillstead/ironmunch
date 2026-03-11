@@ -25,6 +25,8 @@ def assert_no_control_chars(path: str) -> None:
     - 0x7F: DEL — would break fnmatch pattern matching for secret filenames
     - 0x80–0x9F: C1 control block — can bypass continuous-ASCII regex assumptions
     """
+    if not path:
+        raise ValidationError("Path must not be empty")
     if any(ord(c) < 32 or ord(c) == 127 or 128 <= ord(c) <= 159 for c in path):
         raise ValidationError("Path contains control character")
 
@@ -86,6 +88,8 @@ def is_within(root: Path | str, path: Path | str) -> bool:
 
 def assert_inside_root(full_path: str, root: str) -> None:
     """Step 5: Strict containment check with os.sep guard."""
+    if root == os.sep or root == "/":
+        raise ValidationError("Root cannot be filesystem root")
     if not full_path.startswith(root + os.sep):
         raise ValidationError("Path resolves outside root directory")
 
@@ -117,10 +121,18 @@ def validate_path(path: str, root: str) -> str:
         5. assert_inside_root — strict prefix + os.sep
         6. assert_no_symlinked_parents — lstat walk
     """
+    # Reject backslashes (potential traversal bypass on mixed-OS paths)
+    if "\\" in path:
+        raise ValidationError("Backslashes not allowed in paths")
     # Step 0: normalize to NFC so NFD-encoded characters are in canonical form
     # before any string comparison or pattern matching.
     path = unicodedata.normalize("NFC", path)
     assert_no_control_chars(path)
+    # Strip ASCII spaces only (not all whitespace — str.strip() would eat
+    # control chars that assert_no_control_chars must reject first).
+    path = path.strip(" ")
+    if not path:
+        raise ValidationError("Path must not be empty or whitespace-only")
     assert_safe_segments(path)
     assert_path_limits(path)
 

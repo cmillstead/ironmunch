@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import shutil
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -68,6 +69,9 @@ def _file_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+_UMASK_LOCK = threading.Lock()
+
+
 def _makedirs_0o700(path: str) -> None:
     """Create directories with mode 0o700, respecting the umask correctly.
 
@@ -78,13 +82,18 @@ def _makedirs_0o700(path: str) -> None:
     ADV-MED-5: os.makedirs(..., exist_ok=True) does NOT chmod pre-existing
     directories. We call os.chmod() after makedirs to enforce 0o700 on the
     target path whether it was just created or already existed.
+
+    Uses a lock around umask set/restore since os.umask() is process-wide.
     """
-    old_umask = os.umask(0o077)
-    try:
-        os.makedirs(path, mode=0o700, exist_ok=True)
-    finally:
-        os.umask(old_umask)
+    with _UMASK_LOCK:
+        old_umask = os.umask(0o077)
+        try:
+            os.makedirs(path, mode=0o700, exist_ok=True)
+        finally:
+            os.umask(old_umask)
     # Enforce permissions on the target directory itself (pre-existing or new).
+    if os.path.islink(path):
+        raise OSError("refusing to chmod symlink")
     os.chmod(path, 0o700)
 
 
@@ -109,9 +118,19 @@ class CodeIndex:
 
     def _build_symbol_index(self):
         """Build the symbol-by-id lookup dict from the symbols list."""
-        self._symbol_by_id = {
-            sym["id"]: sym for sym in self.symbols if isinstance(sym, dict) and "id" in sym
-        }
+        valid = [sym for sym in self.symbols if isinstance(sym, dict) and "id" in sym]
+        self._symbol_by_id = {}
+        seen_count: dict[str, int] = {}
+        for sym in valid:
+            sid = sym["id"]
+            if sid in self._symbol_by_id:
+                seen_count[sid] = seen_count.get(sid, 1) + 1
+            self._symbol_by_id[sid] = sym
+        if seen_count:
+            logger.warning(
+                "Duplicate symbol IDs in index: %d IDs had duplicates (last wins)",
+                len(seen_count),
+            )
 
     def get_symbol(self, symbol_id: str) -> Optional[dict]:
         """Find a symbol by ID."""
@@ -166,6 +185,8 @@ class IndexStore:
         Args:
             base_path: Base directory for storage. Defaults to ~/.code-index/
         """
+        if base_path is not None and not str(base_path).strip():
+            raise ValueError("base_path must not be empty or whitespace")
         if base_path:
             self.base_path = Path(base_path)
         else:
@@ -302,7 +323,7 @@ class IndexStore:
                     if not is_within(resolved_root, dest):
                         continue  # Traversal — skip silently
                     _makedirs_0o700(str(dest.parent))
-                    tmp_dest = dest.with_suffix(dest.suffix + ".tmp")
+                    tmp_dest = dest.with_name(f"{dest.name}.tmp.{os.getpid()}")
                     try:
                         fd = os.open(
                             str(tmp_dest),
@@ -356,7 +377,10 @@ class IndexStore:
             return None
 
         # Index size validation
-        size = load_path.stat().st_size
+        try:
+            size = load_path.stat().st_size
+        except FileNotFoundError:
+            return None
         if size > MAX_INDEX_SIZE:
             raise ValueError(f"Index file exceeds maximum size ({size} > {MAX_INDEX_SIZE})")
 
@@ -376,9 +400,15 @@ class IndexStore:
                 json_bytes = _safe_gzip_decompress(raw_bytes)
             except (gzip.BadGzipFile, OSError, ValueError):
                 return None  # Corrupt gzip or decompression bomb — reject
-            data = json.loads(json_bytes.decode("utf-8"))
+            try:
+                data = json.loads(json_bytes.decode("utf-8"))
+            except UnicodeDecodeError:
+                return None
         else:
-            data = json.loads(raw_bytes.decode("utf-8"))
+            try:
+                data = json.loads(raw_bytes.decode("utf-8"))
+            except UnicodeDecodeError:
+                return None
 
         # Version check
         stored_version = data.get("index_version", 1)
@@ -459,7 +489,7 @@ class IndexStore:
                 languages=data["languages"],
                 symbols=data["symbols"],
                 index_version=stored_version,
-                file_hashes=data.get("file_hashes", {}),
+                file_hashes=data.get("file_hashes") if isinstance(data.get("file_hashes"), dict) else {},
                 git_head=data.get("git_head", ""),
             )
         except (KeyError, TypeError, ValueError):
@@ -500,6 +530,9 @@ class IndexStore:
             return None
 
         file_path = Path(validated_path)
+
+        if "byte_offset" not in symbol or "byte_length" not in symbol:
+            return None
 
         # ADV-MED-11: cast to int and validate before use in seek/read.
         try:
@@ -664,7 +697,7 @@ class IndexStore:
                     if not is_within(resolved_root, dest):
                         continue  # Traversal — skip silently
                     _makedirs_0o700(str(dest.parent))
-                    tmp_dest = dest.with_suffix(dest.suffix + ".tmp")
+                    tmp_dest = dest.with_name(f"{dest.name}.tmp.{os.getpid()}")
                     try:
                         fd = os.open(
                             str(tmp_dest),
@@ -694,7 +727,10 @@ class IndexStore:
                     if not is_within(resolved_root, dead):
                         continue  # Traversal — skip silently
                     if dead.exists():
-                        dead.unlink()
+                        try:
+                            dead.unlink()
+                        except OSError:
+                            pass
 
                 # Phase 4: rename all content .tmp → final (after JSON succeeded)
                 for final, tmp in content_tmp_paths:
@@ -717,6 +753,10 @@ class IndexStore:
             for index_file in self.base_path.glob(pattern):
                 # Skip .tmp files and lock files
                 if index_file.name.endswith(".tmp") or index_file.name.endswith(".lock"):
+                    continue
+                # Only parse files matching owner__name.json(.gz) pattern
+                stem = index_file.name.replace(".json.gz", "").replace(".json", "")
+                if "__" not in stem:
                     continue
                 # Size limit check
                 try:

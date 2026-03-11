@@ -50,9 +50,13 @@ def make_symbol_id(file_path: str, qualified_name: str, kind: str = "") -> str:
     Returns:
         A human-readable symbol ID.
     """
+    # Prevent ambiguous IDs: '::' in file_path or '#' in qualified_name
+    # would break the ID parsing convention file_path::qualified_name#kind
+    safe_path = file_path.replace("::", "__")
+    safe_name = qualified_name.replace("#", "_")
     if kind:
-        return f"{file_path}::{qualified_name}#{kind}"
-    return f"{file_path}::{qualified_name}"
+        return f"{safe_path}::{safe_name}#{kind}"
+    return f"{safe_path}::{safe_name}"
 
 
 def compute_content_hash(source_bytes: bytes) -> str:

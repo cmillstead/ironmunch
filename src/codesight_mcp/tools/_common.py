@@ -34,7 +34,10 @@ def parse_repo(
         import re
 
         store = IndexStore(base_path=storage_path)
-        repos = store.list_repos()
+        try:
+            repos = store.list_repos()
+        except Exception as exc:
+            raise RepoNotFoundError(f"Failed to list repositories: {exc}")
         # 1. Exact name match (e.g. "myproject" matches "acme/myproject")
         matching = [r for r in repos if r["repo"].endswith(f"/{repo}")]
         # 2. Prefix match for local hash-suffixed repos
@@ -193,6 +196,9 @@ def prepare_graph_query(
             return {"error": f"Symbol not found: {symbol_id}"}
 
     # Build graph from index
-    graph = CodeGraph.get_or_build(index.symbols)
+    try:
+        graph = CodeGraph.get_or_build(index.symbols)
+    except Exception:
+        return {"error": "Failed to build code graph"}
 
     return (owner, name, index, graph, symbol_info)

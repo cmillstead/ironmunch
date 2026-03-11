@@ -35,13 +35,19 @@ def build_symbol_tree(symbols: list[Symbol]) -> list[SymbolNode]:
     return roots
 
 
-def flatten_tree(nodes: list[SymbolNode], depth: int = 0) -> list[tuple[Symbol, int]]:
+def flatten_tree(nodes: list[SymbolNode], depth: int = 0, _visited: set | None = None) -> list[tuple[Symbol, int]]:
     """Flatten symbol tree with depth information.
 
     Returns list of (symbol, depth) tuples for indentation.
     """
+    if _visited is None:
+        _visited = set()
     result = []
     for node in nodes:
+        node_id = id(node)
+        if node_id in _visited:
+            continue
+        _visited.add(node_id)
         result.append((node.symbol, depth))
-        result.extend(flatten_tree(node.children, depth + 1))
+        result.extend(flatten_tree(node.children, depth + 1, _visited))
     return result
