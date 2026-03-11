@@ -515,7 +515,6 @@ class TestSearchTextSecretRedaction:
             result = search_text(
                 repo="test/repo",
                 query="SK_KEY",
-                confirm_sensitive_search=True,
                 storage_path=tmp,
             )
 
@@ -562,7 +561,6 @@ class TestSearchTextSecretRedaction:
             result = search_text(
                 repo="test/repo2",
                 query="sk-short",
-                confirm_sensitive_search=True,
                 storage_path=tmp,
             )
 

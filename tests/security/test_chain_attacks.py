@@ -202,7 +202,6 @@ class TestTimingSideChannel:
         result = search_text(
             repo="nonexistent/repo",
             query="test",
-            confirm_sensitive_search=True,
             storage_path=str(tmp_path),
         )
         # Error results either have no _meta or no timing_ms

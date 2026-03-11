@@ -313,7 +313,7 @@ class TestRequiredArgValidation:
         """call_tool with all required args passes the required-arg check."""
         from codesight_mcp.server import call_tool
         # This will fail later (repo not found) but should pass validation
-        result = await call_tool("search_text", {"query": "test", "confirm_sensitive_search": True})
+        result = await call_tool("search_text", {"query": "test"})
         text = result[0].text
         parsed = json.loads(text)
         # Should NOT be a "required" error — might be repo-not-found or other

@@ -165,7 +165,6 @@ class TestRedactionSentinelBypass:
         result = search_text(
             repo="test/repo",
             query="REDACTED>",
-            confirm_sensitive_search=True,
         )
         assert "error" in result
         assert "sentinel" in result["error"].lower() or "redact" in result["error"].lower()
@@ -175,7 +174,6 @@ class TestRedactionSentinelBypass:
         result = search_text(
             repo="test/repo",
             query="<REDAC",
-            confirm_sensitive_search=True,
         )
         assert "error" in result
 

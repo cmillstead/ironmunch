@@ -47,7 +47,7 @@ class TestSearchTextFileSpotlighting:
             )
             result = search_text(
                 repo="owner/repo", query="helper",
-                confirm_sensitive_search=True, storage_path=tmp
+                storage_path=tmp
             )
 
             assert "error" not in result
@@ -69,7 +69,6 @@ class TestSearchTextFileSpotlighting:
             result = search_text(
                 repo="owner/repo2",
                 query="ignore_previous",
-                confirm_sensitive_search=True,
                 storage_path=tmp,
             )
 
@@ -91,7 +90,7 @@ class TestSearchTextFileSpotlighting:
             )
             result = search_text(
                 repo="owner/repo3", query="MY_CONST",
-                confirm_sensitive_search=True, storage_path=tmp
+                storage_path=tmp
             )
 
             assert "error" not in result
@@ -112,7 +111,7 @@ class TestSearchTextFileSpotlighting:
             )
             result = search_text(
                 repo="owner/repo4", query="compute",
-                confirm_sensitive_search=True, storage_path=tmp
+                storage_path=tmp
             )
 
             assert "error" not in result
@@ -132,7 +131,7 @@ class TestSearchTextFileSpotlighting:
             )
             result = search_text(
                 repo="owner/repo5", query="zzznomatch999",
-                confirm_sensitive_search=True, storage_path=tmp
+                storage_path=tmp
             )
 
             assert "error" not in result
@@ -144,22 +143,9 @@ class TestSearchTextFileSpotlighting:
         with tempfile.TemporaryDirectory() as tmp:
             result = search_text(
                 repo="nobody/ghost", query="anything",
-                confirm_sensitive_search=True, storage_path=tmp
+                storage_path=tmp
             )
             assert "error" in result
-
-    def test_missing_confirmation_returns_error(self):
-        """search_text must require an explicit confirmation flag."""
-        with tempfile.TemporaryDirectory() as tmp:
-            _make_store_with_file(
-                tmp, "owner", "repo6",
-                file_path="x.py",
-                file_content="needle = 1\n",
-            )
-            result = search_text(repo="owner/repo6", query="needle", storage_path=tmp)
-
-            assert "error" in result
-            assert "confirm_sensitive_search" in result["error"]
 
     def test_secret_in_result_line_is_redacted(self):
         """SEC-MED-3: secrets in matching lines must be redacted before returning."""
@@ -172,7 +158,6 @@ class TestSearchTextFileSpotlighting:
             result = search_text(
                 repo="owner/repo_sec3",
                 query="TOKEN",
-                confirm_sensitive_search=True,
                 storage_path=tmp,
             )
 
@@ -194,7 +179,6 @@ class TestSearchTextFileSpotlighting:
             result = search_text(
                 repo="owner/repo7",
                 query="<REDACTED>",
-                confirm_sensitive_search=True,
                 storage_path=tmp,
             )
 
@@ -213,7 +197,6 @@ class TestSearchTextFileSpotlighting:
             result = search_text(
                 repo="owner/repo_sub",
                 query="<REDA",
-                confirm_sensitive_search=True,
                 storage_path=tmp,
             )
             assert "error" in result
@@ -230,7 +213,6 @@ class TestSearchTextFileSpotlighting:
             result = search_text(
                 repo="owner/repo_short",
                 query="<RE",
-                confirm_sensitive_search=True,
                 storage_path=tmp,
             )
             # Should not be blocked (only 3 chars)

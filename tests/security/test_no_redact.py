@@ -91,7 +91,6 @@ class TestNoRedactToolInteraction:
             result = search_text(
                 repo="test/repo",
                 query="password",
-                confirm_sensitive_search=True,
             )
         assert "error" in result
         assert "NO_REDACT" in result["error"] or "redaction disabled" in result["error"].lower()
@@ -103,7 +102,6 @@ class TestNoRedactToolInteraction:
         result = search_text(
             repo="nonexistent/repo",
             query="hello",
-            confirm_sensitive_search=True,
             storage_path=str(tmp_path),
         )
         # Should get a repo-not-found error, not a redaction error

@@ -15,7 +15,6 @@ class ToolSpec:
     untrusted: bool = False
     index_gate: bool = False
     destructive: bool = False
-    text_search: bool = False
     required_args: list[str] = field(default_factory=list)
 
 

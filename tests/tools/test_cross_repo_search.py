@@ -147,7 +147,7 @@ class TestSearchTextCrossRepo:
             _make_repo(tmp, "owner", "repo1", "alpha", "def alpha():\n    return 1\n")
             result = search_text(
                 repo="owner/repo1", query="alpha",
-                confirm_sensitive_search=True, storage_path=tmp,
+                storage_path=tmp,
             )
             assert "error" not in result
             assert result["result_count"] >= 1
@@ -161,8 +161,7 @@ class TestSearchTextCrossRepo:
             result = search_text(
                 repos=["owner/repo1", "owner/repo2"],
                 query="def",
-                confirm_sensitive_search=True,
-                storage_path=tmp,
+                    storage_path=tmp,
             )
             assert "error" not in result
             assert "repos" in result
@@ -177,7 +176,6 @@ class TestSearchTextCrossRepo:
             repo="owner/repo1",
             repos=["owner/repo1"],
             query="foo",
-            confirm_sensitive_search=True,
         )
         assert "error" in result
         assert "both" in result["error"].lower()
@@ -186,7 +184,6 @@ class TestSearchTextCrossRepo:
         """Omitting both repo and repos returns an error."""
         result = search_text(
             query="foo",
-            confirm_sensitive_search=True,
         )
         assert "error" in result
 
@@ -195,7 +192,6 @@ class TestSearchTextCrossRepo:
         repos = [f"owner/repo{i}" for i in range(6)]
         result = search_text(
             repos=repos, query="foo",
-            confirm_sensitive_search=True,
         )
         assert "error" in result
         assert "5" in result["error"]
@@ -207,21 +203,9 @@ class TestSearchTextCrossRepo:
             result = search_text(
                 repos=["owner/repo1", "owner/nonexistent"],
                 query="alpha",
-                confirm_sensitive_search=True,
-                storage_path=tmp,
+                    storage_path=tmp,
             )
             assert result["result_count"] >= 1
             assert "errors" in result
             assert len(result["errors"]) == 1
 
-    def test_confirm_sensitive_still_required(self):
-        """Cross-repo search_text still requires confirm_sensitive_search."""
-        with tempfile.TemporaryDirectory() as tmp:
-            _make_repo(tmp, "owner", "repo1", "alpha", "def alpha():\n    return 1\n")
-            result = search_text(
-                repos=["owner/repo1"],
-                query="alpha",
-                storage_path=tmp,
-            )
-            assert "error" in result
-            assert "confirm_sensitive_search" in result["error"]

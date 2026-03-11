@@ -576,7 +576,6 @@ class TestQueryEchoSanitization:
             result = search_text(
                 repo="local/qtest",
                 query=query,
-                confirm_sensitive_search=True,
                 storage_path=storage,
             )
             assert "query" in result

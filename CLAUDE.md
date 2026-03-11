@@ -2,7 +2,7 @@
 
 ## Code Navigation
 
-This repo is indexed in codesight-mcp. Use codesight-mcp MCP tools for code exploration instead of reading full files:
+This repo is indexed in codesight-mcp. **Always use codesight-mcp tools instead of Grep, Bash search, or Read for code exploration.** Do NOT use Grep or Bash to search indexed repos — use `search_text` or `search_symbols` instead.
 
 ### Indexing
 - `index_repo` — index a local or GitHub repository
@@ -19,7 +19,7 @@ This repo is indexed in codesight-mcp. Use codesight-mcp MCP tools for code expl
 
 ### Search
 - `search_symbols` — find functions, classes, methods by name, signature, or summary
-- `search_text` — full-text search across all files (requires `confirm_sensitive_search=True`)
+- `search_text` — full-text search across all files (returns file, line number, and matched text)
 
 ### Code Graph
 - `get_callers` — find all callers of a symbol

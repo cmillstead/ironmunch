@@ -90,7 +90,6 @@ def search_text(
     query: str = "",
     file_pattern: Optional[str] = None,
     max_results: int = 20,
-    confirm_sensitive_search: bool = False,
     repos: Optional[list[str]] = None,
     storage_path: Optional[str] = None,
 ) -> dict:
@@ -104,7 +103,6 @@ def search_text(
         query: Text to search for (case-insensitive substring match).
         file_pattern: Optional glob pattern to filter files.
         max_results: Maximum number of matching lines to return.
-        confirm_sensitive_search: Must be True to acknowledge text-search risk.
         repos: Optional list of repo identifiers to search across (max 5).
                Mutually exclusive with repo.
         storage_path: Custom storage path.
@@ -117,13 +115,6 @@ def search_text(
     if not isinstance(query, str) or not query.strip():
         return {"error": "query must be a non-empty string"}
 
-    if not confirm_sensitive_search:
-        return {
-            "error": (
-                "search_text requires confirm_sensitive_search=True because "
-                "full-text search can reveal indexed content."
-            )
-        }
     if _no_redact():
         return {
             "error": (
@@ -236,11 +227,6 @@ _spec = register(ToolSpec(
                 "description": "Maximum number of matching lines to return",
                 "default": 20,
             },
-            "confirm_sensitive_search": {
-                "type": "boolean",
-                "description": "Must be true to acknowledge that full-text search can reveal indexed content.",
-                "default": False,
-            },
         },
         "required": ["query"],
     },
@@ -249,11 +235,9 @@ _spec = register(ToolSpec(
         query=args["query"],
         file_pattern=args.get("file_pattern"),
         max_results=args.get("max_results", 20),
-        confirm_sensitive_search=args.get("confirm_sensitive_search", False),
         repos=args.get("repos"),
         storage_path=storage_path,
     ),
-    text_search=True,
     untrusted=True,
     required_args=["query"],
 ))

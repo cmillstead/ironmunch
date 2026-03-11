@@ -74,7 +74,6 @@ def test_flags_default_false():
     assert spec.untrusted is False
     assert spec.index_gate is False
     assert spec.destructive is False
-    assert spec.text_search is False
     assert spec.required_args == []
 
 
@@ -87,13 +86,11 @@ def test_flags_set_correctly():
         untrusted=True,
         index_gate=True,
         destructive=True,
-        text_search=True,
         required_args=["repo"],
     )
     assert spec.untrusted is True
     assert spec.index_gate is True
     assert spec.destructive is True
-    assert spec.text_search is True
     assert spec.required_args == ["repo"]
 
 

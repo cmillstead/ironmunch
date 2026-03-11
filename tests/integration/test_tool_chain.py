@@ -294,7 +294,6 @@ class TestIndexToSearchText:
         """search_text finds text in indexed file contents."""
         result = search_text(
             repo="test/multi", query="return 42",
-            confirm_sensitive_search=True,
             storage_path=multi_file_index,
         )
         assert "error" not in result

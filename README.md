@@ -213,7 +213,7 @@ codesight-mcp exposes **22 MCP tools** organized into five categories:
 | Tool | Description |
 |------|-------------|
 | `search_symbols` | Search symbols by name, signature, summary, or docstring |
-| `search_text` | Full-text search across indexed files (matches against redacted content; requires `confirm_sensitive_search=True`) |
+| `search_text` | Full-text search across indexed files (matches against redacted content) |
 
 ### Code Graph
 

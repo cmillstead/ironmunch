@@ -118,7 +118,7 @@ The `sanitize_signature_for_api()` function applies `_INLINE_SECRET_RE` to signa
 
 Matched secrets are replaced with `<REDACTED>`.
 
-`search_text` runs matching against redacted file content, not raw file bytes, requires `confirm_sensitive_search=True`, and rejects queries for the internal redaction marker `<REDACTED>`.
+`search_text` runs matching against redacted file content, not raw file bytes, and rejects queries for the internal redaction marker `<REDACTED>`. When `CODESIGHT_NO_REDACT=1` is set, `search_text` is disabled entirely to prevent exposing secrets.
 
 ## Rate Limiting
 
