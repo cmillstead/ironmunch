@@ -213,6 +213,10 @@ class CodeGraph:
         """Look up a symbol dict by ID, or return None if not found."""
         return self._symbols_by_id.get(symbol_id)
 
+    def all_symbols(self) -> dict[str, dict]:
+        """Return a copy of the symbol-by-id mapping."""
+        return dict(self._symbols_by_id)
+
     def get_callers(self, symbol_id: str) -> list[str]:
         """Return symbol IDs that call *symbol_id* (reverse call graph)."""
         return sorted(self._calls_rev.get(symbol_id, set()))
