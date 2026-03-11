@@ -201,6 +201,9 @@ def discover_local_files(
             continue
         visited_dirs.add(resolved_dir)
         if len(visited_dirs) > 100_000:
+            logging.getLogger(__name__).warning(
+                "Directory visit limit reached; file discovery may be incomplete"
+            )
             dirnames.clear()
             break
 
