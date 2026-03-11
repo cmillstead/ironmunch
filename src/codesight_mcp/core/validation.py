@@ -124,6 +124,9 @@ def validate_path(path: str, root: str) -> str:
     # Step 0: normalize to NFC so NFD-encoded characters are in canonical form
     # before any string comparison or pattern matching.
     path = unicodedata.normalize("NFC", path)
+    # FUZZ-5: Strip BOM (U+FEFF) — it passes control-char checks (ord > 159)
+    # but creates invisible path differences on most filesystems.
+    path = path.replace("\ufeff", "")
     # Reject backslashes (potential traversal bypass on mixed-OS paths)
     # Must be after NFC normalization to catch backslashes in normalized form.
     if "\\" in path:

@@ -49,6 +49,10 @@ def sanitize_error(err: Exception) -> str:
     if isinstance(err, OSError) and err.errno in _ERRNO_MESSAGES:
         return _ERRNO_MESSAGES[err.errno]
 
+    # FUZZ-19: Lock timeout gets a specific, safe message instead of generic fallback.
+    if isinstance(err, TimeoutError):
+        return "Operation timed out. Another operation may be in progress — try again shortly."
+
     # Log full error to stderr for debugging
     print(f"[codesight-mcp] Sanitized error: {type(err).__name__}", file=sys.stderr)
 

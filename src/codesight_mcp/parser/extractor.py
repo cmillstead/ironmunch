@@ -262,14 +262,14 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
             if child.type == "type_spec":
                 name_node = child.child_by_field_name("name")
                 if name_node:
-                    return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+                    return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")[:200]
         return None
 
     # Delegate to language-specific name extractor if available
     if spec.extract_name is not None and node.type not in spec.name_fields:
         result = spec.extract_name(node, source_bytes)
         if result is not None:
-            return result
+            return result[:200]
         # extract_name returned None — node type not handled by this language
         # Fall through to default logic below
 
@@ -280,12 +280,12 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
     name_node = node.child_by_field_name(field_name)
 
     if name_node:
-        return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+        return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")[:200]
 
     # Fallback: find identifier child (for nodes where tree-sitter doesn't expose a name field)
     for child in node.named_children:
         if child.type == "identifier":
-            return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+            return source_bytes[child.start_byte:child.end_byte].decode("utf-8")[:200]
 
     return None
 
