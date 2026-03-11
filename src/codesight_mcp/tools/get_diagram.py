@@ -190,33 +190,34 @@ def _render_impact(
     edges: list[tuple[str, str]] = []
     edge_labels: dict[tuple[str, str], str] = {}
 
-    # Multi-relationship BFS (mirrors get_impact tool logic)
-    queue: deque[tuple[str, int, str]] = deque()
+    # Multi-relationship BFS tracking parent for correct edges
+    # Queue entries: (current, depth, rel, parent)
+    queue: deque[tuple[str, int, str, str]] = deque()
     visited: set[str] = {symbol_id}
 
     # Seed with direct relationships
     for caller_id in graph.get_callers(symbol_id):
-        queue.append((caller_id, 1, "calls"))
+        queue.append((caller_id, 1, "calls", symbol_id))
     for child_id in graph._inherits_rev.get(symbol_id, set()):
-        queue.append((child_id, 1, "inherits"))
+        queue.append((child_id, 1, "inherits", symbol_id))
     for impl_id in graph._implements_rev.get(symbol_id, set()):
-        queue.append((impl_id, 1, "implements"))
+        queue.append((impl_id, 1, "implements", symbol_id))
 
     while queue and len(nodes) < _MAX_NODES:
-        current, depth, rel = queue.popleft()
+        current, depth, rel, parent = queue.popleft()
         if current in visited:
             continue
         visited.add(current)
 
         sym = graph._symbols_by_id.get(current, {"name": current, "kind": "unknown"})
         nodes[current] = sym
-        edges.append((symbol_id if depth == 1 else current, current))
-        edge_labels[(symbol_id if depth == 1 else current, current)] = rel
+        edges.append((parent, current))
+        edge_labels[(parent, current)] = rel
 
         if depth < max_depth:
             for caller_id in graph.get_callers(current):
                 if caller_id not in visited:
-                    queue.append((caller_id, depth + 1, "calls"))
+                    queue.append((caller_id, depth + 1, "calls", current))
 
     return _build_mermaid(
         nodes, edges, direction, highlight=symbol_id, edge_labels=edge_labels,

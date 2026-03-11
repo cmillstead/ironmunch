@@ -140,6 +140,39 @@ class TestImpactDiagram:
         assert "mermaid" in result
         assert result["node_count"] >= 2
 
+    def test_impact_diagram_no_self_loops(self, tmp_path):
+        """Impact diagram should connect predecessor to current, not self-loops."""
+        from codesight_mcp.tools.get_diagram import get_diagram, _render_impact
+        from codesight_mcp.parser.graph import CodeGraph
+
+        # A -> B -> C (call chain); impact of C should show B->C and A->B edges
+        symbols = [
+            _sym("A", calls=["B"]),
+            _sym("B", calls=["C"]),
+            _sym("C"),
+        ]
+        _make_store(tmp_path, symbols)
+
+        # Build graph directly to inspect _render_impact output
+        sym_dicts = [
+            {"id": "a.py::A#function", "file": "a.py", "name": "A", "kind": "function",
+             "calls": ["B"], "imports": [], "inherits_from": [], "implements": []},
+            {"id": "a.py::B#function", "file": "a.py", "name": "B", "kind": "function",
+             "calls": ["C"], "imports": [], "inherits_from": [], "implements": []},
+            {"id": "a.py::C#function", "file": "a.py", "name": "C", "kind": "function",
+             "calls": [], "imports": [], "inherits_from": [], "implements": []},
+        ]
+        graph = CodeGraph.build(sym_dicts)
+        result = _render_impact(graph, "a.py::C#function", None, 3, "TD")
+
+        # Parse mermaid output for self-loop edges (n1 --> n1)
+        mermaid = result["mermaid"]
+        import re
+        edge_pattern = re.compile(r'(n\d+)\s+-->(?:\|[^|]*\|)?\s+(n\d+)')
+        for m in edge_pattern.finditer(mermaid):
+            src, dst = m.group(1), m.group(2)
+            assert src != dst, f"Self-loop detected: {src} --> {dst} in:\n{mermaid}"
+
 
 class TestDiagramEdgeCases:
 
