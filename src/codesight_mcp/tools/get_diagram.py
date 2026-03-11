@@ -47,7 +47,7 @@ def _render_call_graph(
     graph: CodeGraph, symbol_id: str, index, max_depth: int, direction: str,
 ) -> dict:
     """Render a call graph centered on symbol_id."""
-    center = graph._symbols_by_id.get(symbol_id)
+    center = graph.get_symbol(symbol_id)
     if not center:
         return {"error": f"Symbol not found: {symbol_id}"}
 
@@ -64,7 +64,7 @@ def _render_call_graph(
             continue
         for callee_id in graph.get_callees(current):
             if callee_id not in nodes and len(nodes) < _MAX_NODES:
-                sym = graph._symbols_by_id.get(callee_id)
+                sym = graph.get_symbol(callee_id)
                 if sym:
                     nodes[callee_id] = sym
             if callee_id in nodes:
@@ -82,7 +82,7 @@ def _render_call_graph(
             continue
         for caller_id in graph.get_callers(current):
             if caller_id not in nodes and len(nodes) < _MAX_NODES:
-                sym = graph._symbols_by_id.get(caller_id)
+                sym = graph.get_symbol(caller_id)
                 if sym:
                     nodes[caller_id] = sym
             if caller_id in nodes:
@@ -101,7 +101,7 @@ def _render_type_hierarchy(
     graph: CodeGraph, symbol_id: str, index, max_depth: int, direction: str,
 ) -> dict:
     """Render a type hierarchy centered on symbol_id."""
-    center = graph._symbols_by_id.get(symbol_id)
+    center = graph.get_symbol(symbol_id)
     if not center:
         return {"error": f"Symbol not found: {symbol_id}"}
 
@@ -113,24 +113,24 @@ def _render_type_hierarchy(
 
     # Parents (upward)
     for parent_id in hierarchy["parents"]:
-        sym = graph._symbols_by_id.get(parent_id, {"name": parent_id, "kind": "class"})
+        sym = graph.get_symbol(parent_id) or {"name": parent_id, "kind": "class"}
         nodes[parent_id] = sym
         edges.append((parent_id, symbol_id))
 
     # Children (downward)
     for child_id in hierarchy["children"]:
-        sym = graph._symbols_by_id.get(child_id, {"name": child_id, "kind": "class"})
+        sym = graph.get_symbol(child_id) or {"name": child_id, "kind": "class"}
         nodes[child_id] = sym
         edges.append((symbol_id, child_id))
 
     # Implements (dashed)
     for iface_id in hierarchy["implements"]:
-        sym = graph._symbols_by_id.get(iface_id, {"name": iface_id, "kind": "class"})
+        sym = graph.get_symbol(iface_id) or {"name": iface_id, "kind": "class"}
         nodes[iface_id] = sym
         dash_edges.add((iface_id, symbol_id))
 
     for impl_id in hierarchy["implemented_by"]:
-        sym = graph._symbols_by_id.get(impl_id, {"name": impl_id, "kind": "class"})
+        sym = graph.get_symbol(impl_id) or {"name": impl_id, "kind": "class"}
         nodes[impl_id] = sym
         dash_edges.add((symbol_id, impl_id))
 
@@ -183,7 +183,7 @@ def _render_impact(
     graph: CodeGraph, symbol_id: str, index, max_depth: int, direction: str,
 ) -> dict:
     """Render impact diagram for a symbol."""
-    center = graph._symbols_by_id.get(symbol_id)
+    center = graph.get_symbol(symbol_id)
     if not center:
         return {"error": f"Symbol not found: {symbol_id}"}
 
@@ -196,12 +196,13 @@ def _render_impact(
     queue: deque[tuple[str, int, str, str]] = deque()
     visited: set[str] = {symbol_id}
 
-    # Seed with direct relationships
+    # Seed with direct relationships using public type_hierarchy accessor
+    hierarchy = graph.get_type_hierarchy(symbol_id)
     for caller_id in graph.get_callers(symbol_id):
         queue.append((caller_id, 1, "calls", symbol_id))
-    for child_id in graph._inherits_rev.get(symbol_id, set()):
+    for child_id in hierarchy["children"]:
         queue.append((child_id, 1, "inherits", symbol_id))
-    for impl_id in graph._implements_rev.get(symbol_id, set()):
+    for impl_id in hierarchy["implemented_by"]:
         queue.append((impl_id, 1, "implements", symbol_id))
 
     while queue and len(nodes) < _MAX_NODES:
@@ -210,7 +211,7 @@ def _render_impact(
             continue
         visited.add(current)
 
-        sym = graph._symbols_by_id.get(current, {"name": current, "kind": "unknown"})
+        sym = graph.get_symbol(current) or {"name": current, "kind": "unknown"}
         nodes[current] = sym
         edges.append((parent, current))
         edge_labels[(parent, current)] = rel
