@@ -216,7 +216,7 @@ class CodeGraph:
         from_id: str,
         to_id: str,
         max_depth: int = 10,
-    ) -> list[list[str]]:
+    ) -> dict:
         """Find call paths from *from_id* to *to_id* via BFS.
 
         Args:
@@ -225,18 +225,19 @@ class CodeGraph:
             max_depth: Maximum path length (clamped to 50).
 
         Returns:
-            List of paths (up to _MAX_CALL_CHAIN_PATHS), where each path
-            is a list of symbol IDs.
+            Dict with ``paths`` (list of paths, each a list of symbol IDs)
+            and ``truncated`` (bool, True if BFS queue was capped).
         """
         max_depth = _clamp_depth(max_depth)
         if from_id not in self._symbols_by_id or to_id not in self._symbols_by_id:
-            return []
+            return {"paths": [], "truncated": False}
 
         if from_id == to_id:
-            return [[from_id]]
+            return {"paths": [[from_id]], "truncated": False}
 
         paths: list[list[str]] = []
         queue: deque[list[str]] = deque([[from_id]])
+        truncated = False
 
         while queue:
             # ADV-LOW-3: early termination once enough paths are found
@@ -257,7 +258,9 @@ class CodeGraph:
                 else:
                     if len(queue) < self._MAX_BFS_QUEUE_SIZE:
                         queue.append(new_path)
-        return paths
+                    else:
+                        truncated = True
+        return {"paths": paths, "truncated": truncated}
 
     # ------------------------------------------------------------------
     # Type-hierarchy queries

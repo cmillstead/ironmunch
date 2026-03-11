@@ -208,7 +208,7 @@ class BatchSummarizer:
         prompt = self._build_prompt(batch, nonce=nonce)
 
         try:
-            system_prompt, user_prompt = self._split_prompt(prompt)
+            system_prompt, user_prompt = self._split_prompt(prompt, nonce=nonce)
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=self.max_tokens_per_batch,
@@ -281,15 +281,19 @@ class BatchSummarizer:
         return "\n".join(system_lines) + f"\n{split_marker}\n" + "\n".join(user_lines)
 
     @staticmethod
-    def _split_prompt(prompt: str) -> tuple[str, str]:
+    def _split_prompt(prompt: str, nonce: str | None = None) -> tuple[str, str]:
         """Split a combined prompt into (system, user) parts.
 
         ADV-MED-4: The system parameter receives higher model privilege,
         keeping trusted instructions separate from untrusted signature data.
         ADV-INFO-4: Uses nonce-based <<<SPLIT_{nonce}>>> marker via regex.
         """
-        m = re.search(r"^<<<SPLIT_[0-9a-zA-Z]+>>>$", prompt, re.MULTILINE)
+        m = re.search(r"^<<<SPLIT_([0-9a-zA-Z]+)>>>$", prompt, re.MULTILINE)
         if m:
+            # Verify the matched nonce equals the expected nonce
+            if nonce is not None and m.group(1) != nonce:
+                # Nonce mismatch — skip the split, treat entire prompt as user
+                return "", prompt
             system_part = prompt[:m.start()].strip()
             user_part = prompt[m.end():].strip()
             return system_part, user_part

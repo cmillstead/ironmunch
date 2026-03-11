@@ -112,8 +112,8 @@ def search_text(
     """
     start = timed()
 
-    if not query.strip():
-        return {"error": "query must not be empty or whitespace-only"}
+    if not isinstance(query, str) or not query.strip():
+        return {"error": "query must be a non-empty string"}
 
     if not confirm_sensitive_search:
         return {

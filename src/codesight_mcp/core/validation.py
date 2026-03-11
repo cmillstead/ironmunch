@@ -121,12 +121,13 @@ def validate_path(path: str, root: str) -> str:
         5. assert_inside_root — strict prefix + os.sep
         6. assert_no_symlinked_parents — lstat walk
     """
-    # Reject backslashes (potential traversal bypass on mixed-OS paths)
-    if "\\" in path:
-        raise ValidationError("Backslashes not allowed in paths")
     # Step 0: normalize to NFC so NFD-encoded characters are in canonical form
     # before any string comparison or pattern matching.
     path = unicodedata.normalize("NFC", path)
+    # Reject backslashes (potential traversal bypass on mixed-OS paths)
+    # Must be after NFC normalization to catch backslashes in normalized form.
+    if "\\" in path:
+        raise ValidationError("Backslashes not allowed in paths")
     assert_no_control_chars(path)
     # Strip ASCII spaces only (not all whitespace — str.strip() would eat
     # control chars that assert_no_control_chars must reject first).

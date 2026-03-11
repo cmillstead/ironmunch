@@ -42,6 +42,8 @@ def flatten_tree(nodes: list[SymbolNode], depth: int = 0, _visited: set | None =
     """
     if _visited is None:
         _visited = set()
+    if depth > 500:
+        return []
     result = []
     for node in nodes:
         node_id = id(node)

@@ -104,7 +104,7 @@ def _build_tree(files: list[str], index, path_prefix: str) -> list[dict]:
                 # Directory node — don't overwrite a file node; prefer dir (has children)
                 existing = current.get(part)
                 if existing and existing.get("type") == "file":
-                    current[part] = {"type": "dir", "children": {}}
+                    current[part] = {"type": "dir", "children": {}, "symbol_count": existing.get("symbol_count", 0)}
                 elif part not in current:
                     current[part] = {"type": "dir", "children": {}}
                 current = current[part]["children"]

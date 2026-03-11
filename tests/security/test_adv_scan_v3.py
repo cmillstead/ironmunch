@@ -65,15 +65,21 @@ class TestDoubleCloseFD:
         content_dir.mkdir(mode=0o700)
 
         close_calls = []
+        content_fd = None
         original_close = os.close
 
         def tracking_close(fd):
-            close_calls.append(fd)
+            # Only track close calls for the content file fd, not dir fds
+            # from _makedirs_0o700's fchmod path
+            if fd == content_fd:
+                close_calls.append(fd)
             return original_close(fd)
 
         # Create a file object whose write raises
         original_fdopen = os.fdopen
         def failing_fdopen(fd, *args, **kwargs):
+            nonlocal content_fd
+            content_fd = fd
             fh = original_fdopen(fd, *args, **kwargs)
             original_write = fh.write
             def bad_write(data):
@@ -86,7 +92,7 @@ class TestDoubleCloseFD:
             with pytest.raises(IOError, match="disk full"):
                 store._safe_write_content(content_dir, "test.py", "content")
 
-        # os.close should NOT have been called — fh.close() handles it
+        # os.close should NOT have been called for content fd — fh.close() handles it
         assert len(close_calls) == 0
 
     def test_fdopen_failure_closes_fd(self, tmp_path):

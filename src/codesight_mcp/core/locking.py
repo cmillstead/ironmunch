@@ -14,6 +14,8 @@ _LOCK_RETRY_INTERVAL: float = 0.1
 
 def ensure_private_dir(path: str | Path) -> Path:
     """Create a directory and enforce owner-only permissions."""
+    if not str(path).strip():
+        raise OSError("empty path")
     target = Path(path)
     if target == Path("/") or target == target.parent:
         raise OSError("refusing to operate on filesystem root")
@@ -46,9 +48,11 @@ def atomic_write_nofollow(path: str | Path, data: str) -> None:
             tmp_path.replace(target)
         except OSError:
             tmp_path.unlink(missing_ok=True)
+            tmp_path = None
             raise
     except Exception:
-        tmp_path.unlink(missing_ok=True)
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
         raise
 
 
@@ -69,6 +73,7 @@ def exclusive_file_lock(lock_path: str | Path) -> Iterator[None]:
             except (OSError, BlockingIOError):
                 if time.monotonic() >= deadline:
                     os.close(fd)
+                    fd = -1
                     raise TimeoutError(
                         f"Could not acquire lock on {lock_path} "
                         f"within {_LOCK_TIMEOUT_SECONDS}s"
@@ -76,5 +81,6 @@ def exclusive_file_lock(lock_path: str | Path) -> Iterator[None]:
                 time.sleep(_LOCK_RETRY_INTERVAL)
         yield
     finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
+        if fd >= 0:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
