@@ -181,6 +181,14 @@ class TestIsTestFile:
         assert _is_test_file("src/main.py") is False
         assert _is_test_file("lib/utils.js") is False
 
+    def test_non_test_file_with_test_substring_in_path(self):
+        """Paths containing 'test' as a substring in dir names should not be flagged."""
+        # "/test/" substring used to match these false positives
+        assert _is_test_file("src/attestation/handler.py") is False
+        assert _is_test_file("src/contest/models.py") is False
+        assert _is_test_file("lib/latest/utils.py") is False
+        assert _is_test_file("pkg/detest/runner.py") is False
+
 
 # ---------------------------------------------------------------------------
 # _is_entry_point helper
