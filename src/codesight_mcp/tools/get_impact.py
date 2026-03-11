@@ -137,6 +137,8 @@ def get_impact(
             continue
         _collect_affected(current_id, depth)
 
+    truncated = len(impacted) >= _MAX_IMPACTED
+
     # Collect unique affected files
     affected_files = sorted({
         entry["file"] for entry in impacted
@@ -151,6 +153,7 @@ def get_impact(
         "max_depth": max_depth,
         "impacted_count": len(impacted),
         "affected_file_count": len(affected_files),
+        "truncated": truncated,
         "impacted": impacted,
         "affected_files": affected_files,
         "_meta": {

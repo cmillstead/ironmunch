@@ -401,6 +401,24 @@ class TestGetImpact:
         result = get_impact(_repo(), "utils-py::validate#function", max_depth=99, storage_path=graph_index["path"])
         assert result["max_depth"] == 10
 
+    def test_truncated_flag_present_on_success(self, graph_index):
+        """get_impact should include 'truncated' key in successful result."""
+        result = get_impact(_repo(), "utils-py::validate#function", storage_path=graph_index["path"])
+        assert "error" not in result
+        assert "truncated" in result
+
+    def test_truncated_flag_false_for_small_result(self, graph_index):
+        """truncated should be False when results are well below the cap."""
+        result = get_impact(_repo(), "utils-py::validate#function", storage_path=graph_index["path"])
+        assert "error" not in result
+        assert result["truncated"] is False
+
+def test_get_impact_returns_truncated_flag(monkeypatch, tmp_path):
+    """get_impact should include 'truncated' key in result."""
+    result = get_impact(repo="test/repo", symbol_id="nonexistent", storage_path=str(tmp_path))
+    if "error" not in result:
+        assert "truncated" in result
+
 
 # ===================================================================
 # CodeGraph unit tests
