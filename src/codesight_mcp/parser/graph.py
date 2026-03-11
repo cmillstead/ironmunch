@@ -354,6 +354,10 @@ class CodeGraph:
         Returns:
             Dict mapping symbol_id -> rank score. Ranks sum to N (node count).
         """
+        damping = max(0.1, min(damping, 0.99))
+        max_iterations = max(1, min(max_iterations, 1000))
+        tolerance = max(1e-10, min(tolerance, 1.0))
+
         nodes = list(self._symbols_by_id.keys())
         n = len(nodes)
         if n == 0:

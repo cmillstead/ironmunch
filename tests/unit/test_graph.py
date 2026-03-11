@@ -211,6 +211,38 @@ class TestPageRank:
         assert ranks_85 != ranks_50
 
 
+class TestPageRankParameterValidation:
+    """Task 24: PageRank must clamp parameters to safe bounds."""
+
+    def test_pagerank_clamps_parameters(self):
+        """Extreme parameter values should be clamped, not cause divergence."""
+        syms = _make_symbols(
+            ("a.py::a", "a.py", "a", ["b"], []),
+            ("a.py::b", "a.py", "b", [], []),
+        )
+        g = CodeGraph.build(syms)
+
+        # damping > 0.99 gets clamped to 0.99
+        ranks_high_damping = g.pagerank(damping=5.0)
+        assert all(r > 0 for r in ranks_high_damping.values())
+
+        # damping < 0.1 gets clamped to 0.1
+        ranks_low_damping = g.pagerank(damping=-1.0)
+        assert all(r > 0 for r in ranks_low_damping.values())
+
+        # max_iterations = 0 gets clamped to 1
+        ranks_zero_iter = g.pagerank(max_iterations=0)
+        assert len(ranks_zero_iter) == 2
+
+        # tolerance = 0.0 gets clamped to 1e-10
+        ranks_zero_tol = g.pagerank(tolerance=0.0)
+        assert len(ranks_zero_tol) == 2
+
+        # Very large max_iterations gets clamped to 1000
+        ranks_huge_iter = g.pagerank(max_iterations=999999)
+        assert len(ranks_huge_iter) == 2
+
+
 class TestFingerprint:
     """Test _symbol_fingerprint includes relationship edges."""
 
