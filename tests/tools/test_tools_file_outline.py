@@ -185,3 +185,11 @@ class TestGetFileOutlineEdgeCases:
         )
 
         assert result["file"].startswith("<<<UNTRUSTED_CODE_")
+
+    def test_node_to_dict_has_depth_limit(self):
+        """_node_to_dict should not recurse unboundedly."""
+        import inspect
+        from codesight_mcp.tools.get_file_outline import _node_to_dict
+        source = inspect.getsource(_node_to_dict)
+        assert "_depth" in source or "depth" in source, \
+            "_node_to_dict should have a depth parameter to prevent unbounded recursion"

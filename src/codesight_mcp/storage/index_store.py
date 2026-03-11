@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import shutil
+import stat as stat_module
 import threading
 import time
 from dataclasses import dataclass, field
@@ -119,14 +120,17 @@ def _safe_rmtree(root: Path) -> None:
         dp = Path(dirpath)
         for fn in filenames:
             fp = dp / fn
-            if fp.is_symlink():
-                fp.unlink()  # Remove the symlink itself, don't follow
-            else:
-                fp.unlink()
+            # unlink() works for both regular files and symlinks — no TOCTOU
+            fp.unlink()
         for dn in dirnames:
             dd = dp / dn
-            if dd.is_symlink():
-                dd.unlink()  # Remove symlink, don't recurse into target
+            # Use lstat to check without following, then act
+            try:
+                st = dd.lstat()
+            except OSError:
+                continue
+            if stat_module.S_ISLNK(st.st_mode):
+                dd.unlink()  # remove the symlink itself
             else:
                 dd.rmdir()
     root.rmdir()
@@ -231,23 +235,20 @@ class IndexStore:
         self._cleanup_stale_temps()
 
     def _cleanup_stale_temps(self):
-        """Remove stale .json.tmp files left by crashed writes.
+        """Remove stale .tmp files left by crashed writes.
 
         ADV-MED-2: Skip files newer than 60 seconds — they may belong to an
         active save_index() Phase-2 write.  Removing them would corrupt an
         ongoing write.
+
+        Patterns cover both fixed-suffix (*.tmp) and PID/thread-suffixed
+        (*.tmp.<pid>.<thread_ident>) temp files produced by _atomic_write.
         """
         now = time.time()
-        # ADV-MED-5: Also clean PID/thread-suffixed temps and content dir temps.
-        patterns = [
-            ("*.json.tmp", False),
-            ("*.json.gz.tmp", False),
-            ("*.json.tmp.*", False),     # PID/thread-suffixed temps
-            ("*.json.gz.tmp.*", False),  # PID/thread-suffixed temps
-        ]
-        for pattern, recursive in patterns:
-            glob_fn = self.base_path.rglob if recursive else self.base_path.glob
-            for tmp_file in glob_fn(pattern):
+        # ADV-MED-5: Clean both fixed-suffix and PID/thread-suffixed temps,
+        # including content subdirectories.
+        for pattern in ("*.tmp", "*.tmp.*"):
+            for tmp_file in self.base_path.glob(pattern):
                 try:
                     if tmp_file.is_symlink():
                         continue  # skip symlinks — don't follow or delete

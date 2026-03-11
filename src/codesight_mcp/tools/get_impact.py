@@ -55,7 +55,7 @@ def get_impact(
         for caller_id in graph.get_callers(sid):
             if caller_id not in visited:
                 visited.add(caller_id)
-                sym = graph._symbols_by_id.get(caller_id, {})
+                sym = graph.get_symbol(caller_id) or {}
                 impacted.append({
                     "id": wrap_untrusted_content(caller_id),
                     "name": wrap_untrusted_content(sym.get("name", "")),
@@ -71,9 +71,10 @@ def get_impact(
         # Inheritance children (reverse inherits edges)
         hierarchy = graph.get_type_hierarchy(sid)
         for child_id in hierarchy["children"]:
-            if child_id not in visited and child_id in graph._symbols_by_id:
+            child_sym = graph.get_symbol(child_id)
+            if child_id not in visited and child_sym is not None:
                 visited.add(child_id)
-                sym = graph._symbols_by_id[child_id]
+                sym = child_sym
                 impacted.append({
                     "id": wrap_untrusted_content(child_id),
                     "name": wrap_untrusted_content(sym.get("name", "")),
@@ -87,9 +88,10 @@ def get_impact(
                     queue.append((child_id, depth + 1))
 
         for impl_id in hierarchy["implemented_by"]:
-            if impl_id not in visited and impl_id in graph._symbols_by_id:
+            impl_sym = graph.get_symbol(impl_id)
+            if impl_id not in visited and impl_sym is not None:
                 visited.add(impl_id)
-                sym = graph._symbols_by_id[impl_id]
+                sym = impl_sym
                 impacted.append({
                     "id": wrap_untrusted_content(impl_id),
                     "name": wrap_untrusted_content(sym.get("name", "")),
@@ -109,7 +111,7 @@ def get_impact(
             for import_name in (target_file, file_base, file_module):
                 for importer_file in graph.get_importers(import_name):
                     # Find symbols in that file
-                    for sid2, sym in graph._symbols_by_id.items():
+                    for sid2, sym in graph.all_symbols().items():
                         if sym.get("file") == importer_file and sid2 not in visited:
                             visited.add(sid2)
                             impacted.append({
@@ -137,6 +139,8 @@ def get_impact(
             continue
         _collect_affected(current_id, depth)
 
+    truncated = len(impacted) >= _MAX_IMPACTED
+
     # Collect unique affected files
     affected_files = sorted({
         entry["file"] for entry in impacted
@@ -151,6 +155,7 @@ def get_impact(
         "max_depth": max_depth,
         "impacted_count": len(impacted),
         "affected_file_count": len(affected_files),
+        "truncated": truncated,
         "impacted": impacted,
         "affected_files": affected_files,
         "_meta": {

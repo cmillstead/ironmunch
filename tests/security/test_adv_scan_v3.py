@@ -339,3 +339,39 @@ class TestLoadIndexOwnerNameValidation:
 
         result = store.load_index("test", "repo")
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# ADV-INFO: No deprecated datetime.utcnow() in source
+# ---------------------------------------------------------------------------
+class TestNoDeprecatedUtcnow:
+    """Codebase should not use deprecated datetime.utcnow()."""
+
+    def test_no_deprecated_utcnow(self):
+        """All timestamps must use timezone-aware datetime.now(timezone.utc)."""
+        from pathlib import Path
+
+        src_dir = Path(__file__).parent.parent.parent / "src" / "codesight_mcp"
+        violations = []
+        for py_file in src_dir.rglob("*.py"):
+            content = py_file.read_text()
+            if "utcnow()" in content:
+                violations.append(str(py_file))
+        assert not violations, f"Files using deprecated datetime.utcnow(): {violations}"
+
+    def test_datetime_now_is_utc_aware(self):
+        """datetime.now() without timezone is a bug — must use timezone.utc."""
+        from pathlib import Path
+        import re
+
+        src_dir = Path(__file__).parent.parent.parent / "src" / "codesight_mcp"
+        # Match datetime.now() not followed by a timezone argument
+        pattern = re.compile(r"datetime\.now\(\)")
+        violations = []
+        for py_file in src_dir.rglob("*.py"):
+            content = py_file.read_text()
+            if pattern.search(content):
+                violations.append(str(py_file))
+        assert not violations, (
+            f"Files using naive datetime.now() (missing timezone.utc): {violations}"
+        )

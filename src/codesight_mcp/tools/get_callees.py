@@ -43,21 +43,20 @@ def get_callees(
     callees: list[dict] = []
     queue: deque[tuple[str, int]] = deque()
     queue.append((symbol_id, 1))
-    truncated = False
 
     while queue:
+        if len(callees) >= _MAX_RESULTS:
+            break
         current_id, depth = queue.popleft()
         if depth > max_depth:
             continue
 
         for callee_id in graph.get_callees(current_id):
+            if len(callees) >= _MAX_RESULTS:
+                break
             if callee_id in visited:
                 continue
             visited.add(callee_id)
-            # ADV-MED-7: Cap results to prevent unbounded output.
-            if len(callees) >= _MAX_RESULTS:
-                truncated = True
-                break
             sym = graph.get_symbol(callee_id) or {}
             callees.append({
                 "id": wrap_untrusted_content(callee_id),
@@ -69,8 +68,8 @@ def get_callees(
             })
             if depth < max_depth:
                 queue.append((callee_id, depth + 1))
-        if truncated:
-            break
+
+    truncated = len(callees) >= _MAX_RESULTS
 
     ms = elapsed_ms(start)
 

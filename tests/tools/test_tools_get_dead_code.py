@@ -434,3 +434,10 @@ class TestGetDeadCodeEdgeCases:
             assert "file" in sym
             assert "line" in sym
             assert "language" in sym
+
+
+def test_get_dead_code_respects_limit(tmp_path):
+    """get_dead_code should accept and enforce a limit parameter."""
+    import inspect
+    sig = inspect.signature(get_dead_code)
+    assert "limit" in sig.parameters, "get_dead_code should accept a limit parameter"

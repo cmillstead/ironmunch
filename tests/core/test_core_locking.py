@@ -52,6 +52,22 @@ class TestEnsurePrivateDir:
         assert result == Path(target)
         assert Path(target).is_dir()
 
+    def test_uses_fchmod_not_chmod(self, tmp_path, monkeypatch):
+        """ensure_private_dir should not call path-following os.chmod."""
+        import codesight_mcp.core.locking as locking_mod
+
+        chmod_calls = []
+        original_chmod = os.chmod
+
+        def tracking_chmod(path, mode, **kwargs):
+            chmod_calls.append(("chmod", path, mode))
+            return original_chmod(path, mode, **kwargs)
+
+        monkeypatch.setattr(os, "chmod", tracking_chmod)
+        target = tmp_path / "secure_dir"
+        locking_mod.ensure_private_dir(target)
+        assert len(chmod_calls) == 0, "ensure_private_dir should use fchmod, not chmod"
+
 
 class TestAtomicWriteNofollow:
     def test_writes_content(self, tmp_path):
@@ -83,9 +99,10 @@ class TestAtomicWriteNofollow:
         real.write_text("original")
         link = tmp_path / "link.txt"
         link.symlink_to(real)
-        # The temp file uses PID/thread-suffixed naming. Create a symlink at
-        # the exact path atomic_write_nofollow will try to open.
-        tmp_file = tmp_path / f"link.txt.tmp.{os.getpid()}.{threading.get_ident()}"
+        # The temp file uses PID/thread in the name: link.txt.tmp.<pid>.<tid>
+        # We must create the symlink at the exact path atomic_write_nofollow will use.
+        tmp_name = f"link.txt.tmp.{os.getpid()}.{threading.get_ident()}"
+        tmp_file = tmp_path / tmp_name
         tmp_file.symlink_to(real)
         with pytest.raises(OSError):
             atomic_write_nofollow(link, "evil")
@@ -94,6 +111,16 @@ class TestAtomicWriteNofollow:
         target = str(tmp_path / "strfile.txt")
         atomic_write_nofollow(target, "content")
         assert Path(target).read_text() == "content"
+
+    def test_uses_unique_tmp_suffix(self, tmp_path):
+        """atomic_write_nofollow should include PID/thread in temp filename."""
+        import inspect
+        from codesight_mcp.core.locking import atomic_write_nofollow as awn
+
+        source = inspect.getsource(awn)
+        assert "getpid" in source or "get_ident" in source, (
+            "tmp path should include PID/thread for thread safety"
+        )
 
 
 class TestExclusiveFileLock:

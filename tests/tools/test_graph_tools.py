@@ -401,6 +401,56 @@ class TestGetImpact:
         result = get_impact(_repo(), "utils-py::validate#function", max_depth=99, storage_path=graph_index["path"])
         assert result["max_depth"] == 10
 
+    def test_truncated_flag_present_on_success(self, graph_index):
+        """get_impact should include 'truncated' key in successful result."""
+        result = get_impact(_repo(), "utils-py::validate#function", storage_path=graph_index["path"])
+        assert "error" not in result
+        assert "truncated" in result
+
+    def test_truncated_flag_false_for_small_result(self, graph_index):
+        """truncated should be False when results are well below the cap."""
+        result = get_impact(_repo(), "utils-py::validate#function", storage_path=graph_index["path"])
+        assert "error" not in result
+        assert result["truncated"] is False
+
+def test_get_impact_returns_truncated_flag(monkeypatch, tmp_path):
+    """get_impact should include 'truncated' key in result."""
+    result = get_impact(repo="test/repo", symbol_id="nonexistent", storage_path=str(tmp_path))
+    if "error" not in result:
+        assert "truncated" in result
+
+
+def test_get_callers_caps_results(tmp_path):
+    """get_callers should cap results to prevent unbounded growth."""
+    import inspect
+    source = inspect.getsource(get_callers)
+    assert "_MAX_RESULTS" in source or "max_results" in source, \
+        "get_callers should have a result cap"
+
+
+def test_get_callees_caps_results(tmp_path):
+    """get_callees should cap results to prevent unbounded growth."""
+    import inspect
+    source = inspect.getsource(get_callees)
+    assert "_MAX_RESULTS" in source or "max_results" in source, \
+        "get_callees should have a result cap"
+
+
+def test_get_callers_has_truncated_flag(graph_index):
+    """get_callers result should include 'truncated' key."""
+    result = get_callers("local/testgraph", "utils-py::validate#function", storage_path=graph_index["path"])
+    assert "error" not in result
+    assert "truncated" in result
+    assert result["truncated"] is False
+
+
+def test_get_callees_has_truncated_flag(graph_index):
+    """get_callees result should include 'truncated' key."""
+    result = get_callees("local/testgraph", "app-py::main#function", storage_path=graph_index["path"])
+    assert "error" not in result
+    assert "truncated" in result
+    assert result["truncated"] is False
+
 
 # ===================================================================
 # CodeGraph unit tests

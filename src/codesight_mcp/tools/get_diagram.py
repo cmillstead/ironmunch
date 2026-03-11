@@ -202,12 +202,13 @@ def _render_impact(
     queue: deque[tuple[str, int, str, str]] = deque()
     visited: set[str] = {symbol_id}
 
-    # Seed with direct relationships
+    # Seed with direct relationships using public type_hierarchy accessor
+    hierarchy = graph.get_type_hierarchy(symbol_id)
     for caller_id in graph.get_callers(symbol_id):
         queue.append((caller_id, 1, "calls", symbol_id))
-    for child_id in graph._inherits_rev.get(symbol_id, set()):
+    for child_id in hierarchy["children"]:
         queue.append((child_id, 1, "inherits", symbol_id))
-    for impl_id in graph._implements_rev.get(symbol_id, set()):
+    for impl_id in hierarchy["implemented_by"]:
         queue.append((impl_id, 1, "implements", symbol_id))
 
     while queue and len(nodes) < _MAX_NODES:

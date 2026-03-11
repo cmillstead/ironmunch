@@ -8,6 +8,9 @@ from ._common import RepoContext, timed, elapsed_ms
 from .registry import ToolSpec, register
 
 
+_MAX_DEAD_CODE = 500
+
+
 # Names that are typically entry points and should not be flagged.
 _ENTRY_POINT_NAMES = frozenset({
     "main",
@@ -104,7 +107,7 @@ def get_dead_code(
         repo: Repository identifier (owner/repo or just repo name).
         language: Optional language filter (e.g. "python", "javascript").
         include_tests: If True, include symbols from test files (default False).
-        limit: Maximum results (default 100, max 500).
+        limit: Maximum results to return (default 100, max 500).
         storage_path: Custom storage path.
 
     Returns:
@@ -112,8 +115,7 @@ def get_dead_code(
     """
     start = timed()
 
-    # ADV-MED-2: Clamp limit to prevent unbounded output.
-    limit = max(1, min(limit, 500))
+    limit = max(1, min(limit, _MAX_DEAD_CODE))
 
     ctx = RepoContext.resolve(repo, storage_path)
     if isinstance(ctx, dict):
@@ -125,6 +127,8 @@ def get_dead_code(
     dead: list[dict] = []
 
     for sym in index.symbols:
+        if len(dead) >= limit:
+            break
         sid = sym.get("id", "")
         if not sid:
             continue
@@ -154,11 +158,9 @@ def get_dead_code(
                 "language": sym.get("language", ""),
             })
 
-    ms = elapsed_ms(start)
+    truncated = len(dead) >= limit
 
-    # ADV-MED-2: Cap output and signal truncation.
-    truncated = len(dead) > limit
-    dead = dead[:limit]
+    ms = elapsed_ms(start)
 
     return {
         "repo": f"{owner}/{name}",
@@ -196,7 +198,7 @@ _spec = register(ToolSpec(
             },
             "limit": {
                 "type": "integer",
-                "description": "Maximum results (default 100, max 500)",
+                "description": "Maximum results to return (default 100, max 500)",
                 "default": 100,
             },
         },

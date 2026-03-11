@@ -372,3 +372,23 @@ class TestSplitPromptNoStaticFallback:
         system, user = BatchSummarizer._split_prompt(prompt, nonce=nonce)
         assert system == "System part"
         assert user == "User part"
+
+
+def test_validate_storage_path_uses_lstat(monkeypatch):
+    """_validate_storage_path should use lstat, not stat (which follows symlinks)."""
+    import inspect
+    from codesight_mcp.server import _validate_storage_path
+
+    source = inspect.getsource(_validate_storage_path)
+    assert "resolved.stat()" not in source, "should use lstat() not stat()"
+
+
+def test_safe_rmtree_unlinks_without_toctou_check(tmp_path):
+    """_safe_rmtree should not have separate is_symlink + unlink steps for files."""
+    import inspect
+    from codesight_mcp.storage.index_store import _safe_rmtree
+
+    source = inspect.getsource(_safe_rmtree)
+    # The function should not call is_symlink() for files — just unlink() directly
+    # For directories, it should use lstat() not is_symlink()
+    assert "fp.is_symlink()" not in source, "files should use unlink() directly without is_symlink check"

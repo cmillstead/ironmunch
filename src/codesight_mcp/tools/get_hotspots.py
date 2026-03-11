@@ -8,6 +8,9 @@ from ._common import RepoContext, timed, elapsed_ms
 from .registry import ToolSpec, register
 
 
+_VALID_SORT_BY = {"risk", "complexity", "cognitive"}
+
+
 def _normalize(values: list[float]) -> list[float]:
     """Min-max normalize a list of floats to [0, 1]."""
     if not values:
@@ -38,13 +41,11 @@ def get_hotspots(
     Returns:
         Dict with ranked hotspot list and _meta envelope.
     """
+    if sort_by not in _VALID_SORT_BY:
+        return {"error": f"Invalid sort_by: must be one of {sorted(_VALID_SORT_BY)}"}
+
     start = timed()
     limit = max(1, min(limit, 100))
-
-    # ADV-LOW-3: Validate sort_by against known values.
-    _VALID_SORT_BY = {"risk", "complexity", "cognitive"}
-    if sort_by not in _VALID_SORT_BY:
-        return {"error": f"Invalid sort_by: {sort_by!r}. Must be one of: {', '.join(sorted(_VALID_SORT_BY))}"}
 
     if path:
         if "\x00" in path:

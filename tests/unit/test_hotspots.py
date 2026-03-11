@@ -156,3 +156,16 @@ class TestGetHotspotsPathValidation:
         result = get_key_symbols(repo="test/repo", path="src/\x00evil", storage_path=str(tmp_path))
         assert "error" in result
         assert "null" in result["error"]
+
+
+def test_get_hotspots_rejects_invalid_sort_by(tmp_path):
+    """get_hotspots should reject sort_by values not in the allowlist."""
+    from codesight_mcp.tools.get_hotspots import get_hotspots
+    # Create a real indexed repo so the error comes from sort_by validation, not missing repo
+    symbols = [
+        _sym("func", complexity={"cyclomatic": 5, "cognitive": 5, "max_nesting": 1, "param_count": 0, "loc": 10}),
+    ]
+    _make_store(tmp_path, symbols)
+    result = get_hotspots(repo="test/repo", sort_by="<script>", storage_path=str(tmp_path))
+    assert "error" in result
+    assert "sort_by" in result["error"].lower() or "invalid" in result["error"].lower()
