@@ -6,6 +6,7 @@
 # grammars are well-tested; in-process parsing is required for performance.
 """
 
+import logging
 import threading
 from typing import Optional
 from tree_sitter import Language, Parser
@@ -39,7 +40,10 @@ def _get_parser(lang_name: str) -> Parser:
     if lang_name not in _ALLOWED_LANGUAGES:
         raise ValueError(f"Unsupported language: {lang_name}")
     with _LANGUAGE_BINDINGS_LOCK:
-        if lang_name not in _LANGUAGE_BINDINGS:
+        if lang_name in _LANGUAGE_BINDINGS:
+            if _LANGUAGE_BINDINGS[lang_name] is None:
+                return None
+        else:
             import importlib
             if lang_name in _LANGUAGE_PACK_LANGUAGES:
                 # Use tree-sitter-language-pack for languages without standalone packages
@@ -47,10 +51,8 @@ def _get_parser(lang_name: str) -> Parser:
                     from tree_sitter_language_pack import get_language
                     _LANGUAGE_BINDINGS[lang_name] = get_language(lang_name)
                 except ImportError:
-                    raise ImportError(
-                        f"tree-sitter-language-pack not installed. "
-                        f"Install: pip install tree-sitter-language-pack"
-                    )
+                    _LANGUAGE_BINDINGS[lang_name] = None
+                    return None
             else:
                 if lang_name in _LANGUAGE_FUNC_MAP:
                     mod_name, func_name = _LANGUAGE_FUNC_MAP[lang_name]
@@ -60,10 +62,8 @@ def _get_parser(lang_name: str) -> Parser:
                 try:
                     mod = importlib.import_module(mod_name)
                 except ImportError:
-                    raise ImportError(
-                        f"tree-sitter binding for '{lang_name}' not installed. "
-                        f"Install: pip install tree-sitter-{lang_name}"
-                    )
+                    _LANGUAGE_BINDINGS[lang_name] = None
+                    return None
                 _LANGUAGE_BINDINGS[lang_name] = Language(getattr(mod, func_name)())
         binding = _LANGUAGE_BINDINGS[lang_name]
     parser = Parser(binding)
@@ -93,6 +93,8 @@ def parse_file(content: str, filename: str, language: str) -> list[Symbol]:
 
     # Get parser for this language
     parser = _get_parser(spec.ts_language)
+    if parser is None:
+        return []
     tree = parser.parse(source_bytes)
 
     symbols = []
@@ -124,6 +126,7 @@ def _walk_tree(
 ):
     """Recursively walk the AST and extract symbols."""
     if _depth > 500:
+        logging.getLogger(__name__).warning("Symbol extraction depth limit reached")
         return
     # Check if this node is a symbol
     if node.type in spec.symbol_node_types:

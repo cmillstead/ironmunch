@@ -157,7 +157,9 @@ def _sanitize_arguments(name: str, arguments: dict) -> dict | str:
     # Filter non-string items from list arguments
     if name == "index_folder" and "extra_ignore_patterns" in arguments:
         patterns = arguments["extra_ignore_patterns"]
-        if not isinstance(patterns, list):
+        if isinstance(patterns, str):
+            arguments["extra_ignore_patterns"] = [patterns]
+        elif not isinstance(patterns, list):
             arguments["extra_ignore_patterns"] = []
         elif isinstance(patterns, list):
             arguments["extra_ignore_patterns"] = [

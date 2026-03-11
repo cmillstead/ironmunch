@@ -208,6 +208,8 @@ def sanitize_signature_for_api(signature: str) -> str:
     When CODESIGHT_NO_REDACT=1 is set, returns the signature unchanged
     (opt-in for trusted local usage).
     """
+    if not isinstance(signature, str):
+        return ""
     if len(signature) > 10000:
         signature = signature[:10000]
     if _no_redact():

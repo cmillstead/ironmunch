@@ -37,7 +37,7 @@ def parse_repo(
         try:
             repos = store.list_repos()
         except Exception as exc:
-            raise RepoNotFoundError(f"Failed to list repositories: {exc}")
+            raise RepoNotFoundError(f"Failed to list repositories: {exc}") from exc
         # 1. Exact name match (e.g. "myproject" matches "acme/myproject")
         matching = [r for r in repos if r["repo"].endswith(f"/{repo}")]
         # 2. Prefix match for local hash-suffixed repos

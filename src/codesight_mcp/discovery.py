@@ -186,6 +186,9 @@ def discover_local_files(
             dirnames.clear()
             continue
         visited_dirs.add(resolved_dir)
+        if len(visited_dirs) > 100_000:
+            dirnames.clear()
+            break
 
         # Depth limit — stop descending beyond MAX_DIRECTORY_DEPTH
         try:
@@ -423,6 +426,8 @@ async def fetch_file_content(
     """
     if ".." in unquote(path):
         raise ValueError("File path contains traversal sequence")
+    owner = quote(owner, safe="")
+    repo = quote(repo, safe="")
     url = f"https://api.github.com/repos/{owner}/{repo}/contents/{quote(path, safe='/')}"
     headers = {"Accept": "application/vnd.github.v3.raw"}
 

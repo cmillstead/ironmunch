@@ -100,7 +100,8 @@ def test_call_chain():
         ("a.py::baz", "a.py", "baz", [], []),
     )
     g = CodeGraph.build(syms)
-    chains = g.get_call_chain("a.py::foo", "a.py::baz", max_depth=5)
+    result = g.get_call_chain("a.py::foo", "a.py::baz", max_depth=5)
+    chains = result["paths"]
     assert len(chains) >= 1
     assert chains[0] == ["a.py::foo", "a.py::bar", "a.py::baz"]
 
@@ -112,7 +113,7 @@ def test_call_chain_no_path():
         ("a.py::bar", "a.py", "bar", [], []),
     )
     g = CodeGraph.build(syms)
-    assert g.get_call_chain("a.py::foo", "a.py::bar") == []
+    assert g.get_call_chain("a.py::foo", "a.py::bar") == {"paths": [], "truncated": False}
 
 
 def test_type_hierarchy():

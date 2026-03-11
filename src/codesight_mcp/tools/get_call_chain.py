@@ -43,7 +43,9 @@ def get_call_chain(
     max_depth = min(max(max_depth, 1), 10)
 
     # Use CodeGraph.get_call_chain for path finding
-    paths = graph.get_call_chain(from_symbol, to_symbol, max_depth)
+    chain_result = graph.get_call_chain(from_symbol, to_symbol, max_depth)
+    paths = chain_result["paths"]
+    truncated = chain_result["truncated"]
 
     # Limit total paths to avoid excessive output
     max_paths = 5
@@ -77,6 +79,7 @@ def get_call_chain(
         "to_symbol": wrap_untrusted_content(to_symbol),
         "max_depth": max_depth,
         "path_count": len(formatted_paths),
+        "truncated": truncated,
         "paths": formatted_paths,
         "_meta": {
             **make_meta(source="code_index", trusted=False),

@@ -92,9 +92,15 @@ def _makedirs_0o700(path: str) -> None:
         finally:
             os.umask(old_umask)
     # Enforce permissions on the target directory itself (pre-existing or new).
-    if os.path.islink(path):
-        raise OSError("refusing to chmod symlink")
-    os.chmod(path, 0o700)
+    # Use O_NOFOLLOW + fchmod to avoid TOCTOU race between islink and chmod.
+    try:
+        _fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY)
+    except OSError:
+        raise OSError("refusing to chmod symlink or inaccessible directory")
+    try:
+        os.fchmod(_fd, 0o700)
+    finally:
+        os.close(_fd)
 
 
 
@@ -323,7 +329,7 @@ class IndexStore:
                     if not is_within(resolved_root, dest):
                         continue  # Traversal — skip silently
                     _makedirs_0o700(str(dest.parent))
-                    tmp_dest = dest.with_name(f"{dest.name}.tmp.{os.getpid()}")
+                    tmp_dest = dest.with_name(f"{dest.name}.tmp.{os.getpid()}.{threading.get_ident()}")
                     try:
                         fd = os.open(
                             str(tmp_dest),
@@ -697,7 +703,7 @@ class IndexStore:
                     if not is_within(resolved_root, dest):
                         continue  # Traversal — skip silently
                     _makedirs_0o700(str(dest.parent))
-                    tmp_dest = dest.with_name(f"{dest.name}.tmp.{os.getpid()}")
+                    tmp_dest = dest.with_name(f"{dest.name}.tmp.{os.getpid()}.{threading.get_ident()}")
                     try:
                         fd = os.open(
                             str(tmp_dest),
@@ -729,8 +735,10 @@ class IndexStore:
                     if dead.exists():
                         try:
                             dead.unlink()
-                        except OSError:
-                            pass
+                        except OSError as exc:
+                            logging.getLogger(__name__).warning(
+                                "Failed to unlink stale content file: %s", exc
+                            )
 
                 # Phase 4: rename all content .tmp → final (after JSON succeeded)
                 for final, tmp in content_tmp_paths:
@@ -755,7 +763,13 @@ class IndexStore:
                 if index_file.name.endswith(".tmp") or index_file.name.endswith(".lock"):
                     continue
                 # Only parse files matching owner__name.json(.gz) pattern
-                stem = index_file.name.replace(".json.gz", "").replace(".json", "")
+                name_ = index_file.name
+                if name_.endswith(".json.gz"):
+                    stem = name_[:-8]
+                elif name_.endswith(".json"):
+                    stem = name_[:-5]
+                else:
+                    continue
                 if "__" not in stem:
                     continue
                 # Size limit check

@@ -2,6 +2,7 @@
 
 import errno
 import json
+import logging
 import os
 import secrets
 import tempfile
@@ -48,6 +49,7 @@ def _rate_limit(tool_name: str, storage_path: str | None) -> bool:
     """Check a persistent rate limit bucket. Returns True if allowed."""
     state_dir = _rate_limit_state_dir(storage_path)
     if state_dir is None:
+        logging.getLogger(__name__).warning("Rate limiting disabled: unable to create state directory")
         return True  # Allow the call if we can't set up rate limiting
     lock_path = state_dir / ".rate_limits.lock"
     state_path = state_dir / ".rate_limits.json"
@@ -91,6 +93,9 @@ def _rate_limit(tool_name: str, storage_path: str | None) -> bool:
             tool_map = {}
         # Cap each tool's timestamps on load
         for tname in list(tool_map.keys()):
+            if not isinstance(tool_map.get(tname), list):
+                tool_map[tname] = []
+                continue
             entries = [
                 float(t)
                 for t in tool_map[tname]
@@ -114,6 +119,6 @@ def _rate_limit(tool_name: str, storage_path: str | None) -> bool:
         state = {"global": global_timestamps, "tools": tool_map}
         try:
             atomic_write_nofollow(state_path, json.dumps(state))
-        except OSError:
-            pass  # State write failed — still allow the call
+        except OSError as exc:
+            logging.getLogger(__name__).warning("Failed to persist rate limit state: %s", exc)
         return True

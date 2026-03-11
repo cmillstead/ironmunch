@@ -399,7 +399,8 @@ class TestCodeGraphUnit:
         ]
         graph = CodeGraph.build(symbols)
         # Should not infinite-loop; a->b->c is a valid path
-        paths = graph.get_call_chain("a", "c", max_depth=10)
+        result = graph.get_call_chain("a", "c", max_depth=10)
+        paths = result["paths"]
         assert len(paths) >= 1
         assert paths[0] == ["a", "b", "c"]
 
