@@ -142,22 +142,32 @@ Allow codesight-mcp tools to avoid a permission prompt on every call. Add to `~/
 ```json
 "permissions": {
   "allow": [
-    "mcp__codesight_mcp__search_symbols",
-    "mcp__codesight_mcp__search_text",
-    "mcp__codesight_mcp__get_symbol",
-    "mcp__codesight_mcp__get_symbols",
-    "mcp__codesight_mcp__get_file_outline",
-    "mcp__codesight_mcp__get_file_tree",
-    "mcp__codesight_mcp__get_repo_outline",
-    "mcp__codesight_mcp__list_repos",
-    "mcp__codesight_mcp__index_repo",
-    "mcp__codesight_mcp__index_folder",
-    "mcp__codesight_mcp__get_callers",
-    "mcp__codesight_mcp__get_callees",
-    "mcp__codesight_mcp__get_call_chain",
-    "mcp__codesight_mcp__get_type_hierarchy",
-    "mcp__codesight_mcp__get_imports",
-    "mcp__codesight_mcp__get_impact"
+    "mcp__codesight-mcp__search_symbols",
+    "mcp__codesight-mcp__search_text",
+    "mcp__codesight-mcp__search_references",
+    "mcp__codesight-mcp__get_symbol",
+    "mcp__codesight-mcp__get_symbols",
+    "mcp__codesight-mcp__get_context",
+    "mcp__codesight-mcp__get_file_outline",
+    "mcp__codesight-mcp__get_file_tree",
+    "mcp__codesight-mcp__get_repo_outline",
+    "mcp__codesight-mcp__list_repos",
+    "mcp__codesight-mcp__index_repo",
+    "mcp__codesight-mcp__index_folder",
+    "mcp__codesight-mcp__get_callers",
+    "mcp__codesight-mcp__get_callees",
+    "mcp__codesight-mcp__get_call_chain",
+    "mcp__codesight-mcp__get_type_hierarchy",
+    "mcp__codesight-mcp__get_imports",
+    "mcp__codesight-mcp__get_impact",
+    "mcp__codesight-mcp__get_hotspots",
+    "mcp__codesight-mcp__get_key_symbols",
+    "mcp__codesight-mcp__get_diagram",
+    "mcp__codesight-mcp__get_dead_code",
+    "mcp__codesight-mcp__get_dependencies",
+    "mcp__codesight-mcp__compare_symbols",
+    "mcp__codesight-mcp__get_changes",
+    "mcp__codesight-mcp__status"
   ]
 }
 ```
@@ -187,7 +197,7 @@ Use `Read` only for content that isn't a named symbol (config files, etc).
 
 ## Tools
 
-codesight-mcp exposes **22 MCP tools** organized into five categories:
+codesight-mcp exposes **27 MCP tools** organized into six categories:
 
 ### Indexing
 
@@ -235,6 +245,8 @@ codesight-mcp exposes **22 MCP tools** organized into five categories:
 | `get_hotspots` | Find the most complex/risky symbols — cyclomatic complexity, cognitive complexity, nesting depth, fan-in/fan-out, composite risk score. Supports path filtering and sort modes. |
 | `get_key_symbols` | Rank symbols by structural importance using PageRank on the call graph. Identifies the most connected and depended-upon symbols. |
 | `get_diagram` | Generate Mermaid diagrams — call graphs, type hierarchies, import trees, and impact diagrams from the code graph. |
+| `get_dead_code` | Find unreferenced symbols — functions and classes with zero callers or importers. |
+| `status` | Server status — storage configuration, index stats, and feature flags. |
 
 ### Dependencies & Diffing
 
