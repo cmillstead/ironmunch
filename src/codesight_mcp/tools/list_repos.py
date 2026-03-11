@@ -21,6 +21,8 @@ def list_repos(storage_path: Optional[str] = None) -> dict:
 
     # Wrap repo names — directory names come from disk and are attacker-influenced
     for r in repos:
+        if "repo" not in r:
+            continue
         r["repo"] = wrap_untrusted_content(r["repo"])
 
     return {

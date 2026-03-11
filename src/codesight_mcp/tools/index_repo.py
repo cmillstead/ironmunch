@@ -77,7 +77,10 @@ async def index_repo(
             return {"success": False, "error": sanitize_error(e)}
 
         # Fetch .gitignore
-        gitignore_content = await fetch_gitignore(owner, repo, github_token)
+        try:
+            gitignore_content = await fetch_gitignore(owner, repo, github_token)
+        except Exception:
+            gitignore_content = ""
 
         # Discover source files (uses codesight_mcp.discovery)
         source_files = discover_source_files(tree_entries, gitignore_content)

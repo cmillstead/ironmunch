@@ -1,6 +1,7 @@
 """In-memory code graph for relationship queries."""
 
 import hashlib
+import threading
 from collections import defaultdict, deque
 from typing import Optional
 
@@ -77,6 +78,7 @@ class CodeGraph:
 
     # Class-level graph cache: fingerprint -> CodeGraph
     _graph_cache: dict[str, "CodeGraph"] = {}
+    _graph_cache_lock: threading.Lock = threading.Lock()
     _CACHE_MAX_SIZE: int = 8
 
     @classmethod
@@ -94,23 +96,32 @@ class CodeGraph:
             A cached or freshly built CodeGraph.
         """
         fingerprint = _symbol_fingerprint(symbols)
-        graph = cls._graph_cache.get(fingerprint)
-        if graph is not None:
-            return graph
+        with cls._graph_cache_lock:
+            graph = cls._graph_cache.get(fingerprint)
+            if graph is not None:
+                return graph
 
-        # Evict oldest entries if cache is full
-        while len(cls._graph_cache) >= cls._CACHE_MAX_SIZE:
-            oldest_key = next(iter(cls._graph_cache))
-            del cls._graph_cache[oldest_key]
-
+        # Build outside the lock to avoid holding it during expensive work
         graph = cls.build(symbols)
-        cls._graph_cache[fingerprint] = graph
+
+        with cls._graph_cache_lock:
+            # Check again in case another thread built it while we were building
+            if fingerprint in cls._graph_cache:
+                return cls._graph_cache[fingerprint]
+
+            # Evict oldest entries if cache is full
+            while len(cls._graph_cache) >= cls._CACHE_MAX_SIZE:
+                oldest_key = next(iter(cls._graph_cache))
+                del cls._graph_cache[oldest_key]
+
+            cls._graph_cache[fingerprint] = graph
         return graph
 
     @classmethod
     def clear_cache(cls) -> None:
         """Clear the graph cache. Called after re-indexing or cache invalidation."""
-        cls._graph_cache.clear()
+        with cls._graph_cache_lock:
+            cls._graph_cache.clear()
 
     def _index_symbols(self, symbols: list[dict]) -> None:
         """Build lookup tables from raw symbol dicts."""
@@ -198,6 +209,7 @@ class CodeGraph:
     # ADV-LOW-3: maximum paths returned by get_call_chain to prevent
     # exponential BFS expansion in highly connected graphs.
     _MAX_CALL_CHAIN_PATHS: int = 5
+    _MAX_BFS_QUEUE_SIZE: int = 10_000
 
     def get_call_chain(
         self,
@@ -220,6 +232,9 @@ class CodeGraph:
         if from_id not in self._symbols_by_id or to_id not in self._symbols_by_id:
             return []
 
+        if from_id == to_id:
+            return [[from_id]]
+
         paths: list[list[str]] = []
         queue: deque[list[str]] = deque([[from_id]])
 
@@ -240,7 +255,8 @@ class CodeGraph:
                     if len(paths) >= self._MAX_CALL_CHAIN_PATHS:
                         break
                 else:
-                    queue.append(new_path)
+                    if len(queue) < self._MAX_BFS_QUEUE_SIZE:
+                        queue.append(new_path)
         return paths
 
     # ------------------------------------------------------------------

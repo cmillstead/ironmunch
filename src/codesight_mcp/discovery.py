@@ -10,9 +10,10 @@ GitHub discovery: fetch tree via API, then filter by extension/pattern/size.
 import errno
 import logging
 import os
+import stat
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse, quote, unquote
 
 import httpx
 import pathspec
@@ -171,8 +172,20 @@ def discover_local_files(
         except Exception:
             pass
 
+    visited_dirs: set[str] = set()
     for dirpath, dirnames, filenames in os.walk(root, followlinks=follow_symlinks):
         current = Path(dirpath)
+
+        # Symlink cycle protection: skip directories already visited
+        try:
+            resolved_dir = str(current.resolve())
+        except OSError:
+            dirnames.clear()
+            continue
+        if resolved_dir in visited_dirs:
+            dirnames.clear()
+            continue
+        visited_dirs.add(resolved_dir)
 
         # Depth limit — stop descending beyond MAX_DIRECTORY_DEPTH
         try:
@@ -260,6 +273,10 @@ def discover_local_files(
             flags = os.O_RDONLY if follow_symlinks else os.O_RDONLY | os.O_NOFOLLOW
             try:
                 fd = os.open(str(file_path), flags)
+                st = os.fstat(fd)
+                if not stat.S_ISREG(st.st_mode):
+                    os.close(fd)
+                    continue
                 with os.fdopen(fd, "rb") as fh:
                     head = fh.read(8192)
                 if is_binary_content(head):
@@ -329,7 +346,10 @@ def parse_github_url(url: str) -> tuple[str, str]:
     if "/" in url and "://" not in url:
         parts = url.split("/")
         if len(parts) >= 2:
-            return parts[0], parts[1]
+            owner, repo = parts[0], parts[1]
+            if not owner or not repo:
+                raise ValueError("empty owner or repo in URL")
+            return owner, repo
 
     # Parse URL
     parsed = urlparse(url)
@@ -338,7 +358,10 @@ def parse_github_url(url: str) -> tuple[str, str]:
     # Extract owner/repo from path
     parts = path.split("/")
     if len(parts) >= 2:
-        return parts[0], parts[1]
+        owner, repo = parts[0], parts[1]
+        if not owner or not repo:
+            raise ValueError("empty owner or repo in URL")
+        return owner, repo
 
     raise ValueError(f"Could not parse GitHub URL: {url}")
 
@@ -360,6 +383,8 @@ async def fetch_repo_tree(
     Returns:
         List of tree entry dicts with 'path', 'type', 'size' keys.
     """
+    owner = quote(owner, safe="")
+    repo = quote(repo, safe="")
     url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/HEAD"
     params = {"recursive": "1"}
     headers = {"Accept": "application/vnd.github.v3+json"}
@@ -372,6 +397,10 @@ async def fetch_repo_tree(
         response.raise_for_status()
         data = response.json()
 
+    if data.get("truncated"):
+        logging.getLogger(__name__).warning(
+            "GitHub tree was truncated; index may be incomplete"
+        )
     return data.get("tree", [])
 
 
@@ -392,7 +421,7 @@ async def fetch_file_content(
     Returns:
         File content as a string.
     """
-    if ".." in path:
+    if ".." in unquote(path):
         raise ValueError("File path contains traversal sequence")
     url = f"https://api.github.com/repos/{owner}/{repo}/contents/{quote(path, safe='/')}"
     headers = {"Accept": "application/vnd.github.v3.raw"}
@@ -475,7 +504,10 @@ def discover_source_files(
             continue
 
         path = entry.get("path", "")
-        size = entry.get("size", 0)
+        try:
+            size = int(entry.get("size", 0))
+        except (TypeError, ValueError):
+            size = 0
 
         # Extension filter
         _, ext = os.path.splitext(path)

@@ -128,7 +128,10 @@ def get_impact(
     _collect_affected(symbol_id, 1)
 
     # Continue BFS for transitive impact
+    _MAX_IMPACTED = 500
     while queue:
+        if len(impacted) >= _MAX_IMPACTED:
+            break
         current_id, depth = queue.popleft()
         if depth > max_depth:
             continue

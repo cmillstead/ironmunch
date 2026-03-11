@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import os
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+
+_LOCK_TIMEOUT_SECONDS: float = 30.0
+_LOCK_RETRY_INTERVAL: float = 0.1
 
 
 def ensure_private_dir(path: str | Path) -> Path:
     """Create a directory and enforce owner-only permissions."""
     target = Path(path)
+    if target == Path("/") or target == target.parent:
+        raise OSError("refusing to operate on filesystem root")
     if target.is_symlink():
         raise OSError("Refusing to use symlinked directory")
     old_umask = os.umask(0o077)
@@ -36,7 +42,11 @@ def atomic_write_nofollow(path: str | Path, data: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(data)
-        tmp_path.replace(target)
+        try:
+            tmp_path.replace(target)
+        except OSError:
+            tmp_path.unlink(missing_ok=True)
+            raise
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
@@ -51,7 +61,19 @@ def exclusive_file_lock(lock_path: str | Path) -> Iterator[None]:
     ensure_private_dir(path.parent)
     fd = os.open(str(path), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except (OSError, BlockingIOError):
+                if time.monotonic() >= deadline:
+                    os.close(fd)
+                    raise TimeoutError(
+                        f"Could not acquire lock on {lock_path} "
+                        f"within {_LOCK_TIMEOUT_SECONDS}s"
+                    )
+                time.sleep(_LOCK_RETRY_INTERVAL)
         yield
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)

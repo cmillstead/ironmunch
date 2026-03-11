@@ -151,12 +151,15 @@ def _sanitize_arguments(name: str, arguments: dict) -> dict | str:
         "confirm_sensitive_search",
     ):
         if flag in arguments and not isinstance(arguments[flag], bool):
-            arguments[flag] = arguments[flag] in (True, 1)
+            val = arguments[flag]
+            arguments[flag] = val in (True, 1) or (isinstance(val, str) and val.lower() in ("true", "1", "yes"))
 
     # Filter non-string items from list arguments
     if name == "index_folder" and "extra_ignore_patterns" in arguments:
         patterns = arguments["extra_ignore_patterns"]
-        if isinstance(patterns, list):
+        if not isinstance(patterns, list):
+            arguments["extra_ignore_patterns"] = []
+        elif isinstance(patterns, list):
             arguments["extra_ignore_patterns"] = [
                 p for p in patterns if isinstance(p, str)
             ]
@@ -236,7 +239,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     except Exception as e:
         return [TextContent(type="text", text=json.dumps({"error": sanitize_error(e)}))]
 
-    if not _rate_limit(name, storage_path):
+    try:
+        rate_ok = _rate_limit(name, storage_path)
+    except Exception:
+        rate_ok = True  # Allow the call if rate limiter is broken
+    if not rate_ok:
         return [TextContent(type="text", text=json.dumps({
             "error": "Rate limit exceeded. Try again in a moment."
         }))]

@@ -109,7 +109,7 @@ def finalize_index(
     result: dict = {
         "success": True,
         "repo": f"{owner}/{name}",
-        "indexed_at": store.load_index(owner, name).indexed_at,
+        "indexed_at": getattr(store.load_index(owner, name), "indexed_at", None) or "unknown",
         "file_count": len(parsed_files),
         "symbol_count": len(all_symbols),
         "languages": languages,

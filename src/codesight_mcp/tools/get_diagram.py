@@ -15,7 +15,17 @@ _VALID_TYPES = {"call_graph", "type_hierarchy", "imports", "impact"}
 
 def _escape(label: str) -> str:
     """Escape a label for Mermaid syntax."""
-    return label.replace('"', '#quot;').replace('<', '&lt;').replace('>', '&gt;')
+    return (label
+            .replace('"', '#quot;')
+            .replace('<', '&lt;')
+            .replace('>', '&gt;')
+            .replace('|', '#124;')
+            .replace('(', '#40;')
+            .replace(')', '#41;')
+            .replace('[', '#91;')
+            .replace(']', '#93;')
+            .replace('{', '#123;')
+            .replace('}', '#125;'))
 
 
 def _node_id(index: int) -> str:
@@ -306,6 +316,9 @@ def get_diagram(
 
     if diagram_type == "imports" and not path:
         return {"error": "path is required for imports diagrams"}
+
+    if path and ".." in path.split("/"):
+        return {"error": "invalid path: traversal not allowed"}
 
     max_depth = max(1, min(max_depth, 5))
     if direction not in ("TD", "LR"):

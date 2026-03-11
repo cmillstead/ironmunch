@@ -14,6 +14,8 @@ from .limits import MAX_INDEX_SIZE
 _MAX_CALLS_PER_MINUTE: int = 60
 _MAX_GLOBAL_CALLS_PER_MINUTE: int = 300
 _RATE_WINDOW_SECONDS: int = 60
+_MAX_TIMESTAMPS_PER_TOOL: int = _MAX_CALLS_PER_MINUTE * 2
+_MAX_GLOBAL_TIMESTAMPS: int = _MAX_GLOBAL_CALLS_PER_MINUTE * 2
 
 
 def _rate_limit_state_dir(storage_path: str | None) -> Path:
@@ -35,13 +37,18 @@ def _rate_limit_state_dir(storage_path: str | None) -> Path:
         try:
             return ensure_private_dir(Path(tempfile.gettempdir()) / f"codesight-mcp-rate-limits-{suffix}")
         except PermissionError:
-            rand = secrets.token_hex(8)
-            return ensure_private_dir(Path(tempfile.gettempdir()) / f"codesight-mcp-rate-limits-{suffix}-{rand}")
+            try:
+                rand = secrets.token_hex(8)
+                return ensure_private_dir(Path(tempfile.gettempdir()) / f"codesight-mcp-rate-limits-{suffix}-{rand}")
+            except PermissionError:
+                return None
 
 
 def _rate_limit(tool_name: str, storage_path: str | None) -> bool:
     """Check a persistent rate limit bucket. Returns True if allowed."""
     state_dir = _rate_limit_state_dir(storage_path)
+    if state_dir is None:
+        return True  # Allow the call if we can't set up rate limiting
     lock_path = state_dir / ".rate_limits.lock"
     state_path = state_dir / ".rate_limits.json"
     now = time.time()
@@ -74,16 +81,27 @@ def _rate_limit(tool_name: str, storage_path: str | None) -> bool:
         global_timestamps = [
             float(t)
             for t in data.get("global", [])
-            if isinstance(t, (int, float)) and now - float(t) < _RATE_WINDOW_SECONDS
+            if isinstance(t, (int, float)) and now - float(t) < _RATE_WINDOW_SECONDS and float(t) <= now + 5
         ]
+        # Cap global timestamps to prevent memory/CPU spike from huge arrays
+        if len(global_timestamps) > _MAX_GLOBAL_TIMESTAMPS:
+            global_timestamps = global_timestamps[-_MAX_GLOBAL_TIMESTAMPS:]
         tool_map = data.get("tools", {})
         if not isinstance(tool_map, dict):
             tool_map = {}
-        tool_timestamps = [
-            float(t)
-            for t in tool_map.get(tool_name, [])
-            if isinstance(t, (int, float)) and now - float(t) < _RATE_WINDOW_SECONDS
-        ]
+        # Cap each tool's timestamps on load
+        for tname in list(tool_map.keys()):
+            entries = [
+                float(t)
+                for t in tool_map[tname]
+                if isinstance(t, (int, float)) and now - float(t) < _RATE_WINDOW_SECONDS and float(t) <= now + 5
+            ]
+            if entries:
+                tool_map[tname] = entries[-_MAX_TIMESTAMPS_PER_TOOL:]
+            else:
+                # Prune stale tool entries with no valid timestamps
+                del tool_map[tname]
+        tool_timestamps = tool_map.get(tool_name, [])
 
         if len(global_timestamps) >= _MAX_GLOBAL_CALLS_PER_MINUTE:
             return False
@@ -94,5 +112,8 @@ def _rate_limit(tool_name: str, storage_path: str | None) -> bool:
         tool_timestamps.append(now)
         tool_map[tool_name] = tool_timestamps
         state = {"global": global_timestamps, "tools": tool_map}
-        atomic_write_nofollow(state_path, json.dumps(state))
+        try:
+            atomic_write_nofollow(state_path, json.dumps(state))
+        except OSError:
+            pass  # State write failed — still allow the call
         return True

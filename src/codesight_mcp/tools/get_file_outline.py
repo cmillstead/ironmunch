@@ -48,7 +48,7 @@ def get_file_outline(
         }
 
     # Build symbol tree
-    symbol_objects = [_dict_to_symbol(s) for s in file_symbols]
+    symbol_objects = [sym for s in file_symbols if (sym := _dict_to_symbol(s)) is not None]
     tree = build_symbol_tree(symbol_objects)
 
     # Convert to output format
@@ -72,27 +72,30 @@ def get_file_outline(
     }
 
 
-def _dict_to_symbol(d: dict) -> Symbol:
+def _dict_to_symbol(d: dict) -> Symbol | None:
     """Convert dict back to Symbol dataclass."""
-    return Symbol(
-        id=d["id"],
-        file=d["file"],
-        name=d["name"],
-        qualified_name=d["qualified_name"],
-        kind=d["kind"],
-        language=d["language"],
-        signature=d["signature"],
-        docstring=d.get("docstring", ""),
-        summary=d.get("summary", ""),
-        decorators=d.get("decorators", []),
-        keywords=d.get("keywords", []),
-        parent=d.get("parent"),
-        line=d["line"],
-        end_line=d["end_line"],
-        byte_offset=d["byte_offset"],
-        byte_length=d["byte_length"],
-        content_hash=d.get("content_hash", ""),
-    )
+    try:
+        return Symbol(
+            id=d["id"],
+            file=d["file"],
+            name=d["name"],
+            qualified_name=d["qualified_name"],
+            kind=d["kind"],
+            language=d["language"],
+            signature=d["signature"],
+            docstring=d.get("docstring", ""),
+            summary=d.get("summary", ""),
+            decorators=d.get("decorators", []),
+            keywords=d.get("keywords", []),
+            parent=d.get("parent"),
+            line=d["line"],
+            end_line=d["end_line"],
+            byte_offset=d["byte_offset"],
+            byte_length=d["byte_length"],
+            content_hash=d.get("content_hash", ""),
+        )
+    except (KeyError, TypeError):
+        return None
 
 
 def _node_to_dict(node: SymbolNode) -> dict:
