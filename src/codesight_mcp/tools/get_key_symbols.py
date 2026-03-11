@@ -7,6 +7,8 @@ from ..parser.graph import CodeGraph
 from ._common import RepoContext, timed, elapsed_ms
 from .registry import ToolSpec, register
 
+_MAX_CANDIDATES = 200
+
 
 def get_key_symbols(
     repo: str,
@@ -43,8 +45,9 @@ def get_key_symbols(
     # PageRank on full graph (scope filter applied after)
     ranks = graph.pagerank()
 
-    # Build candidates with metadata
-    candidates = []
+    # Build pre-filtered list and sort by cheap heuristic (caller count)
+    # to cap expensive get_impact calls.
+    pre_candidates = []
     for sym in index.symbols:
         sid = sym.get("id", "")
         if not sid:
@@ -60,6 +63,15 @@ def get_key_symbols(
 
         fan_in = len(graph.get_callers(sid))
         fan_out = len(graph.get_callees(sid))
+        pre_candidates.append((sym, sid, sym_kind, file_path, fan_in, fan_out))
+
+    # Sort by caller count (cheap heuristic) and cap to _MAX_CANDIDATES
+    pre_candidates.sort(key=lambda c: c[4], reverse=True)
+    pre_candidates = pre_candidates[:_MAX_CANDIDATES]
+
+    # Build candidates with expensive impact computation
+    candidates = []
+    for sym, sid, sym_kind, file_path, fan_in, fan_out in pre_candidates:
         impact = graph.get_impact(sid, max_depth=3)
 
         candidates.append({

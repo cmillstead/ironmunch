@@ -97,3 +97,31 @@ class TestGetKeySymbols:
         _make_store(tmp_path, [])
         result = get_key_symbols(repo="test/repo", storage_path=str(tmp_path))
         assert result["key_symbols"] == []
+
+    def test_key_symbols_caps_candidates(self, tmp_path):
+        """Verify that get_key_symbols does not process more than _MAX_CANDIDATES symbols."""
+        from codesight_mcp.tools.get_key_symbols import get_key_symbols, _MAX_CANDIDATES
+        from unittest.mock import patch
+
+        # Create more symbols than _MAX_CANDIDATES
+        num_symbols = _MAX_CANDIDATES + 50
+        symbols = [_sym(f"f{i}") for i in range(num_symbols)]
+        _make_store(tmp_path, symbols)
+
+        # Track how many times get_impact is called
+        call_count = 0
+        original_get_impact = None
+
+        from codesight_mcp.parser.graph import CodeGraph
+        original_get_impact = CodeGraph.get_impact
+
+        def counting_get_impact(self, sid, max_depth=5):
+            nonlocal call_count
+            call_count += 1
+            return original_get_impact(self, sid, max_depth=max_depth)
+
+        with patch.object(CodeGraph, "get_impact", counting_get_impact):
+            result = get_key_symbols(repo="test/repo", storage_path=str(tmp_path))
+
+        # get_impact should be called at most _MAX_CANDIDATES times
+        assert call_count <= _MAX_CANDIDATES
