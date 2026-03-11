@@ -35,6 +35,7 @@ from .tools import (  # noqa: F401
     get_type_hierarchy, get_imports, get_impact,
     get_dead_code, status,
     get_hotspots, get_key_symbols, get_diagram,
+    get_context, search_references, get_dependencies,
 )
 
 # ADV-LOW-7: Read CODE_INDEX_PATH once at startup so subsequent env mutations
@@ -91,16 +92,10 @@ _DESTRUCTIVE_WARNING = (
     " Only call when the user has explicitly asked to delete an index."
 )
 
-_TEXT_SEARCH_WARNING = (
-    " Only call when the user has explicitly asked to search indexed file"
-    " contents and confirm_sensitive_search=True."
-)
-
 _WARNINGS = {
     "untrusted": _UNTRUSTED_WARNING,
     "index_gate": _INDEX_WARNING,
     "destructive": _DESTRUCTIVE_WARNING,
-    "text_search": _TEXT_SEARCH_WARNING,
 }
 
 # Create server
@@ -151,7 +146,6 @@ def _sanitize_arguments(name: str, arguments: dict) -> dict | str:
     # Coerce boolean flags
     _BOOLEAN_FLAGS = (
         "follow_symlinks", "use_ai_summaries", "verify", "confirm",
-        "confirm_sensitive_search",
     )
     for flag in _BOOLEAN_FLAGS:
         if flag in arguments:

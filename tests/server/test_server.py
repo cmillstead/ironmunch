@@ -15,10 +15,10 @@ from codesight_mcp.core.rate_limiting import _rate_limit
 
 @pytest.mark.asyncio
 async def test_server_lists_all_tools():
-    """Test that server lists all 22 tools."""
+    """Test that server lists all 25 tools."""
     tools = await list_tools()
 
-    assert len(tools) == 22
+    assert len(tools) == 25
 
     names = {t.name for t in tools}
     expected = {
@@ -29,6 +29,7 @@ async def test_server_lists_all_tools():
         "get_type_hierarchy", "get_imports", "get_impact",
         "get_dead_code", "status",
         "get_hotspots", "get_key_symbols", "get_diagram",
+        "get_context", "search_references", "get_dependencies",
     }
     assert names == expected
 
@@ -66,7 +67,7 @@ async def test_search_symbols_tool_schema():
 
 @pytest.mark.asyncio
 async def test_search_text_tool_schema():
-    """Test search_text tool has the confirmation field in its schema."""
+    """Test search_text tool has the expected fields in its schema."""
     tools = await list_tools()
 
     search = next(t for t in tools if t.name == "search_text")
@@ -76,7 +77,6 @@ async def test_search_text_tool_schema():
     assert "query" in props
     assert "file_pattern" in props
     assert "max_results" in props
-    assert "confirm_sensitive_search" in props
 
 
 # -- Description warning tests ------------------------------------------------
@@ -109,15 +109,6 @@ async def test_indexing_tools_have_consent_warning():
             assert "explicitly asked to index" in tool.description, (
                 f"{tool.name} missing explicit-consent warning"
             )
-
-
-@pytest.mark.asyncio
-async def test_search_text_has_explicit_confirmation_warning():
-    """search_text must require explicit confirmation in its description."""
-    tools = await list_tools()
-    search_text_tool = next(t for t in tools if t.name == "search_text")
-
-    assert "confirm_sensitive_search=True" in search_text_tool.description
 
 
 @pytest.mark.asyncio
@@ -202,15 +193,6 @@ class TestCallToolInputBounds:
         assert "empty" in text.lower()
 
     @pytest.mark.asyncio
-    async def test_search_text_requires_confirmation(self):
-        result = await call_tool("search_text", {
-            "repo": "test/repo",
-            "query": "needle",
-        })
-        text = result[0].text
-        assert "confirm_sensitive_search" in text
-
-    @pytest.mark.asyncio
     async def test_symbol_ids_list_capped(self):
         result = await call_tool("get_symbols", {
             "repo": "test/repo",
@@ -243,14 +225,6 @@ class TestCallToolInputBounds:
         result = _sanitize_arguments("index_folder", args)
         assert isinstance(result, dict)
         assert result["follow_symlinks"] is True
-
-    def test_search_confirmation_bool_preserved(self):
-        """confirm_sensitive_search must preserve a real boolean."""
-        from codesight_mcp.server import _sanitize_arguments
-        args = {"query": "x", "confirm_sensitive_search": True}
-        result = _sanitize_arguments("search_text", args)
-        assert isinstance(result, dict)
-        assert result["confirm_sensitive_search"] is True
 
     def test_symbol_ids_oversized_items_filtered(self):
         """SEC-LOW-3: oversized symbol_ids must be filtered."""

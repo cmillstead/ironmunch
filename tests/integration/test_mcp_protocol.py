@@ -1,6 +1,6 @@
 """P0-10: MCP protocol registration and dispatch tests.
 
-Verify that all 22 tools are registered with correct schemas and that
+Verify that all 24 tools are registered with correct schemas and that
 the server dispatch works correctly.
 """
 
@@ -12,7 +12,7 @@ from codesight_mcp.server import server, call_tool, list_tools
 from codesight_mcp.tools.registry import get_all_specs
 
 
-# The 22 expected tool names.
+# The 25 expected tool names.
 EXPECTED_TOOLS = sorted([
     "index_repo",
     "index_folder",
@@ -36,17 +36,20 @@ EXPECTED_TOOLS = sorted([
     "get_hotspots",
     "get_key_symbols",
     "get_diagram",
+    "get_context",
+    "search_references",
+    "get_dependencies",
 ])
 
 
 class TestToolRegistration:
-    """Verify all 22 tools are present in the registry."""
+    """Verify all 25 tools are present in the registry."""
 
     def test_all_22_tools_registered(self):
-        """The registry must contain exactly 22 tools."""
+        """The registry must contain exactly 25 tools."""
         specs = get_all_specs()
-        assert len(specs) == 22, (
-            f"Expected 22 tools, got {len(specs)}: {sorted(specs.keys())}"
+        assert len(specs) == 25, (
+            f"Expected 25 tools, got {len(specs)}: {sorted(specs.keys())}"
         )
 
     def test_all_expected_tool_names_present(self):
@@ -90,10 +93,10 @@ class TestListToolsHandler:
     """Verify the @server.list_tools() handler returns correct Tool objects."""
 
     async def test_list_tools_returns_all_22(self):
-        """The list_tools handler returns exactly 22 Tool objects."""
+        """The list_tools handler returns exactly 25 Tool objects."""
         tools = await list_tools()
-        assert len(tools) == 22, (
-            f"Expected 22 tools from list_tools(), got {len(tools)}: "
+        assert len(tools) == 25, (
+            f"Expected 25 tools from list_tools(), got {len(tools)}: "
             f"{[t.name for t in tools]}"
         )
 
@@ -128,10 +131,6 @@ class TestListToolsHandler:
             "invalidate_cache missing destructive warning"
         )
 
-        # search_text has text_search warning
-        assert "confirm_sensitive_search" in tools_by_name["search_text"].description, (
-            "search_text missing text_search warning"
-        )
 
 
 class TestUnknownToolDispatch:
