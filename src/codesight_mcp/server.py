@@ -44,6 +44,8 @@ _CODE_INDEX_PATH: str = os.environ.get("CODE_INDEX_PATH", "")
 # ADV-LOW-6: Resolve CODESIGHT_ALLOWED_ROOTS to absolute paths at startup so
 # callers always receive fully-resolved paths regardless of cwd changes.
 # ADV-MED-5: Reject entries that resolve to a filesystem root (/ or C:\).
+MAX_RESPONSE_BYTES = 5_000_000
+
 _raw_roots = os.environ.get("CODESIGHT_ALLOWED_ROOTS", "").split(":")
 ALLOWED_ROOTS: list[str] = []
 for _r in _raw_roots:
@@ -269,7 +271,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if asyncio.iscoroutine(result):
             result = await result
 
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+        text = json.dumps(result, indent=2)
+        if len(text.encode("utf-8")) > MAX_RESPONSE_BYTES:
+            return [TextContent(type="text", text=json.dumps({
+                "error": "Response too large. Try a more specific query."
+            }))]
+        return [TextContent(type="text", text=text)]
 
     except Exception as e:
         return [TextContent(type="text", text=json.dumps({"error": sanitize_error(e)}))]
@@ -300,12 +307,13 @@ def main():
     """
     import sys
 
+    # ADV-LOW-10: Restrict LOG_LEVEL to safe values — DEBUG/INFO leak internals.
+    _ALLOWED_LOG_LEVELS = {"WARNING", "ERROR", "CRITICAL"}
+    _log_level = os.environ.get("LOG_LEVEL", "WARNING").upper()
+    if _log_level not in _ALLOWED_LOG_LEVELS:
+        _log_level = "WARNING"
     logging.basicConfig(
-        level=getattr(
-            logging,
-            os.environ.get("LOG_LEVEL", "WARNING").upper(),
-            logging.WARNING,
-        ),
+        level=getattr(logging, _log_level, logging.WARNING),
         format="%(levelname)s %(name)s: %(message)s",
     )
 

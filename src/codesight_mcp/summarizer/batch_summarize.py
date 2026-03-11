@@ -20,12 +20,16 @@ logger = logging.getLogger(__name__)
 # in-process dependency cannot redirect AI requests after startup.
 _ANTHROPIC_BASE_URL: str | None = os.environ.get("ANTHROPIC_BASE_URL") or None
 
+# ADV-MED-5: Freeze ANTHROPIC_API_KEY at import time so a compromised
+# in-process dependency cannot swap the key after startup.
+_ANTHROPIC_API_KEY: str = os.environ.get("ANTHROPIC_API_KEY", "")
+
 # ADV-INFO-1: Warn when a custom base URL is configured.
+# ADV-MED-6: Reject non-HTTPS base URLs outright.
 if _ANTHROPIC_BASE_URL is not None:
     if not _ANTHROPIC_BASE_URL.startswith("https://"):
-        logging.getLogger(__name__).warning(
-            "ANTHROPIC_BASE_URL is set to a non-HTTPS URL: %s — AI requests may be insecure",
-            _ANTHROPIC_BASE_URL,
+        raise ValueError(
+            f"ANTHROPIC_BASE_URL must use HTTPS, got: {_ANTHROPIC_BASE_URL}"
         )
     else:
         logging.getLogger(__name__).warning(
@@ -63,6 +67,15 @@ _INJECTION_PHRASES = (
     "|>",
     "execute ",
     "run this",
+    # ADV-LOW-4: additional injection phrases.
+    "note to ai",
+    "critical instruction",
+    "from now on",
+    "act as",
+    "<<sys>>",
+    "[/inst]",
+    "<s>",
+    "</s>",
 )
 
 # ADV-MED-2: Valid symbol kinds — only these are interpolated into prompts.
@@ -169,7 +182,7 @@ class BatchSummarizer:
         """Initialize Anthropic client if API key is available."""
         try:
             from anthropic import Anthropic
-            api_key = os.environ.get("ANTHROPIC_API_KEY")
+            api_key = _ANTHROPIC_API_KEY
             if api_key:
                 self.client = Anthropic(
                     api_key=api_key,
@@ -290,8 +303,7 @@ class BatchSummarizer:
         sub_nonces = [secrets.token_hex(4) for _ in symbols]
         user_lines = ["Input:"]
         for i, sym in enumerate(symbols, 1):
-            safe_sig = sym.signature.replace("\n", " ").replace("\r", " ")[:200]
-            safe_sig = sanitize_signature_for_api(safe_sig)
+            safe_sig = sanitize_signature_for_api(sym.signature.replace("\n", " ").replace("\r", " "))[:200]
             kind = sym.kind if sym.kind in _VALID_KINDS else "symbol"
             user_lines.append(f"  [{i}:{sub_nonces[i-1]}] {kind}: {sig_open}{safe_sig}{sig_close}")
 

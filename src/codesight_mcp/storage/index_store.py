@@ -199,7 +199,13 @@ class CodeIndex:
     def _match_pattern(self, file_path: str, pattern: str) -> bool:
         """Match file path against glob pattern."""
         import fnmatch
-        return fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(file_path, f"*/{pattern}")
+        # ADV-LOW-9: Reject patterns with excessive bracket groups
+        if pattern.count("[") > 5:
+            return False
+        try:
+            return fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(file_path, f"*/{pattern}")
+        except re.error:
+            return False
 
     def _score_symbol(self, sym: dict, query_lower: str, query_words: set) -> int:
         """Calculate search score for a symbol.
@@ -257,16 +263,30 @@ class IndexStore:
                     tmp_file.unlink()
                 except OSError:
                     pass
-        # Clean temps in content subdirectories
-        for tmp_file in self.base_path.rglob("*.tmp.*"):
+        # ADV-LOW-8: Clean temps in content subdirectories with bounded depth
+        _MAX_CLEANUP_DEPTH = 5
+        dirs = [(self.base_path, 0)]
+        while dirs:
+            d, depth = dirs.pop()
+            if depth > _MAX_CLEANUP_DEPTH:
+                continue
             try:
-                if tmp_file.is_symlink():
-                    continue
-                if (now - tmp_file.lstat().st_mtime) < 60:
-                    continue
-                tmp_file.unlink()
+                entries = list(d.iterdir())
             except OSError:
-                pass
+                continue
+            for entry in entries:
+                try:
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir():
+                        dirs.append((entry, depth + 1))
+                        continue
+                    if ".tmp." in entry.name or entry.name.endswith(".tmp"):
+                        if (now - entry.lstat().st_mtime) < 60:
+                            continue
+                        entry.unlink()
+                except OSError:
+                    pass
 
     def _index_path(self, owner: str, name: str) -> Path:
         """Path to compressed index file (.json.gz)."""
@@ -531,7 +551,7 @@ class IndexStore:
                     for d in sym["decorators"]
                 ]
             # ADV-LOW-5: Sanitize calls/imports list items
-            for list_field in ("calls", "imports"):
+            for list_field in ("calls", "imports", "inherits_from", "implements"):
                 if list_field in sym and isinstance(sym[list_field], list):
                     sym[list_field] = [
                         _sanitize_list_item(item)
@@ -962,7 +982,10 @@ class IndexStore:
             "signature": sanitize_signature_for_api(symbol.signature),
             "docstring": sanitize_signature_for_api(symbol.docstring),
             "summary": sanitize_signature_for_api(symbol.summary),
-            "decorators": symbol.decorators,
+            "decorators": [
+                sanitize_signature_for_api(d) if isinstance(d, str) else d
+                for d in (symbol.decorators or [])
+            ],
             "keywords": symbol.keywords,
             "parent": symbol.parent,
             "line": symbol.line,
@@ -973,8 +996,8 @@ class IndexStore:
             # ADV-LOW-5: Sanitize list fields — strip control chars, cap length.
             "calls": [_sanitize_list_item(c) for c in (symbol.calls or []) if isinstance(c, str)][:500],
             "imports": [_sanitize_list_item(i) for i in (symbol.imports or []) if isinstance(i, str)][:500],
-            "inherits_from": symbol.inherits_from,
-            "implements": symbol.implements,
+            "inherits_from": [_sanitize_list_item(i) for i in (symbol.inherits_from or []) if isinstance(i, str)][:500],
+            "implements": [_sanitize_list_item(i) for i in (symbol.implements or []) if isinstance(i, str)][:500],
             "complexity": symbol.complexity,
         }
 

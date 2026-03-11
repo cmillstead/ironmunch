@@ -123,7 +123,9 @@ def search_text(
             )
         }
     q_upper = query.strip().upper()
-    if len(q_upper) >= 4 and _REDACTION_SENTINEL.startswith(q_upper):
+    if len(q_upper) >= 4 and (
+        _REDACTION_SENTINEL.startswith(q_upper) or q_upper in _REDACTION_SENTINEL
+    ):
         return {
             "error": "Query matches redaction sentinel pattern; not allowed"
         }

@@ -25,6 +25,8 @@ def _escape(label: str) -> str:
             .replace('"', '#quot;')
             .replace('<', '&lt;')
             .replace('>', '&gt;')
+            .replace('%', '#37;')
+            .replace('`', '#96;')
             .replace('|', '#124;')
             .replace('(', '#40;')
             .replace(')', '#41;')

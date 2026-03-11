@@ -35,7 +35,8 @@ class TestStatusHappyPath:
 
         assert result["repo_count"] == 0
         assert result["total_symbols"] == 0
-        assert result["storage_path"] == str(tmp_path)
+        # ADV-LOW-13: storage_path replaced with storage_configured
+        assert result["storage_configured"] is True
         assert result["version"] == INDEX_VERSION
         # ADV-LOW-7: has_api_key removed — must not leak API key presence
         assert "has_api_key" not in result
@@ -87,6 +88,33 @@ class TestStatusApiKey:
         import json
         serialized = json.dumps(result)
         assert secret not in serialized
+
+
+class TestStatusRedaction:
+    """ADV-LOW-13: storage_path must not leak directory structure."""
+
+    def test_no_absolute_path_in_output(self, tmp_path):
+        """Status response must not contain absolute storage path."""
+        result = status(storage_path=str(tmp_path))
+        import json
+        serialized = json.dumps(result)
+        assert str(tmp_path) not in serialized
+
+    def test_storage_configured_true(self, tmp_path):
+        """storage_configured is True when storage_path is provided."""
+        result = status(storage_path=str(tmp_path))
+        assert result["storage_configured"] is True
+
+    def test_no_redact_warning(self, tmp_path, monkeypatch):
+        """ADV-LOW-11: When CODESIGHT_NO_REDACT=1, status should include warning."""
+        monkeypatch.setattr("codesight_mcp.tools.status._NO_REDACT", True)
+        result = status(storage_path=str(tmp_path))
+        assert result["redaction_disabled"] is True
+
+    def test_no_redact_absent_by_default(self, tmp_path):
+        """redaction_disabled should not appear when redaction is active."""
+        result = status(storage_path=str(tmp_path))
+        assert "redaction_disabled" not in result
 
 
 class TestStatusMeta:

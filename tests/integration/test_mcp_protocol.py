@@ -167,7 +167,7 @@ class TestStatusToolDispatch:
         assert len(result) == 1
         payload = json.loads(result[0].text)
         assert "error" not in payload, f"Unexpected error: {payload}"
-        assert "storage_path" in payload
+        assert "storage_configured" in payload
         assert "repo_count" in payload
         assert "total_symbols" in payload
         assert "version" in payload

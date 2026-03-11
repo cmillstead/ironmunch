@@ -91,6 +91,7 @@ class CodeGraph:
     _graph_cache: dict[str, "CodeGraph"] = {}
     _graph_cache_lock: threading.Lock = threading.Lock()
     _CACHE_MAX_SIZE: int = 8
+    _CACHE_MAX_BYTES: int = 50_000_000  # 50 MB budget for cached graphs
 
     @classmethod
     def get_or_build(cls, symbols: list[dict]) -> "CodeGraph":
@@ -114,15 +115,21 @@ class CodeGraph:
 
         # Build outside the lock to avoid holding it during expensive work
         graph = cls.build(symbols)
+        new_size = graph._approx_size()
 
         with cls._graph_cache_lock:
             # Check again in case another thread built it while we were building
             if fingerprint in cls._graph_cache:
                 return cls._graph_cache[fingerprint]
 
-            # Evict oldest entries if cache is full
-            while len(cls._graph_cache) >= cls._CACHE_MAX_SIZE:
+            # Evict oldest entries if count limit or memory budget exceeded
+            total = sum(g._approx_size() for g in cls._graph_cache.values())
+            while cls._graph_cache and (
+                len(cls._graph_cache) >= cls._CACHE_MAX_SIZE
+                or total + new_size > cls._CACHE_MAX_BYTES
+            ):
                 oldest_key = next(iter(cls._graph_cache))
+                total -= cls._graph_cache[oldest_key]._approx_size()
                 del cls._graph_cache[oldest_key]
 
             cls._graph_cache[fingerprint] = graph
@@ -133,6 +140,16 @@ class CodeGraph:
         """Clear the graph cache. Called after re-indexing or cache invalidation."""
         with cls._graph_cache_lock:
             cls._graph_cache.clear()
+
+    def _approx_size(self) -> int:
+        """Estimate memory usage of this graph in bytes."""
+        count = 0
+        for d in (self._calls_fwd, self._calls_rev, self._imports_fwd, self._imports_rev,
+                  self._inherits_fwd, self._inherits_rev, self._implements_fwd, self._implements_rev):
+            for k, v in d.items():
+                count += len(k) + sum(len(s) for s in v)
+        count += sum(len(k) for k in self._symbols_by_id)
+        return count * 2  # rough estimate: 2 bytes per char
 
     def _index_symbols(self, symbols: list[dict]) -> None:
         """Build lookup tables from raw symbol dicts."""

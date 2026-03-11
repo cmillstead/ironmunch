@@ -1,8 +1,10 @@
 """Health-check / status tool."""
 
+import os
 from typing import Optional
 
 from ..core.boundaries import make_meta
+from ..security import _NO_REDACT
 from ..storage import IndexStore, INDEX_VERSION
 from ._common import timed, elapsed_ms
 from .registry import ToolSpec, register
@@ -12,7 +14,7 @@ def status(storage_path: Optional[str] = None) -> dict:
     """Return a quick health-check snapshot.
 
     Returns:
-        Dict with storage_path, repo_count, total_symbols,
+        Dict with storage_configured, repo_count, total_symbols,
         version, and _meta envelope.
     """
     start = timed()
@@ -23,8 +25,9 @@ def status(storage_path: Optional[str] = None) -> dict:
     ms = elapsed_ms(start)
 
     # ADV-LOW-7: Removed has_api_key — leaks API key presence to MCP clients.
-    return {
-        "storage_path": str(store.base_path),
+    # ADV-LOW-13: Redact storage_path — absolute path leaks directory structure.
+    result = {
+        "storage_configured": storage_path is not None or bool(os.environ.get("CODE_INDEX_PATH")),
         "repo_count": len(repos),
         "total_symbols": total_symbols,
         "version": INDEX_VERSION,
@@ -33,6 +36,12 @@ def status(storage_path: Optional[str] = None) -> dict:
             "timing_ms": ms,
         },
     }
+
+    # ADV-LOW-11: Warn when redaction is disabled
+    if _NO_REDACT:
+        result["redaction_disabled"] = True
+
+    return result
 
 
 _spec = register(ToolSpec(
