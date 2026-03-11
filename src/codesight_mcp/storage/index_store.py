@@ -312,6 +312,31 @@ class IndexStore:
         sanitize_repo_identifier(name)
         return self.base_path / f"{owner}__{name}.lock"
 
+    def _metadata_path(self, owner: str, name: str) -> Path:
+        """Path to the lightweight metadata sidecar file."""
+        sanitize_repo_identifier(owner)
+        sanitize_repo_identifier(name)
+        return self.base_path / f"{owner}__{name}.meta.json"
+
+    def _write_metadata_sidecar(self, index: "CodeIndex") -> None:
+        """Write a small metadata sidecar alongside the index.
+
+        Called after the main index write succeeds. Uses _atomic_write
+        so the sidecar is never left in a partial state.
+        """
+        meta = {
+            "repo": index.repo,
+            "owner": index.owner,
+            "name": index.name,
+            "indexed_at": index.indexed_at,
+            "symbol_count": len(index.symbols),
+            "file_count": len(index.source_files),
+            "languages": index.languages,
+            "index_version": index.index_version,
+        }
+        meta_path = self._metadata_path(index.owner, index.name)
+        self._atomic_write(meta_path, json.dumps(meta))
+
     def _atomic_write(self, final_path: Path, data: "bytes | str") -> None:
         """Write data to final_path atomically via a .tmp file.
 
@@ -430,6 +455,9 @@ class IndexStore:
                 legacy = self._legacy_index_path(owner, name)
                 if legacy.exists():
                     legacy.unlink(missing_ok=True)
+
+                # Write metadata sidecar (after index write succeeded)
+                self._write_metadata_sidecar(index)
 
                 # Phase 3: rename all content .tmp → final (after JSON succeeded)
                 for final, tmp in content_tmp_paths:
@@ -814,6 +842,9 @@ class IndexStore:
                 if legacy.exists():
                     legacy.unlink(missing_ok=True)
 
+                # Write metadata sidecar (after index write succeeded)
+                self._write_metadata_sidecar(updated)
+
                 # Phase 3: remove deleted files from content dir (containment-validated)
                 for fp in deleted_files:
                     dead = (content_dir / fp).resolve()
@@ -844,11 +875,58 @@ class IndexStore:
 
     _MAX_REPOS: int = 500
 
-    def list_repos(self) -> list[dict]:
-        """List all indexed repositories (supports both .json.gz and .json)."""
-        repos = []
-        seen_repos: set[str] = set()  # avoid listing both legacy and compressed
+    def _read_metadata_sidecar(self, meta_path: Path) -> Optional[dict]:
+        """Read and validate a metadata sidecar file. Returns None on any error."""
+        try:
+            fd = os.open(str(meta_path), os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return None
+        required = ("repo", "indexed_at", "symbol_count", "file_count", "languages", "index_version")
+        if not all(k in data for k in required):
+            return None
+        if not isinstance(data.get("repo"), str) or not isinstance(data.get("indexed_at"), str):
+            return None
+        if not isinstance(data.get("symbol_count"), int) or not isinstance(data.get("file_count"), int):
+            return None
+        if not isinstance(data.get("languages"), dict):
+            return None
+        return data
 
+    def list_repos(self) -> list[dict]:
+        """List all indexed repositories.
+
+        Reads lightweight .meta.json sidecars when available, falling back
+        to full index decompression for repos that lack a sidecar (backwards
+        compatibility with indexes created before this feature).
+        """
+        repos = []
+        seen_repos: set[str] = set()
+
+        # Phase 1: read metadata sidecars (fast path)
+        for meta_file in self.base_path.glob("*.meta.json"):
+            if len(repos) >= self._MAX_REPOS:
+                break
+            if meta_file.name.endswith(".tmp") or meta_file.is_symlink():
+                continue
+            data = self._read_metadata_sidecar(meta_file)
+            if data is None:
+                continue
+            repo_key = data["repo"]
+            if repo_key in seen_repos:
+                continue
+            seen_repos.add(repo_key)
+            repos.append({
+                "repo": data["repo"],
+                "indexed_at": data["indexed_at"],
+                "symbol_count": data["symbol_count"],
+                "file_count": data["file_count"],
+                "languages": data["languages"],
+                "index_version": data.get("index_version", 1),
+            })
+
+        # Phase 2: fall back to full index reads for repos without sidecars
         for pattern in ("*.json.gz", "*.json"):
             for index_file in self.base_path.glob(pattern):
                 if len(repos) >= self._MAX_REPOS:
@@ -878,17 +956,13 @@ class IndexStore:
                         raw_bytes = raw_f.read()
 
                     if index_file.name.endswith(".gz"):
-                        # ADV-HIGH-1: streaming decompression with size cap
                         json_bytes = _safe_gzip_decompress(raw_bytes)
                         data = json.loads(json_bytes.decode("utf-8"))
                     else:
                         data = json.loads(raw_bytes.decode("utf-8"))
 
-                    # Validate required fields before accessing
                     if not all(k in data for k in ("repo", "indexed_at", "symbols", "source_files", "languages")):
                         continue
-
-                    # Type-validate key string fields to prevent injection / errors
                     if not isinstance(data.get("repo"), str) or not isinstance(data.get("indexed_at"), str):
                         continue
 
@@ -911,15 +985,16 @@ class IndexStore:
         return repos
 
     def delete_index(self, owner: str, name: str) -> bool:
-        """Delete an index and its raw files."""
+        """Delete an index, its metadata sidecar, and its raw files."""
         index_path = self._index_path(owner, name)
         legacy_path = self._legacy_index_path(owner, name)
+        meta_path = self._metadata_path(owner, name)
         content_dir = self._content_dir(owner, name)
 
         with exclusive_file_lock(self._repo_lock_path(owner, name)):
             deleted = False
 
-            for ipath in (index_path, legacy_path):
+            for ipath in (index_path, legacy_path, meta_path):
                 if ipath.exists():
                     ipath.unlink()
                     deleted = True
