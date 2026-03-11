@@ -122,3 +122,37 @@ class TestGetHotspots:
         _make_store(tmp_path, symbols)
         result = get_hotspots(repo="test/repo", storage_path=str(tmp_path))
         assert len(result["hotspots"]) == 0
+
+
+class TestGetHotspotsPathValidation:
+    """Path parameter validation for get_hotspots and get_key_symbols."""
+
+    def test_hotspots_rejects_path_traversal(self, tmp_path):
+        from codesight_mcp.tools.get_hotspots import get_hotspots
+        result = get_hotspots(repo="test/repo", path="../etc/passwd", storage_path=str(tmp_path))
+        assert "error" in result
+        assert "traversal" in result["error"]
+
+    def test_hotspots_rejects_null_bytes_in_path(self, tmp_path):
+        from codesight_mcp.tools.get_hotspots import get_hotspots
+        result = get_hotspots(repo="test/repo", path="src/\x00evil", storage_path=str(tmp_path))
+        assert "error" in result
+        assert "null" in result["error"]
+
+    def test_hotspots_rejects_mid_path_traversal(self, tmp_path):
+        from codesight_mcp.tools.get_hotspots import get_hotspots
+        result = get_hotspots(repo="test/repo", path="src/../../etc", storage_path=str(tmp_path))
+        assert "error" in result
+        assert "traversal" in result["error"]
+
+    def test_key_symbols_rejects_path_traversal(self, tmp_path):
+        from codesight_mcp.tools.get_key_symbols import get_key_symbols
+        result = get_key_symbols(repo="test/repo", path="../etc/passwd", storage_path=str(tmp_path))
+        assert "error" in result
+        assert "traversal" in result["error"]
+
+    def test_key_symbols_rejects_null_bytes_in_path(self, tmp_path):
+        from codesight_mcp.tools.get_key_symbols import get_key_symbols
+        result = get_key_symbols(repo="test/repo", path="src/\x00evil", storage_path=str(tmp_path))
+        assert "error" in result
+        assert "null" in result["error"]

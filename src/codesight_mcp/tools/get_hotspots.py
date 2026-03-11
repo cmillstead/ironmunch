@@ -41,6 +41,12 @@ def get_hotspots(
     start = timed()
     limit = max(1, min(limit, 100))
 
+    if path:
+        if "\x00" in path:
+            return {"error": "path contains null bytes"}
+        if any(part == ".." for part in path.split("/")):
+            return {"error": "path traversal not allowed"}
+
     ctx = RepoContext.resolve(repo, storage_path)
     if isinstance(ctx, dict):
         return ctx
