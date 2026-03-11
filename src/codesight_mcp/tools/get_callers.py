@@ -50,7 +50,7 @@ def get_callers(
             if caller_id in visited or caller_id == symbol_id:
                 continue
             visited.add(caller_id)
-            sym = graph._symbols_by_id.get(caller_id, {})
+            sym = graph.get_symbol(caller_id) or {}
             callers.append({
                 "id": wrap_untrusted_content(caller_id),
                 "name": wrap_untrusted_content(sym.get("name", "")),

@@ -50,7 +50,7 @@ def get_callees(
             if callee_id in visited:
                 continue
             visited.add(callee_id)
-            sym = graph._symbols_by_id.get(callee_id, {})
+            sym = graph.get_symbol(callee_id) or {}
             callees.append({
                 "id": wrap_untrusted_content(callee_id),
                 "name": wrap_untrusted_content(sym.get("name", "")),
