@@ -244,7 +244,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     try:
         rate_ok = _rate_limit(name, storage_path)
     except Exception:
-        rate_ok = True  # Allow the call if rate limiter is broken
+        rate_ok = False  # Fail closed if rate limiter is broken
     if not rate_ok:
         return [TextContent(type="text", text=json.dumps({
             "error": "Rate limit exceeded. Try again in a moment."

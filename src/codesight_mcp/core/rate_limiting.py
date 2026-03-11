@@ -17,6 +17,10 @@ _MAX_GLOBAL_CALLS_PER_MINUTE: int = 300
 _RATE_WINDOW_SECONDS: int = 60
 _MAX_TIMESTAMPS_PER_TOOL: int = _MAX_CALLS_PER_MINUTE * 2
 _MAX_GLOBAL_TIMESTAMPS: int = _MAX_GLOBAL_CALLS_PER_MINUTE * 2
+_MAX_WRITE_FAILURES: int = 10
+
+# Module-level failure counter for fail-closed behavior
+_consecutive_write_failures: int = 0
 
 
 def _rate_limit_state_dir(storage_path: str | None) -> Path:
@@ -47,10 +51,27 @@ def _rate_limit_state_dir(storage_path: str | None) -> Path:
 
 def _rate_limit(tool_name: str, storage_path: str | None) -> bool:
     """Check a persistent rate limit bucket. Returns True if allowed."""
+    global _consecutive_write_failures
+
+    # Fail closed after too many consecutive write failures
+    if _consecutive_write_failures >= _MAX_WRITE_FAILURES:
+        logging.getLogger(__name__).warning(
+            "Rate limiting fail-closed: %d consecutive write failures",
+            _consecutive_write_failures,
+        )
+        return False
+
     state_dir = _rate_limit_state_dir(storage_path)
     if state_dir is None:
-        logging.getLogger(__name__).warning("Rate limiting disabled: unable to create state directory")
-        return True  # Allow the call if we can't set up rate limiting
+        _consecutive_write_failures += 1
+        if _consecutive_write_failures >= _MAX_WRITE_FAILURES:
+            logging.getLogger(__name__).warning(
+                "Rate limiting fail-closed: unable to create state directory after %d failures",
+                _consecutive_write_failures,
+            )
+            return False
+        logging.getLogger(__name__).warning("Rate limiting degraded: unable to create state directory")
+        return True  # Allow the call if below threshold
     lock_path = state_dir / ".rate_limits.lock"
     state_path = state_dir / ".rate_limits.json"
     now = time.time()
@@ -119,6 +140,8 @@ def _rate_limit(tool_name: str, storage_path: str | None) -> bool:
         state = {"global": global_timestamps, "tools": tool_map}
         try:
             atomic_write_nofollow(state_path, json.dumps(state))
+            _consecutive_write_failures = 0  # Reset on successful write
         except OSError as exc:
+            _consecutive_write_failures += 1
             logging.getLogger(__name__).warning("Failed to persist rate limit state: %s", exc)
         return True
