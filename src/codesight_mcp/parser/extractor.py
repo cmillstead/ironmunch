@@ -90,6 +90,13 @@ def parse_file(content: str, filename: str, language: str) -> list[Symbol]:
 
     spec = LANGUAGE_REGISTRY[language]
     source_bytes = content.encode("utf-8", errors="replace")
+    # Warn if replacement characters were injected — byte offsets stored in
+    # the index may not correspond to the original file's byte positions.
+    if b"\xef\xbf\xbd" in source_bytes and "\ufffd" not in content:
+        logging.getLogger(__name__).warning(
+            "File contains non-UTF-8 bytes; byte offsets may be inaccurate: %s",
+            filename,
+        )
 
     # Get parser for this language
     parser = _get_parser(spec.ts_language)
