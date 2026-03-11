@@ -46,6 +46,34 @@ _PRIORITY_DIRS = ["src/", "lib/", "pkg/", "cmd/", "internal/"]
 MAX_GITIGNORE_PATTERN_LEN = 200
 
 
+def _safe_pathspec_from_lines(
+    patterns: list[str], timeout: float = 5.0
+) -> "pathspec.PathSpec | None":
+    """TM-11: Compile gitignore patterns with a timeout.
+
+    Wraps pathspec.PathSpec.from_lines() in a daemon thread to defend against
+    ReDoS from crafted patterns or a compromised pathspec library.
+    Returns None if compilation times out or fails.
+    """
+    import concurrent.futures
+    if not patterns:
+        return None
+    # Use a daemon thread pool so we don't block on cleanup if the thread hangs.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        future = pool.submit(pathspec.PathSpec.from_lines, "gitignore", patterns)
+        return future.result(timeout=timeout)
+    except (concurrent.futures.TimeoutError, Exception):
+        logging.getLogger(__name__).warning(
+            "TM-11: Gitignore pattern compilation timed out or failed; "
+            "proceeding without gitignore filtering"
+        )
+        return None
+    finally:
+        # shutdown(wait=False) so we don't block if the thread is stuck
+        pool.shutdown(wait=False)
+
+
 # ADV-LOW-8: suppress httpx DEBUG records that contain an Authorization header
 # so that tokens never appear in application logs.
 class _RedactAuthFilter(logging.Filter):
@@ -107,7 +135,7 @@ def _load_gitignore(folder_path: Path) -> Optional[pathspec.PathSpec]:
                 lines = lines[:2000]
             # ADV-MED-12: drop per-pattern overlong entries to prevent ReDoS
             lines = [p for p in lines if len(p) <= MAX_GITIGNORE_PATTERN_LEN]
-            return pathspec.PathSpec.from_lines("gitignore", lines)
+            return _safe_pathspec_from_lines(lines)
         except Exception:
             pass
     return None
@@ -267,7 +295,10 @@ def discover_local_files(
             if extra_spec and extra_spec.match_file(rel_path):
                 continue
 
-            # Secret detection
+            # Secret detection — runs after gitignore matching intentionally.
+            # Gitignore negation (e.g. !.env) only un-ignores a file (makes
+            # match_file return False), so the file still reaches this check.
+            # TM-3: This ordering prevents negation-pattern bypass.
             if is_secret_file(rel_path):
                 skipped_secret_count += 1
                 continue
@@ -511,10 +542,7 @@ def discover_source_files(
                 lines = lines[:2000]
             # ADV-LOW-2: drop overlong patterns to prevent ReDoS (matches local _load_gitignore)
             lines = [p for p in lines if len(p) <= MAX_GITIGNORE_PATTERN_LEN]
-            gitignore_spec = pathspec.PathSpec.from_lines(
-                "gitignore",
-                lines,
-            )
+            gitignore_spec = _safe_pathspec_from_lines(lines)
         except Exception:
             pass
 
@@ -548,7 +576,9 @@ def discover_source_files(
         if should_skip_file(path):
             continue
 
-        # Secret detection
+        # Secret detection — runs before gitignore matching (below).
+        # TM-3: This ordering prevents gitignore negation patterns
+        # (e.g. !.env) from bypassing secret file exclusion.
         if is_secret_file(path):
             continue
 

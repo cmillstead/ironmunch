@@ -6,6 +6,8 @@ import os
 import random
 import threading
 import time
+import logging as _logging
+import platform as _platform
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -44,6 +46,18 @@ def ensure_private_dir(path: str | Path) -> Path:
         os.fchmod(_fd, 0o700)
     finally:
         os.close(_fd)
+    # TM-4: Check for POSIX ACLs on Linux
+    if _platform.system() == "Linux":
+        try:
+            acl_data = os.getxattr(str(target), b"system.posix_acl_access")
+            if len(acl_data) > 28:
+                _logging.getLogger(__name__).warning(
+                    "TM-4: Directory %s has POSIX ACL entries beyond base permissions. "
+                    "Run 'setfacl -b %s' to remove them.",
+                    target, target,
+                )
+        except (OSError, AttributeError):
+            pass
     return target
 
 

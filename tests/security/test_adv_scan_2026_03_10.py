@@ -112,19 +112,20 @@ class TestGetDeadCodeLimit:
 # ---------------------------------------------------------------------------
 class TestHomoglyphBypass:
     def test_ascii_encoding_strips_non_ascii(self):
-        """ADV-MED-3: After NFKD + ASCII encoding, non-ASCII chars are stripped.
+        """ADV-MED-3 + TM-2: After NFKD + confusable mapping + ASCII encoding,
+        cross-script homoglyphs are normalized to Latin equivalents.
 
-        This prevents confusable chars from bypassing blocklist via visual
-        similarity (e.g. Cyrillic 'і' for Latin 'i'). The Cyrillic-injected
-        version won't match because non-ASCII chars are removed entirely.
+        TM-2 strengthened this: Cyrillic/Greek lookalikes are now mapped to
+        their Latin equivalents before checking, so confusable-char injection
+        phrases are correctly detected.
         """
         from codesight_mcp.summarizer.batch_summarize import _contains_injection_phrase
         # Pure ASCII injection phrase still detected
         assert _contains_injection_phrase("ignore previous")
-        # Cyrillic lookalike is stripped, resulting in "gnore " — no match
-        # This is safe because the LLM sees non-ASCII chars and won't follow
+        # TM-2: Cyrillic lookalike 'і' (U+0456) is now mapped to Latin 'i',
+        # so "іgnore " correctly matches the "ignore " blocklist entry.
         cyrillic_ignore = "\u0456gnore "
-        assert not _contains_injection_phrase(cyrillic_ignore)
+        assert _contains_injection_phrase(cyrillic_ignore)
         # Mixed-script with enough ASCII to match still caught
         assert _contains_injection_phrase("system: do something")
 

@@ -86,6 +86,38 @@ _VALID_KINDS = frozenset({
 })
 
 
+# TM-2: Mapping of common Cyrillic/Greek homoglyphs to Latin equivalents.
+# NFKD normalization doesn't convert cross-script lookalikes, so we need
+# an explicit confusable mapping for the most common attack vectors.
+_CONFUSABLE_MAP = str.maketrans({
+    "\u0410": "A", "\u0430": "a",  # Cyrillic А/а → Latin A/a
+    "\u0412": "B", "\u0432": "b",  # Cyrillic В/в → Latin B/b (visual)
+    "\u0421": "C", "\u0441": "c",  # Cyrillic С/с → Latin C/c
+    "\u0415": "E", "\u0435": "e",  # Cyrillic Е/е → Latin E/e
+    "\u041d": "H", "\u043d": "h",  # Cyrillic Н/н → Latin H/h (visual)
+    "\u0406": "I", "\u0456": "i",  # Cyrillic І/і → Latin I/i
+    "\u041a": "K", "\u043a": "k",  # Cyrillic К/к → Latin K/k
+    "\u041c": "M", "\u043c": "m",  # Cyrillic М/м → Latin M/m
+    "\u041e": "O", "\u043e": "o",  # Cyrillic О/о → Latin O/o
+    "\u0420": "P", "\u0440": "p",  # Cyrillic Р/р → Latin P/p
+    "\u0422": "T", "\u0442": "t",  # Cyrillic Т/т → Latin T/t
+    "\u0425": "X", "\u0445": "x",  # Cyrillic Х/х → Latin X/x
+    "\u0423": "Y", "\u0443": "y",  # Cyrillic У/у → Latin Y/y (visual)
+    "\u0405": "S", "\u0455": "s",  # Cyrillic Ѕ/ѕ (Dze) → Latin S/s
+    "\u0391": "A", "\u03b1": "a",  # Greek Α/α → Latin A/a
+    "\u0392": "B", "\u03b2": "b",  # Greek Β/β → Latin B/b
+    "\u0395": "E", "\u03b5": "e",  # Greek Ε/ε → Latin E/e
+    "\u0397": "H", "\u03b7": "h",  # Greek Η/η → Latin H/h
+    "\u0399": "I", "\u03b9": "i",  # Greek Ι/ι → Latin I/i
+    "\u039a": "K", "\u03ba": "k",  # Greek Κ/κ → Latin K/k
+    "\u039c": "M", "\u03bc": "m",  # Greek Μ/μ → Latin M/m
+    "\u039f": "O", "\u03bf": "o",  # Greek Ο/ο → Latin O/o
+    "\u03a1": "P", "\u03c1": "p",  # Greek Ρ/ρ → Latin P/p
+    "\u03a4": "T", "\u03c4": "t",  # Greek Τ/τ → Latin T/t
+    "\u03a7": "X", "\u03c7": "x",  # Greek Χ/χ → Latin X/x
+})
+
+
 def _contains_injection_phrase(text: str) -> bool:
     """Return True if text contains any injection phrase (case-insensitive).
 
@@ -98,9 +130,17 @@ def _contains_injection_phrase(text: str) -> bool:
     stripped = "".join(
         c for c in text if unicodedata.category(c) != "Cf"
     )
-    # ADV-MED-3: After NFKD normalization, encode to ASCII (ignore non-ASCII)
-    # to defeat homoglyph/Cyrillic lookalike bypass of the blocklist.
-    text_lower = unicodedata.normalize("NFKD", stripped).encode("ascii", errors="ignore").decode("ascii").lower()
+    nfkd = unicodedata.normalize("NFKD", stripped)
+    # TM-2: Apply confusable mapping to convert cross-script homoglyphs
+    # (Cyrillic/Greek lookalikes) to Latin equivalents before checking.
+    # NFKD alone doesn't handle these since they are distinct codepoints.
+    confusable_normalized = nfkd.translate(_CONFUSABLE_MAP)
+    nfkd_lower = confusable_normalized.lower()
+    if any(phrase in nfkd_lower for phrase in _INJECTION_PHRASES):
+        return True
+    # ADV-MED-3: Also check after ASCII stripping (original behavior)
+    # to catch homoglyphs that NFKD decomposes to ASCII equivalents.
+    text_lower = nfkd.encode("ascii", errors="ignore").decode("ascii").lower()
     return any(phrase in text_lower for phrase in _INJECTION_PHRASES)
 
 

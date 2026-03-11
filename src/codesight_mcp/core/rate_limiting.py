@@ -44,6 +44,13 @@ def _rate_limit_state_dir(storage_path: str | None) -> Path:
         try:
             return ensure_private_dir(Path(tempfile.gettempdir()) / f"codesight-mcp-rate-limits-{suffix}")
         except PermissionError:
+            # TM-5: Log warning — a PermissionError on the predictable path
+            # means someone else owns it (potential pre-creation attack).
+            logging.getLogger(__name__).warning(
+                "TM-5: Rate limit state directory with predictable name is owned "
+                "by another user — possible pre-created directory tampering. "
+                "Retrying with random suffix."
+            )
             try:
                 rand = secrets.token_hex(8)
                 return ensure_private_dir(Path(tempfile.gettempdir()) / f"codesight-mcp-rate-limits-{suffix}-{rand}")

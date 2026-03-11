@@ -72,6 +72,7 @@ _INT_PARAM_BOUNDS: dict[str, tuple[int, int]] = {
     "max_results": (1, MAX_SEARCH_RESULTS),
     "max_depth": (1, 10),
     "limit": (1, 100),
+    "line": (1, 1_000_000),
 }
 
 
@@ -250,6 +251,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     if isinstance(sanitized, str):
         return [TextContent(type="text", text=json.dumps({"error": sanitized}))]
     arguments = sanitized
+
+    # CC-3: Check required args declared in ToolSpec
+    spec = specs[name]
+    if spec.required_args:
+        missing = [arg for arg in spec.required_args if arg not in arguments]
+        if missing:
+            return [TextContent(type="text", text=json.dumps({
+                "error": f"Missing required argument(s): {', '.join(missing)}"
+            }))]
 
     try:
         storage_path = _validate_storage_path(_CODE_INDEX_PATH or None)

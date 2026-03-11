@@ -32,6 +32,32 @@ INDEX_VERSION = 2
 _HASH_RE = re.compile(r"[0-9a-f]{64}")
 
 
+def _check_posix_acls(path: str) -> None:
+    """TM-4: Warn if POSIX ACL entries exist on a directory (Linux only).
+
+    After fchmod(0o700), POSIX ACLs set by an attacker via setfacl
+    persist and grant additional access beyond the base permission bits.
+    """
+    import platform
+    if platform.system() != "Linux":
+        return
+    try:
+        # On Linux, the system.posix_acl_access xattr contains ACL entries.
+        # If getxattr succeeds and the ACL has more than the 3 base entries
+        # (owner, group, other), non-owner ACL entries are present.
+        acl_data = os.getxattr(path, b"system.posix_acl_access")
+        # POSIX ACL binary format: 4-byte version + 8 bytes per entry.
+        # 3 base entries = 4 + 3*8 = 28 bytes. More than 28 = extra ACLs.
+        if len(acl_data) > 28:
+            logger.warning(
+                "TM-4: Directory %s has POSIX ACL entries beyond base permissions. "
+                "Run 'setfacl -b %s' to remove them.",
+                path, path,
+            )
+    except (OSError, AttributeError):
+        pass  # No xattr support or no ACL — safe
+
+
 def _sanitize_list_item(item: str) -> str:
     """ADV-LOW-5: Strip control chars and cap length for calls/imports list items."""
     # Strip C0 (0x00-0x1F), DEL (0x7F), C1 (0x80-0x9F)
@@ -106,6 +132,7 @@ def _makedirs_0o700(path: str) -> None:
         os.fchmod(_fd, 0o700)
     finally:
         os.close(_fd)
+    _check_posix_acls(path)
 
 
 def _safe_rmtree(root: Path) -> None:
@@ -510,13 +537,13 @@ class IndexStore:
                 return None  # Corrupt gzip or decompression bomb — reject
             try:
                 data = json.loads(json_bytes.decode("utf-8"))
-            except UnicodeDecodeError:
-                return None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return None  # FUZZ-11: corrupt JSON returns None gracefully
         else:
             try:
                 data = json.loads(raw_bytes.decode("utf-8"))
-            except UnicodeDecodeError:
-                return None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return None  # FUZZ-11: corrupt JSON returns None gracefully
 
         # Version check
         stored_version = data.get("index_version", 1)

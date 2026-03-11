@@ -55,9 +55,14 @@ def make_symbol_id(file_path: str, qualified_name: str, kind: str = "") -> str:
     # Use percent-encoding to avoid collision (e.g. 'foo::bar.py' vs 'foo__bar.py').
     safe_path = file_path.replace("::", "%3A%3A")
     safe_name = qualified_name.replace("#", "%23")
+    # TM-1: Cap qualified_name component to prevent memory amplification
+    # from adversarially long identifiers in malicious repositories.
+    safe_name = safe_name[:400]
     if kind:
-        return f"{safe_path}::{safe_name}#{kind}"
-    return f"{safe_path}::{safe_name}"
+        result = f"{safe_path}::{safe_name}#{kind}"
+    else:
+        result = f"{safe_path}::{safe_name}"
+    return result[:500]
 
 
 def compute_content_hash(source_bytes: bytes) -> str:
