@@ -286,6 +286,33 @@ class TestGetTypeHierarchy:
         result = get_type_hierarchy(_repo(), "nonexistent", storage_path=graph_index["path"])
         assert "error" in result
 
+    def test_deep_hierarchy_does_not_crash(self, tmp_path):
+        """A 1000-deep inheritance chain should not cause RecursionError."""
+        depth = 1000
+        symbols = []
+        for i in range(depth):
+            inherits = [f"C{i - 1}"] if i > 0 else []
+            symbols.append(_make_sym(
+                "deep.py", f"C{i}", kind="class", inherits_from=inherits
+            ))
+        store = IndexStore(base_path=str(tmp_path))
+        store.save_index(
+            owner="local", name="deeprepo",
+            source_files=["deep.py"],
+            symbols=symbols,
+            raw_files={"deep.py": SRC},
+            languages={"python": 1},
+        )
+        # Should not raise RecursionError
+        result = get_type_hierarchy(
+            "local/deeprepo",
+            "deep-py::C999#class",
+            storage_path=str(tmp_path),
+        )
+        assert "error" not in result
+        # Should have parents but capped by depth limit
+        assert result["parent_count"] > 0
+
 
 # ===================================================================
 # get_imports
