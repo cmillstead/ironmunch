@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import random
 import threading
 import time
 from contextlib import contextmanager
@@ -72,6 +73,7 @@ def exclusive_file_lock(lock_path: str | Path) -> Iterator[None]:
     fd = os.open(str(path), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+        attempt = 0
         while True:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -84,7 +86,9 @@ def exclusive_file_lock(lock_path: str | Path) -> Iterator[None]:
                         f"Could not acquire lock on {lock_path} "
                         f"within {_LOCK_TIMEOUT_SECONDS}s"
                     )
-                time.sleep(_LOCK_RETRY_INTERVAL)
+                attempt += 1
+                base = min(0.05 * (1.5 ** min(attempt, 10)), 1.0)
+                time.sleep(base + random.uniform(0, base * 0.5))
         yield
     finally:
         if fd >= 0:
