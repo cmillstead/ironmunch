@@ -8,6 +8,9 @@ from ._common import RepoContext, timed, elapsed_ms
 from .registry import ToolSpec, register
 
 
+_MAX_DEAD_CODE = 500
+
+
 # Names that are typically entry points and should not be flagged.
 _ENTRY_POINT_NAMES = frozenset({
     "main",
@@ -95,6 +98,7 @@ def get_dead_code(
     repo: str,
     language: Optional[str] = None,
     include_tests: bool = False,
+    limit: int = 100,
     storage_path: Optional[str] = None,
 ) -> dict:
     """Find symbols with zero callers (potentially dead code).
@@ -103,12 +107,15 @@ def get_dead_code(
         repo: Repository identifier (owner/repo or just repo name).
         language: Optional language filter (e.g. "python", "javascript").
         include_tests: If True, include symbols from test files (default False).
+        limit: Maximum results to return (default 100, max 500).
         storage_path: Custom storage path.
 
     Returns:
         Dict with list of potentially dead symbols and _meta envelope.
     """
     start = timed()
+
+    limit = max(1, min(limit, _MAX_DEAD_CODE))
 
     ctx = RepoContext.resolve(repo, storage_path)
     if isinstance(ctx, dict):
@@ -120,6 +127,8 @@ def get_dead_code(
     dead: list[dict] = []
 
     for sym in index.symbols:
+        if len(dead) >= limit:
+            break
         sid = sym.get("id", "")
         if not sid:
             continue
@@ -149,11 +158,14 @@ def get_dead_code(
                 "language": sym.get("language", ""),
             })
 
+    truncated = len(dead) >= limit
+
     ms = elapsed_ms(start)
 
     return {
         "repo": f"{owner}/{name}",
         "dead_count": len(dead),
+        "truncated": truncated,
         "symbols": dead,
         "_meta": {
             **make_meta(source="code_index", trusted=False),
@@ -184,6 +196,11 @@ _spec = register(ToolSpec(
                 "description": "Include symbols from test files (default false)",
                 "default": False,
             },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum results to return (default 100, max 500)",
+                "default": 100,
+            },
         },
         "required": ["repo"],
     },
@@ -191,6 +208,7 @@ _spec = register(ToolSpec(
         repo=args["repo"],
         language=args.get("language"),
         include_tests=args.get("include_tests", False),
+        limit=args.get("limit", 100),
         storage_path=storage_path,
     ),
     untrusted=True,
