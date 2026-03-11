@@ -146,13 +146,26 @@ def _sanitize_arguments(name: str, arguments: dict) -> dict | str:
         ]
 
     # Coerce boolean flags
-    for flag in (
+    _BOOLEAN_FLAGS = (
         "follow_symlinks", "use_ai_summaries", "verify", "confirm",
         "confirm_sensitive_search",
-    ):
-        if flag in arguments and not isinstance(arguments[flag], bool):
+    )
+    for flag in _BOOLEAN_FLAGS:
+        if flag in arguments:
             val = arguments[flag]
-            arguments[flag] = val in (True, 1) or (isinstance(val, str) and val.lower() in ("true", "1", "yes"))
+            if isinstance(val, bool):
+                pass  # already a bool
+            elif isinstance(val, int):
+                arguments[flag] = val == 1
+            elif isinstance(val, str):
+                if val.lower() in ("true", "1", "yes"):
+                    arguments[flag] = True
+                elif val.lower() in ("false", "0", "no"):
+                    arguments[flag] = False
+                else:
+                    return f"Invalid boolean value for {flag}: {val!r}"
+            else:
+                arguments[flag] = False
 
     # Filter non-string items from list arguments
     if name == "index_folder" and "extra_ignore_patterns" in arguments:
