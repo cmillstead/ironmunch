@@ -1,7 +1,8 @@
-"""Get a symbol plus its structural neighborhood.
+"""Get a symbol plus its structural and relational neighborhood.
 
 Returns the target symbol (with source), its siblings (other symbols in the same
-scope), and its parent (if any). Replaces the common get_symbol → get_file_outline
+scope), and its parent (if any). Optionally includes graph data: direct callers,
+callees, and type hierarchy. Replaces the common get_symbol → get_file_outline
 → Read multi-tool pattern with a single call.
 """
 
@@ -10,8 +11,12 @@ from typing import Optional
 from ..security import sanitize_signature_for_api
 from ..core.boundaries import wrap_untrusted_content, make_meta
 from ..core.errors import sanitize_error
+from ..parser.graph import CodeGraph
 from ._common import RepoContext, timed, elapsed_ms
 from .registry import ToolSpec, register
+
+
+_GRAPH_CAP = 20  # Max callers/callees/hierarchy entries to return
 
 
 def _sym_summary(sym: dict) -> dict:
@@ -27,12 +32,72 @@ def _sym_summary(sym: dict) -> dict:
     }
 
 
+def _graph_ref(sym: dict) -> dict:
+    """Return a minimal reference dict for a graph neighbor."""
+    return {
+        "id": wrap_untrusted_content(sym["id"]),
+        "kind": sym.get("kind", ""),
+        "name": wrap_untrusted_content(sym.get("name", "")),
+        "file": wrap_untrusted_content(sym.get("file", "")),
+        "line": sym.get("line", 0),
+    }
+
+
+def _build_graph_section(
+    graph: CodeGraph,
+    symbol_id: str,
+    symbol: dict,
+) -> dict:
+    """Build the graph section with direct callers, callees, and type hierarchy."""
+    # Direct callers (depth 1 only)
+    caller_ids = list(graph.get_callers(symbol_id))[:_GRAPH_CAP]
+    callers = []
+    for cid in caller_ids:
+        sym = graph.get_symbol(cid)
+        if sym:
+            callers.append(_graph_ref(sym))
+
+    # Direct callees (depth 1 only)
+    callee_ids = list(graph.get_callees(symbol_id))[:_GRAPH_CAP]
+    callees = []
+    for cid in callee_ids:
+        sym = graph.get_symbol(cid)
+        if sym:
+            callees.append(_graph_ref(sym))
+
+    result: dict = {
+        "callers": callers,
+        "callees": callees,
+    }
+
+    # Type hierarchy (only for classes)
+    if symbol.get("kind") == "class":
+        parents = []
+        children = []
+        hierarchy = graph.get_type_hierarchy(symbol_id)
+        for pid in list(hierarchy.get("parents", []))[:_GRAPH_CAP]:
+            sym = graph.get_symbol(pid)
+            if sym:
+                parents.append(_graph_ref(sym))
+        for cid in list(hierarchy.get("children", []))[:_GRAPH_CAP]:
+            sym = graph.get_symbol(cid)
+            if sym:
+                children.append(_graph_ref(sym))
+        result["type_hierarchy"] = {
+            "parents": parents,
+            "children": children,
+        }
+
+    return result
+
+
 def get_context(
     repo: str,
     symbol_id: str,
+    include_graph: bool = False,
     storage_path: Optional[str] = None,
 ) -> dict:
-    """Get a symbol plus its structural neighborhood.
+    """Get a symbol plus its structural and optional relational neighborhood.
 
     Given a symbol_id, returns:
     - The target symbol with full source code.
@@ -40,6 +105,8 @@ def get_context(
       For methods this is other methods of the same class; for module-level
       symbols this is other module-level symbols in the same file.
     - Its parent symbol (signature only), or None for module-level symbols.
+    - Optionally (include_graph=True): direct callers, callees, and type
+      hierarchy from the code graph.
 
     The target symbol does NOT appear in its own siblings list.
     Symbols from other files are never returned as siblings.
@@ -47,10 +114,11 @@ def get_context(
     Args:
         repo: Repository identifier (owner/repo or just repo name).
         symbol_id: Symbol ID from get_file_outline or search_symbols.
+        include_graph: Include direct callers, callees, and type hierarchy.
         storage_path: Custom storage path.
 
     Returns:
-        Dict with symbol, siblings, parent, and _meta envelope.
+        Dict with symbol, siblings, parent, optional graph, and _meta envelope.
     """
     start = timed()
 
@@ -97,9 +165,15 @@ def get_context(
         if parent_sym:
             parent = _sym_summary(parent_sym)
 
+    # Build graph section if requested
+    graph_section = None
+    if include_graph:
+        graph = CodeGraph.build(index.symbols)
+        graph_section = _build_graph_section(graph, symbol_id, symbol)
+
     ms = elapsed_ms(start)
 
-    return {
+    result = {
         "symbol": {
             "id": wrap_untrusted_content(symbol["id"]),
             "kind": symbol["kind"],
@@ -119,14 +193,21 @@ def get_context(
         },
     }
 
+    if graph_section is not None:
+        result["graph"] = graph_section
+
+    return result
+
 
 _spec = register(ToolSpec(
     name="get_context",
     description=(
         "Get a symbol plus its structural neighborhood: the target symbol "
         "(with source), its siblings in the same scope, and its parent "
-        "(signature only). Replaces the common get_symbol → get_file_outline "
-        "→ Read multi-tool pattern with a single call."
+        "(signature only). Optionally include graph data (direct callers, "
+        "callees, type hierarchy) with include_graph=true. Replaces the "
+        "common get_symbol → get_file_outline → Read multi-tool pattern "
+        "with a single call."
     ),
     input_schema={
         "type": "object",
@@ -139,12 +220,18 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "Symbol ID from get_file_outline or search_symbols",
             },
+            "include_graph": {
+                "type": "boolean",
+                "description": "Include direct callers, callees, and type hierarchy from the code graph",
+                "default": False,
+            },
         },
         "required": ["repo", "symbol_id"],
     },
     handler=lambda args, storage_path: get_context(
         repo=args["repo"],
         symbol_id=args["symbol_id"],
+        include_graph=args.get("include_graph", False),
         storage_path=storage_path,
     ),
     untrusted=True,

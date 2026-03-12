@@ -2,7 +2,7 @@
 
 import pytest
 
-from codesight_mcp.tools.get_context import get_context
+from codesight_mcp.tools.get_context import get_context, _GRAPH_CAP
 from codesight_mcp.storage import IndexStore
 from codesight_mcp.parser import Symbol
 
@@ -393,3 +393,261 @@ class TestGetContextErrors:
         )
 
         assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# Graph integration tests
+# ---------------------------------------------------------------------------
+
+def _make_graph_repo(tmp_path):
+    """Index a repo with call relationships and inheritance for graph tests.
+
+    Layout:
+      app.py:
+        class Base:                    (line 1-3)
+          def base_method(self): ...   (line 2-3)
+        class Child(Base):             (line 4-6, inherits Base)
+          def child_method(self): ...  (line 5-6, calls helper)
+        def helper():                  (line 7-8)
+        def caller():                  (line 9-10, calls helper)
+    """
+    app_src = (
+        "class Base:\n"
+        "    def base_method(self):\n"
+        "        pass\n"
+        "class Child(Base):\n"
+        "    def child_method(self):\n"
+        "        helper()\n"
+        "def helper():\n"
+        "    pass\n"
+        "def caller():\n"
+        "    helper()\n"
+    )
+
+    base_cls = Symbol(
+        id="app.py::Base#class", file="app.py", name="Base",
+        qualified_name="Base", kind="class", language="python",
+        signature="class Base:", summary="Base class",
+        line=1, end_line=3, byte_offset=0, byte_length=50,
+    )
+    base_method = Symbol(
+        id="app.py::Base.base_method#method", file="app.py",
+        name="base_method", qualified_name="Base.base_method",
+        kind="method", language="python",
+        signature="def base_method(self):", summary="Base method",
+        parent="app.py::Base#class",
+        line=2, end_line=3, byte_offset=12, byte_length=30,
+    )
+    child_cls = Symbol(
+        id="app.py::Child#class", file="app.py", name="Child",
+        qualified_name="Child", kind="class", language="python",
+        signature="class Child(Base):", summary="Child class",
+        inherits_from=["Base"],
+        line=4, end_line=6, byte_offset=50, byte_length=60,
+    )
+    child_method = Symbol(
+        id="app.py::Child.child_method#method", file="app.py",
+        name="child_method", qualified_name="Child.child_method",
+        kind="method", language="python",
+        signature="def child_method(self):", summary="Child method",
+        parent="app.py::Child#class",
+        calls=["helper"],
+        line=5, end_line=6, byte_offset=62, byte_length=30,
+    )
+    helper_fn = Symbol(
+        id="app.py::helper#function", file="app.py", name="helper",
+        qualified_name="helper", kind="function", language="python",
+        signature="def helper():", summary="Helper function",
+        line=7, end_line=8, byte_offset=110, byte_length=20,
+    )
+    caller_fn = Symbol(
+        id="app.py::caller#function", file="app.py", name="caller",
+        qualified_name="caller", kind="function", language="python",
+        signature="def caller():", summary="Caller function",
+        calls=["helper"],
+        line=9, end_line=10, byte_offset=130, byte_length=20,
+    )
+
+    store = IndexStore(base_path=str(tmp_path))
+    store.save_index(
+        owner="local", name="graphproject",
+        source_files=["app.py"],
+        symbols=[base_cls, base_method, child_cls, child_method, helper_fn, caller_fn],
+        raw_files={"app.py": app_src},
+        languages={"python": 1},
+    )
+    return store
+
+
+class TestGetContextGraphDisabledByDefault:
+    """Graph data should not appear unless include_graph=True."""
+
+    def test_no_graph_key_by_default(self, tmp_path):
+        """Without include_graph, result should not contain a 'graph' key."""
+        _make_graph_repo(tmp_path)
+        result = get_context(
+            repo="local/graphproject",
+            symbol_id="app.py::helper#function",
+            storage_path=str(tmp_path),
+        )
+        assert "error" not in result
+        assert "graph" not in result
+
+    def test_no_graph_key_when_false(self, tmp_path):
+        """Explicitly passing include_graph=False should omit graph."""
+        _make_graph_repo(tmp_path)
+        result = get_context(
+            repo="local/graphproject",
+            symbol_id="app.py::helper#function",
+            include_graph=False,
+            storage_path=str(tmp_path),
+        )
+        assert "graph" not in result
+
+
+class TestGetContextGraphCallers:
+    """Graph callers should appear when include_graph=True."""
+
+    def test_helper_has_callers(self, tmp_path):
+        """helper() is called by child_method and caller — both should appear."""
+        _make_graph_repo(tmp_path)
+        result = get_context(
+            repo="local/graphproject",
+            symbol_id="app.py::helper#function",
+            include_graph=True,
+            storage_path=str(tmp_path),
+        )
+        assert "error" not in result
+        assert "graph" in result
+        caller_names = [c["name"] for c in result["graph"]["callers"]]
+        # Unwrap boundary markers for comparison
+        assert any("child_method" in n for n in caller_names)
+        assert any("caller" in n for n in caller_names)
+
+    def test_caller_has_no_callers(self, tmp_path):
+        """caller() is not called by anything — callers list should be empty."""
+        _make_graph_repo(tmp_path)
+        result = get_context(
+            repo="local/graphproject",
+            symbol_id="app.py::caller#function",
+            include_graph=True,
+            storage_path=str(tmp_path),
+        )
+        assert result["graph"]["callers"] == []
+
+
+class TestGetContextGraphCallees:
+    """Graph callees should appear when include_graph=True."""
+
+    def test_caller_calls_helper(self, tmp_path):
+        """caller() calls helper() — should appear in callees."""
+        _make_graph_repo(tmp_path)
+        result = get_context(
+            repo="local/graphproject",
+            symbol_id="app.py::caller#function",
+            include_graph=True,
+            storage_path=str(tmp_path),
+        )
+        assert "graph" in result
+        callee_names = [c["name"] for c in result["graph"]["callees"]]
+        assert any("helper" in n for n in callee_names)
+
+    def test_helper_has_no_callees(self, tmp_path):
+        """helper() doesn't call anything — callees list should be empty."""
+        _make_graph_repo(tmp_path)
+        result = get_context(
+            repo="local/graphproject",
+            symbol_id="app.py::helper#function",
+            include_graph=True,
+            storage_path=str(tmp_path),
+        )
+        assert result["graph"]["callees"] == []
+
+
+class TestGetContextGraphTypeHierarchy:
+    """Type hierarchy should appear for classes only."""
+
+    def test_child_class_shows_parent(self, tmp_path):
+        """Child class should show Base in type_hierarchy.parents."""
+        _make_graph_repo(tmp_path)
+        result = get_context(
+            repo="local/graphproject",
+            symbol_id="app.py::Child#class",
+            include_graph=True,
+            storage_path=str(tmp_path),
+        )
+        assert "type_hierarchy" in result["graph"]
+        parent_names = [p["name"] for p in result["graph"]["type_hierarchy"]["parents"]]
+        assert any("Base" in n for n in parent_names)
+
+    def test_base_class_shows_child(self, tmp_path):
+        """Base class should show Child in type_hierarchy.children."""
+        _make_graph_repo(tmp_path)
+        result = get_context(
+            repo="local/graphproject",
+            symbol_id="app.py::Base#class",
+            include_graph=True,
+            storage_path=str(tmp_path),
+        )
+        assert "type_hierarchy" in result["graph"]
+        child_names = [c["name"] for c in result["graph"]["type_hierarchy"]["children"]]
+        assert any("Child" in n for n in child_names)
+
+    def test_function_has_no_type_hierarchy(self, tmp_path):
+        """Non-class symbols should not have a type_hierarchy key."""
+        _make_graph_repo(tmp_path)
+        result = get_context(
+            repo="local/graphproject",
+            symbol_id="app.py::helper#function",
+            include_graph=True,
+            storage_path=str(tmp_path),
+        )
+        assert "type_hierarchy" not in result["graph"]
+
+
+class TestGetContextGraphFields:
+    """Graph entries should have the expected fields."""
+
+    def test_graph_ref_has_required_fields(self, tmp_path):
+        """Each graph reference should have id, kind, name, file, line."""
+        _make_graph_repo(tmp_path)
+        result = get_context(
+            repo="local/graphproject",
+            symbol_id="app.py::helper#function",
+            include_graph=True,
+            storage_path=str(tmp_path),
+        )
+        for caller in result["graph"]["callers"]:
+            for field in ("id", "kind", "name", "file", "line"):
+                assert field in caller, f"Missing field: {field}"
+
+    def test_graph_refs_are_wrapped(self, tmp_path):
+        """Graph ref names and IDs should be wrapped with boundary markers."""
+        _make_graph_repo(tmp_path)
+        result = get_context(
+            repo="local/graphproject",
+            symbol_id="app.py::helper#function",
+            include_graph=True,
+            storage_path=str(tmp_path),
+        )
+        for caller in result["graph"]["callers"]:
+            assert "UNTRUSTED" in caller["id"]
+            assert "UNTRUSTED" in caller["name"]
+
+
+class TestGetContextGraphWithStructural:
+    """Graph data should coexist correctly with structural data."""
+
+    def test_siblings_still_present_with_graph(self, tmp_path):
+        """Enabling graph should not affect siblings/parent."""
+        _make_graph_repo(tmp_path)
+        result = get_context(
+            repo="local/graphproject",
+            symbol_id="app.py::Child.child_method#method",
+            include_graph=True,
+            storage_path=str(tmp_path),
+        )
+        assert "siblings" in result
+        assert "parent" in result
+        assert result["parent"] is not None
+        assert "graph" in result
