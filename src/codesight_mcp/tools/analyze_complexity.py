@@ -22,7 +22,7 @@ def _normalize(values: list[float]) -> list[float]:
     return [(v - lo) / span for v in values]
 
 
-def get_hotspots(
+def analyze_complexity(
     repo: str,
     path: Optional[str] = None,
     limit: int = 20,
@@ -161,7 +161,7 @@ def get_hotspots(
 
 
 _spec = register(ToolSpec(
-    name="get_hotspots",
+    name="analyze_complexity",
     description=(
         "Find the most complex and risky symbols in a codebase. "
         "Returns cyclomatic complexity, cognitive complexity, nesting depth, "
@@ -193,7 +193,7 @@ _spec = register(ToolSpec(
         },
         "required": ["repo"],
     },
-    handler=lambda args, storage_path: get_hotspots(
+    handler=lambda args, storage_path: analyze_complexity(
         repo=args["repo"],
         path=args.get("path"),
         limit=args.get("limit", 20),

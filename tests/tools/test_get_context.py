@@ -1,8 +1,8 @@
-"""Tests for the get_context tool."""
+"""Tests for the get_symbol_context tool."""
 
 import pytest
 
-from codesight_mcp.tools.get_context import get_context, _GRAPH_CAP
+from codesight_mcp.tools.get_symbol_context import get_symbol_context, _GRAPH_CAP
 from codesight_mcp.storage import IndexStore
 from codesight_mcp.parser import Symbol
 
@@ -122,9 +122,9 @@ class TestGetContextMethodSiblings:
     """Method targets should get class siblings, not symbols from other files."""
 
     def test_method_returns_sibling_method(self, tmp_path):
-        """get_context on a method should include the other method as a sibling."""
+        """get_symbol_context on a method should include the other method as a sibling."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::Calculator.add#method",
             storage_path=str(tmp_path),
@@ -138,7 +138,7 @@ class TestGetContextMethodSiblings:
     def test_method_excludes_target_from_siblings(self, tmp_path):
         """The target symbol must not appear in its own siblings list."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::Calculator.add#method",
             storage_path=str(tmp_path),
@@ -150,7 +150,7 @@ class TestGetContextMethodSiblings:
     def test_method_excludes_symbols_from_other_files(self, tmp_path):
         """Symbols in other files must never appear as siblings."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::Calculator.add#method",
             storage_path=str(tmp_path),
@@ -162,7 +162,7 @@ class TestGetContextMethodSiblings:
     def test_method_sibling_count_is_correct(self, tmp_path):
         """Two-method class: each method should see exactly one sibling."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::Calculator.add#method",
             storage_path=str(tmp_path),
@@ -174,7 +174,7 @@ class TestGetContextMethodSiblings:
     def test_method_excludes_standalone_function_as_sibling(self, tmp_path):
         """Module-level functions must not appear as siblings of a method."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::Calculator.add#method",
             storage_path=str(tmp_path),
@@ -190,7 +190,7 @@ class TestGetContextParent:
     def test_method_has_class_as_parent(self, tmp_path):
         """A method should report its containing class as parent."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::Calculator.add#method",
             storage_path=str(tmp_path),
@@ -203,7 +203,7 @@ class TestGetContextParent:
     def test_module_level_function_has_no_parent(self, tmp_path):
         """A top-level function should have parent=None."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::standalone#function",
             storage_path=str(tmp_path),
@@ -218,7 +218,7 @@ class TestGetContextModuleLevelSiblings:
     def test_module_level_function_sees_class_as_sibling(self, tmp_path):
         """standalone() should see Calculator class as a sibling (both module-level)."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::standalone#function",
             storage_path=str(tmp_path),
@@ -230,7 +230,7 @@ class TestGetContextModuleLevelSiblings:
     def test_module_level_function_excludes_methods_as_siblings(self, tmp_path):
         """standalone() must not see methods (which have a parent) as siblings."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::standalone#function",
             storage_path=str(tmp_path),
@@ -243,7 +243,7 @@ class TestGetContextModuleLevelSiblings:
     def test_module_level_function_excludes_other_files(self, tmp_path):
         """Module-level siblings from other files must not appear."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::standalone#function",
             storage_path=str(tmp_path),
@@ -259,7 +259,7 @@ class TestGetContextSymbolData:
     def test_symbol_has_source(self, tmp_path):
         """The symbol dict in result should include non-empty source."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::Calculator.add#method",
             storage_path=str(tmp_path),
@@ -271,7 +271,7 @@ class TestGetContextSymbolData:
     def test_symbol_source_is_wrapped(self, tmp_path):
         """Source should be wrapped with untrusted content markers."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::Calculator.add#method",
             storage_path=str(tmp_path),
@@ -282,7 +282,7 @@ class TestGetContextSymbolData:
     def test_symbol_has_required_fields(self, tmp_path):
         """Symbol dict should include id, kind, name, signature, line, end_line, summary."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::Calculator.add#method",
             storage_path=str(tmp_path),
@@ -295,7 +295,7 @@ class TestGetContextSymbolData:
     def test_siblings_have_no_source_field(self, tmp_path):
         """Sibling dicts should include signatures but NOT source code."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::Calculator.add#method",
             storage_path=str(tmp_path),
@@ -307,7 +307,7 @@ class TestGetContextSymbolData:
     def test_siblings_sorted_by_line(self, tmp_path):
         """Siblings should be returned in line-number order."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::Calculator.add#method",
             storage_path=str(tmp_path),
@@ -323,7 +323,7 @@ class TestGetContextMeta:
     def test_meta_has_timing_ms(self, tmp_path):
         """Result _meta should include timing_ms."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::Calculator.add#method",
             storage_path=str(tmp_path),
@@ -335,7 +335,7 @@ class TestGetContextMeta:
     def test_meta_has_sibling_count(self, tmp_path):
         """Result _meta should include sibling_count matching siblings list length."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::Calculator.add#method",
             storage_path=str(tmp_path),
@@ -346,7 +346,7 @@ class TestGetContextMeta:
     def test_meta_content_trust_is_untrusted(self, tmp_path):
         """contentTrust should be 'untrusted' since we return source code."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::Calculator.add#method",
             storage_path=str(tmp_path),
@@ -365,7 +365,7 @@ class TestGetContextErrors:
     def test_unknown_symbol_returns_error(self, tmp_path):
         """A non-existent symbol ID should return an error dict."""
         _make_class_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/myproject",
             symbol_id="calc.py::DoesNotExist#function",
             storage_path=str(tmp_path),
@@ -376,7 +376,7 @@ class TestGetContextErrors:
 
     def test_unknown_repo_returns_error(self, tmp_path):
         """A non-existent repo should return an error dict."""
-        result = get_context(
+        result = get_symbol_context(
             repo="nobody/norepo",
             symbol_id="any::sym#function",
             storage_path=str(tmp_path),
@@ -386,7 +386,7 @@ class TestGetContextErrors:
 
     def test_unindexed_repo_returns_error(self, tmp_path):
         """A valid-looking but unindexed repo should return an error."""
-        result = get_context(
+        result = get_symbol_context(
             repo="owner/missing",
             symbol_id="foo.py::bar#function",
             storage_path=str(tmp_path),
@@ -485,7 +485,7 @@ class TestGetContextGraphDisabledByDefault:
     def test_no_graph_key_by_default(self, tmp_path):
         """Without include_graph, result should not contain a 'graph' key."""
         _make_graph_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/graphproject",
             symbol_id="app.py::helper#function",
             storage_path=str(tmp_path),
@@ -496,7 +496,7 @@ class TestGetContextGraphDisabledByDefault:
     def test_no_graph_key_when_false(self, tmp_path):
         """Explicitly passing include_graph=False should omit graph."""
         _make_graph_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/graphproject",
             symbol_id="app.py::helper#function",
             include_graph=False,
@@ -511,7 +511,7 @@ class TestGetContextGraphCallers:
     def test_helper_has_callers(self, tmp_path):
         """helper() is called by child_method and caller — both should appear."""
         _make_graph_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/graphproject",
             symbol_id="app.py::helper#function",
             include_graph=True,
@@ -527,7 +527,7 @@ class TestGetContextGraphCallers:
     def test_caller_has_no_callers(self, tmp_path):
         """caller() is not called by anything — callers list should be empty."""
         _make_graph_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/graphproject",
             symbol_id="app.py::caller#function",
             include_graph=True,
@@ -542,7 +542,7 @@ class TestGetContextGraphCallees:
     def test_caller_calls_helper(self, tmp_path):
         """caller() calls helper() — should appear in callees."""
         _make_graph_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/graphproject",
             symbol_id="app.py::caller#function",
             include_graph=True,
@@ -555,7 +555,7 @@ class TestGetContextGraphCallees:
     def test_helper_has_no_callees(self, tmp_path):
         """helper() doesn't call anything — callees list should be empty."""
         _make_graph_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/graphproject",
             symbol_id="app.py::helper#function",
             include_graph=True,
@@ -570,7 +570,7 @@ class TestGetContextGraphTypeHierarchy:
     def test_child_class_shows_parent(self, tmp_path):
         """Child class should show Base in type_hierarchy.parents."""
         _make_graph_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/graphproject",
             symbol_id="app.py::Child#class",
             include_graph=True,
@@ -583,7 +583,7 @@ class TestGetContextGraphTypeHierarchy:
     def test_base_class_shows_child(self, tmp_path):
         """Base class should show Child in type_hierarchy.children."""
         _make_graph_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/graphproject",
             symbol_id="app.py::Base#class",
             include_graph=True,
@@ -596,7 +596,7 @@ class TestGetContextGraphTypeHierarchy:
     def test_function_has_no_type_hierarchy(self, tmp_path):
         """Non-class symbols should not have a type_hierarchy key."""
         _make_graph_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/graphproject",
             symbol_id="app.py::helper#function",
             include_graph=True,
@@ -611,7 +611,7 @@ class TestGetContextGraphFields:
     def test_graph_ref_has_required_fields(self, tmp_path):
         """Each graph reference should have id, kind, name, file, line."""
         _make_graph_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/graphproject",
             symbol_id="app.py::helper#function",
             include_graph=True,
@@ -624,7 +624,7 @@ class TestGetContextGraphFields:
     def test_graph_refs_are_wrapped(self, tmp_path):
         """Graph ref names and IDs should be wrapped with boundary markers."""
         _make_graph_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/graphproject",
             symbol_id="app.py::helper#function",
             include_graph=True,
@@ -641,7 +641,7 @@ class TestGetContextGraphWithStructural:
     def test_siblings_still_present_with_graph(self, tmp_path):
         """Enabling graph should not affect siblings/parent."""
         _make_graph_repo(tmp_path)
-        result = get_context(
+        result = get_symbol_context(
             repo="local/graphproject",
             symbol_id="app.py::Child.child_method#method",
             include_graph=True,
@@ -689,7 +689,7 @@ class TestGetContextGraphCap:
             languages={"python": 1},
         )
 
-        result = get_context(
+        result = get_symbol_context(
             repo="local/captest",
             symbol_id="app.py::target#function",
             include_graph=True,

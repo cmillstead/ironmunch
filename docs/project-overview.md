@@ -51,7 +51,7 @@ server.py (286 lines)
   │   ├── Navigation:  get_repo_outline, get_file_tree, get_file_outline, get_symbol, get_symbols
   │   ├── Search:      search_symbols, search_text
   │   ├── Code Graph:  get_callers, get_callees, get_call_chain, get_type_hierarchy, get_imports, get_impact, get_dead_code
-  │   └── Analysis:    get_hotspots, get_key_symbols, get_diagram, status
+  │   └── Analysis:    analyze_complexity, get_key_symbols, get_diagram, get_status
   │
   ├── parser/          (AST parsing, symbol extraction, code graph)
   │   ├── languages.py    — LanguageSpec registry for 15 languages

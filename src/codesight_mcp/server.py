@@ -33,9 +33,9 @@ from .tools import (  # noqa: F401
     invalidate_cache, search_text, get_repo_outline,
     get_callers, get_callees, get_call_chain,
     get_type_hierarchy, get_imports, get_impact,
-    get_dead_code, status,
-    get_hotspots, get_key_symbols, get_diagram,
-    get_context, search_references, get_dependencies,
+    get_dead_code, get_status,
+    analyze_complexity, get_key_symbols, get_diagram,
+    get_symbol_context, search_references, get_dependencies,
     compare_symbols, get_changes,
 )
 

@@ -44,7 +44,7 @@ codesight-mcp/
 │       ├── index_folder.py     # Index local folder (with ALLOWED_ROOTS security)
 │       ├── invalidate_cache.py # Delete index + cached data (requires confirm=True)
 │       ├── list_repos.py       # List all indexed repositories
-│       ├── status.py           # Health check snapshot
+│       ├── get_status.py       # Health check snapshot
 │       ├── get_repo_outline.py # High-level repo overview (dirs, languages, symbol counts)
 │       ├── get_file_tree.py    # Directory tree with optional path prefix filter
 │       ├── get_file_outline.py # All symbols in a file with signatures
@@ -57,7 +57,7 @@ codesight-mcp/
 │       ├── get_type_hierarchy.py # Class inheritance tree (parents + children)
 │       ├── get_imports.py      # File-level import relationships
 │       ├── get_impact.py       # Transitive impact analysis (callers + inheritors + importers)
-│       ├── get_hotspots.py     # Complexity/risk ranking (cyclomatic, cognitive, fan-in/out)
+│       ├── analyze_complexity.py # Complexity/risk ranking (cyclomatic, cognitive, fan-in/out)
 │       ├── get_key_symbols.py  # PageRank-based structural importance ranking
 │       ├── get_diagram.py      # Mermaid diagram generation (call_graph, hierarchy, imports, impact)
 │       └── get_dead_code.py    # Unused symbol detection (zero callers)

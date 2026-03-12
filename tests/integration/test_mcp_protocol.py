@@ -32,11 +32,11 @@ EXPECTED_TOOLS = sorted([
     "get_imports",
     "get_impact",
     "get_dead_code",
-    "status",
-    "get_hotspots",
+    "get_status",
+    "analyze_complexity",
     "get_key_symbols",
     "get_diagram",
-    "get_context",
+    "get_symbol_context",
     "search_references",
     "get_dependencies",
     "compare_symbols",
@@ -164,7 +164,7 @@ class TestStatusToolDispatch:
         monkeypatch.setattr(
             "codesight_mcp.server._CODE_INDEX_PATH", str(tmp_path)
         )
-        result = await call_tool("status", {})
+        result = await call_tool("get_status", {})
         assert len(result) == 1
         payload = json.loads(result[0].text)
         assert "error" not in payload, f"Unexpected error: {payload}"
@@ -180,7 +180,7 @@ class TestStatusToolDispatch:
         monkeypatch.setattr(
             "codesight_mcp.server._CODE_INDEX_PATH", str(tmp_path)
         )
-        result = await call_tool("status", {})
+        result = await call_tool("get_status", {})
         payload = json.loads(result[0].text)
         assert payload["repo_count"] == 0
         assert payload["total_symbols"] == 0

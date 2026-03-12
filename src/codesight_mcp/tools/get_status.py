@@ -10,7 +10,7 @@ from ._common import timed, elapsed_ms
 from .registry import ToolSpec, register
 
 
-def status(storage_path: Optional[str] = None) -> dict:
+def get_status(storage_path: Optional[str] = None) -> dict:
     """Return a quick health-check snapshot.
 
     Returns:
@@ -45,12 +45,12 @@ def status(storage_path: Optional[str] = None) -> dict:
 
 
 _spec = register(ToolSpec(
-    name="status",
+    name="get_status",
     description="Quick health check: storage path, repo count, total symbols, and index version.",
     input_schema={
         "type": "object",
         "properties": {},
     },
-    handler=lambda args, storage_path: status(storage_path=storage_path),
+    handler=lambda args, storage_path: get_status(storage_path=storage_path),
     required_args=[],
 ))

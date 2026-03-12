@@ -71,7 +71,7 @@ MCP request → _sanitize_arguments() → rate_limit check → tool function →
 | **Navigation** | `get_repo_outline`, `get_file_tree`, `get_file_outline`, `get_symbol`, `get_symbols` | Browse repository structure and retrieve symbols |
 | **Search** | `search_symbols`, `search_text` | Find symbols by name/signature or full-text content search |
 | **Code Graph** | `get_callers`, `get_callees`, `get_call_chain`, `get_type_hierarchy`, `get_imports`, `get_impact`, `get_dead_code` | Navigate call relationships, inheritance, imports, and change impact |
-| **Analysis** | `get_hotspots`, `get_key_symbols`, `get_diagram`, `status` | Complexity metrics, PageRank importance, Mermaid visualization |
+| **Analysis** | `analyze_complexity`, `get_key_symbols`, `get_diagram`, `get_status` | Complexity metrics, PageRank importance, Mermaid visualization |
 
 **Tool registration pattern:**
 ```python

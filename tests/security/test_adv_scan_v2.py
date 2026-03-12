@@ -578,8 +578,8 @@ class TestStatusNoApiKeyLeak:
     """ADV-LOW-7: status tool must not expose has_api_key."""
 
     def test_has_api_key_absent(self, tmp_path):
-        from codesight_mcp.tools.status import status
-        result = status(storage_path=str(tmp_path))
+        from codesight_mcp.tools.get_status import get_status
+        result = get_status(storage_path=str(tmp_path))
         assert "has_api_key" not in result
 
 
