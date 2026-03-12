@@ -2,10 +2,12 @@
 
 import re
 import subprocess
+from collections import defaultdict
+from pathlib import Path
 from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
-from ..core.validation import ValidationError
+from ..core.validation import ValidationError, is_within
 from ..parser.graph import CodeGraph
 from ._common import RepoContext, elapsed_ms, timed
 from .registry import ToolSpec, register
@@ -114,15 +116,20 @@ def _map_hunks_to_symbols(hunks: list[dict], index) -> list[dict]:
         Deduplicated list of symbol dicts (keys: id, name, kind, file,
         line, signature).
     """
+    # Pre-index symbols by file for O(H * S_file) instead of O(H * S_total)
+    file_symbols: dict[str, list[dict]] = defaultdict(list)
+    for sym in index.symbols:
+        f = sym.get("file", "")
+        if f:
+            file_symbols[f].append(sym)
+
     seen: set[str] = set()
     affected: list[dict] = []
 
     for hunk in hunks:
         file_path = hunk["file"]
         for (h_start, h_end) in hunk["lines"]:
-            for sym in index.symbols:
-                if sym.get("file") != file_path:
-                    continue
+            for sym in file_symbols.get(file_path, []):
                 sym_line = sym.get("line", 0)
                 sym_end = sym.get("end_line", sym_line)
                 # Overlap check: hunk_start <= sym_end and hunk_end >= sym_start
@@ -139,6 +146,7 @@ def _map_hunks_to_symbols(hunks: list[dict], index) -> list[dict]:
                             "signature": wrap_untrusted_content(
                                 sym.get("signature", "")
                             ),
+                            "_raw_id": sid,  # Preserved for impact lookup
                         })
 
     return affected
@@ -150,6 +158,7 @@ def get_changes(
     repo_path: Optional[str] = None,
     include_impact: bool = False,
     storage_path: Optional[str] = None,
+    allowed_roots: Optional[list[str]] = None,
 ) -> dict:
     """Map a git diff to affected symbols in the codesight index.
 
@@ -186,14 +195,23 @@ def get_changes(
 
     owner, name, index = ctx.owner, ctx.name, ctx.index
 
-    # 3. Run git diff
+    # 3. Validate repo_path against ALLOWED_ROOTS
     if not repo_path:
         return {"error": "repo_path is required to run git diff"}
+
+    resolved_path = Path(repo_path).expanduser().resolve()
+    if allowed_roots:
+        allowed = [Path(r).expanduser().resolve() for r in allowed_roots if r.strip()]
+        if not any(is_within(a, resolved_path) or resolved_path == a for a in allowed):
+            return {"error": "repo_path is outside allowed roots"}
+
+    if not resolved_path.is_dir():
+        return {"error": "repo_path is not a directory"}
 
     try:
         proc = subprocess.run(
             ["git", "diff", "--unified=0", git_ref],
-            cwd=repo_path,
+            cwd=str(resolved_path),
             capture_output=True,
             text=True,
             timeout=30,
@@ -223,13 +241,11 @@ def get_changes(
         graph = CodeGraph.get_or_build(index.symbols)
         downstream_ids: set[str] = set()
         for sym_entry in affected:
-            # Extract raw ID from the wrapped string
-            raw_id = re.sub(r"<<<(?:END_)?UNTRUSTED_CODE_[0-9a-f]+>>>\n?", "", sym_entry["id"]).strip()
-            downstream_ids.update(graph.get_impact(raw_id, max_depth=3))
+            downstream_ids.update(graph.get_impact(sym_entry["_raw_id"], max_depth=3))
 
         downstream_syms = []
         for sid in downstream_ids:
-            sym = graph._symbols_by_id.get(sid, {})
+            sym = graph.get_symbol(sid)
             if sym:
                 downstream_syms.append({
                     "id": wrap_untrusted_content(sid),
@@ -244,6 +260,10 @@ def get_changes(
             "downstream_count": len(downstream_syms),
             "downstream": downstream_syms,
         }
+
+    # Strip internal _raw_id before returning
+    for sym_entry in affected:
+        sym_entry.pop("_raw_id", None)
 
     ms = elapsed_ms(start)
 
@@ -261,9 +281,33 @@ def get_changes(
     }
 
     if include_impact:
-        result["impact"] = impact_result
+        result["impact"] = impact_result or {"downstream_count": 0, "downstream": []}
 
     return result
+
+
+def _handle_get_changes(args: dict, storage_path, *, _allowed_roots_fn=None):
+    """Handler that resolves ALLOWED_ROOTS at call time."""
+    if _handle_get_changes._allowed_roots_fn is not None:
+        allowed = _handle_get_changes._allowed_roots_fn()
+    else:
+        allowed = None
+    return get_changes(
+        repo=args["repo"],
+        git_ref=args.get("git_ref", "HEAD~1..HEAD"),
+        repo_path=args.get("repo_path"),
+        include_impact=args.get("include_impact", False),
+        storage_path=storage_path,
+        allowed_roots=allowed,
+    )
+
+
+_handle_get_changes._allowed_roots_fn = None
+
+
+def set_allowed_roots_fn(fn):
+    """Set the function that returns ALLOWED_ROOTS. Called by server.py."""
+    _handle_get_changes._allowed_roots_fn = fn
 
 
 _spec = register(ToolSpec(
@@ -305,13 +349,7 @@ _spec = register(ToolSpec(
         },
         "required": ["repo"],
     },
-    handler=lambda args, storage_path: get_changes(
-        repo=args["repo"],
-        git_ref=args.get("git_ref", "HEAD~1..HEAD"),
-        repo_path=args.get("repo_path"),
-        include_impact=args.get("include_impact", False),
-        storage_path=storage_path,
-    ),
+    handler=lambda args, storage_path: _handle_get_changes(args, storage_path),
     untrusted=True,
     required_args=["repo"],
 ))

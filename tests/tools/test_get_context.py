@@ -651,3 +651,49 @@ class TestGetContextGraphWithStructural:
         assert "parent" in result
         assert result["parent"] is not None
         assert "graph" in result
+
+
+class TestGetContextGraphCap:
+    """Graph results should be capped at _GRAPH_CAP."""
+
+    def test_callers_capped_at_graph_cap(self, tmp_path):
+        """When a symbol has more callers than _GRAPH_CAP, results are truncated."""
+        # Create a target function and >_GRAPH_CAP callers
+        target = Symbol(
+            id="app.py::target#function", file="app.py", name="target",
+            qualified_name="target", kind="function", language="python",
+            signature="def target():", summary="Target",
+            line=1, end_line=2, byte_offset=0, byte_length=20,
+        )
+        callers = []
+        src_lines = "def target():\n    pass\n"
+        for i in range(_GRAPH_CAP + 5):
+            line_start = 3 + i * 2
+            callers.append(Symbol(
+                id=f"app.py::caller{i}#function", file="app.py",
+                name=f"caller{i}", qualified_name=f"caller{i}",
+                kind="function", language="python",
+                signature=f"def caller{i}():", summary=f"Caller {i}",
+                calls=["app.py::target#function"],
+                line=line_start, end_line=line_start + 1,
+                byte_offset=0, byte_length=20,
+            ))
+            src_lines += f"def caller{i}():\n    target()\n"
+
+        store = IndexStore(base_path=str(tmp_path))
+        store.save_index(
+            owner="local", name="captest",
+            source_files=["app.py"],
+            symbols=[target] + callers,
+            raw_files={"app.py": src_lines},
+            languages={"python": 1},
+        )
+
+        result = get_context(
+            repo="local/captest",
+            symbol_id="app.py::target#function",
+            include_graph=True,
+            storage_path=str(tmp_path),
+        )
+        assert "graph" in result
+        assert len(result["graph"]["callers"]) <= _GRAPH_CAP

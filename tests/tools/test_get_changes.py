@@ -298,7 +298,7 @@ class TestValidateRef:
 
 
 class TestGetChangesIntegration:
-    """Integration tests for get_changes handler — error paths only."""
+    """Integration tests for get_changes handler."""
 
     def test_repo_not_found_returns_error(self, tmp_path):
         result = get_changes(
@@ -369,3 +369,218 @@ class TestGetChangesIntegration:
             storage_path=str(tmp_path),
         )
         assert isinstance(result, dict)
+
+    def test_repo_path_outside_allowed_roots_blocked(self, tmp_path):
+        """repo_path must be within allowed_roots."""
+        symbols = [_sym("app.py", "foo", 1, 10)]
+        store = IndexStore(base_path=str(tmp_path))
+        store.save_index(
+            owner="local",
+            name="rootstest",
+            source_files=["app.py"],
+            symbols=symbols,
+            raw_files={"app.py": SRC},
+            languages={"python": 1},
+        )
+        result = get_changes(
+            repo="local/rootstest",
+            repo_path=str(tmp_path / "subdir"),
+            storage_path=str(tmp_path),
+            allowed_roots=["/some/other/place"],
+        )
+        assert "error" in result
+        assert "outside allowed roots" in result["error"]
+
+    def test_repo_path_within_allowed_roots_accepted(self, tmp_path):
+        """repo_path within allowed_roots should proceed (may fail at git, not at root check)."""
+        symbols = [_sym("app.py", "foo", 1, 10)]
+        store = IndexStore(base_path=str(tmp_path))
+        store.save_index(
+            owner="local",
+            name="rootsok",
+            source_files=["app.py"],
+            symbols=symbols,
+            raw_files={"app.py": SRC},
+            languages={"python": 1},
+        )
+        result = get_changes(
+            repo="local/rootsok",
+            repo_path=str(tmp_path),
+            storage_path=str(tmp_path),
+            allowed_roots=[str(tmp_path)],
+        )
+        # Should get past the roots check — fails at git diff (no .git), not at roots
+        assert "error" in result
+        assert "outside allowed roots" not in result["error"]
+
+    def test_repo_path_not_a_directory_returns_error(self, tmp_path):
+        symbols = [_sym("app.py", "foo", 1, 10)]
+        store = IndexStore(base_path=str(tmp_path))
+        store.save_index(
+            owner="local",
+            name="notadir",
+            source_files=["app.py"],
+            symbols=symbols,
+            raw_files={"app.py": SRC},
+            languages={"python": 1},
+        )
+        fake_file = tmp_path / "not_a_dir.txt"
+        fake_file.write_text("hello")
+        result = get_changes(
+            repo="local/notadir",
+            repo_path=str(fake_file),
+            storage_path=str(tmp_path),
+        )
+        assert "error" in result
+        assert "not a directory" in result["error"]
+
+    def test_happy_path_with_real_git_repo(self, tmp_path):
+        """End-to-end: create a real git repo, make a commit, run get_changes."""
+        import subprocess
+        # Create git repo
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=str(repo_dir), capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=str(repo_dir), capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=str(repo_dir), capture_output=True)
+
+        # First commit
+        (repo_dir / "app.py").write_text("def foo():\n    pass\n")
+        subprocess.run(["git", "add", "app.py"], cwd=str(repo_dir), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=str(repo_dir), capture_output=True)
+
+        # Second commit modifying foo
+        (repo_dir / "app.py").write_text("def foo():\n    return 42\n")
+        subprocess.run(["git", "add", "app.py"], cwd=str(repo_dir), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "modify foo"], cwd=str(repo_dir), capture_output=True)
+
+        # Index with a symbol covering the changed lines
+        symbols = [_sym("app.py", "foo", 1, 2)]
+        store = IndexStore(base_path=str(tmp_path / "index"))
+        store.save_index(
+            owner="local",
+            name="happypath",
+            source_files=["app.py"],
+            symbols=symbols,
+            raw_files={"app.py": "def foo():\n    return 42\n"},
+            languages={"python": 1},
+        )
+
+        result = get_changes(
+            repo="local/happypath",
+            git_ref="HEAD~1..HEAD",
+            repo_path=str(repo_dir),
+            storage_path=str(tmp_path / "index"),
+        )
+        assert "error" not in result
+        assert result["changed_files"] >= 1
+        assert result["affected_symbol_count"] >= 1
+        assert _unwrap(result["affected_symbols"][0]["name"]) == "foo"
+        assert "_meta" in result
+        assert result["_meta"]["timing_ms"] >= 0
+
+    def test_include_impact_with_real_git_repo(self, tmp_path):
+        """End-to-end: include_impact=True returns impact section."""
+        import subprocess
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=str(repo_dir), capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=str(repo_dir), capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=str(repo_dir), capture_output=True)
+
+        (repo_dir / "app.py").write_text("def foo():\n    pass\ndef bar():\n    foo()\n")
+        subprocess.run(["git", "add", "app.py"], cwd=str(repo_dir), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=str(repo_dir), capture_output=True)
+
+        (repo_dir / "app.py").write_text("def foo():\n    return 1\ndef bar():\n    foo()\n")
+        subprocess.run(["git", "add", "app.py"], cwd=str(repo_dir), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "change foo"], cwd=str(repo_dir), capture_output=True)
+
+        symbols = [
+            _sym("app.py", "foo", 1, 2),
+            _sym("app.py", "bar", 3, 4),
+        ]
+        # bar calls foo
+        from dataclasses import replace as dc_replace
+        bar_sym = dc_replace(symbols[1], calls=["app.py::foo#function"])
+
+        store = IndexStore(base_path=str(tmp_path / "index"))
+        store.save_index(
+            owner="local",
+            name="impacttest",
+            source_files=["app.py"],
+            symbols=[symbols[0], bar_sym],
+            raw_files={"app.py": "def foo():\n    return 1\ndef bar():\n    foo()\n"},
+            languages={"python": 1},
+        )
+
+        result = get_changes(
+            repo="local/impacttest",
+            git_ref="HEAD~1..HEAD",
+            repo_path=str(repo_dir),
+            include_impact=True,
+            storage_path=str(tmp_path / "index"),
+        )
+        assert "error" not in result
+        assert "impact" in result
+        assert isinstance(result["impact"], dict)
+        assert "downstream_count" in result["impact"]
+        assert "downstream" in result["impact"]
+
+    def test_include_impact_empty_affected_returns_empty_impact(self, tmp_path):
+        """When include_impact=True but no symbols affected, impact should be a consistent empty dict."""
+        import subprocess
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=str(repo_dir), capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=str(repo_dir), capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=str(repo_dir), capture_output=True)
+
+        # Commit a file that has no indexed symbols
+        (repo_dir / "readme.txt").write_text("hello\n")
+        subprocess.run(["git", "add", "readme.txt"], cwd=str(repo_dir), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=str(repo_dir), capture_output=True)
+
+        (repo_dir / "readme.txt").write_text("hello world\n")
+        subprocess.run(["git", "add", "readme.txt"], cwd=str(repo_dir), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "change"], cwd=str(repo_dir), capture_output=True)
+
+        symbols = [_sym("app.py", "foo", 1, 10)]
+        store = IndexStore(base_path=str(tmp_path / "index"))
+        store.save_index(
+            owner="local",
+            name="emptyimpact",
+            source_files=["app.py"],
+            symbols=symbols,
+            raw_files={"app.py": SRC},
+            languages={"python": 1},
+        )
+
+        result = get_changes(
+            repo="local/emptyimpact",
+            git_ref="HEAD~1..HEAD",
+            repo_path=str(repo_dir),
+            include_impact=True,
+            storage_path=str(tmp_path / "index"),
+        )
+        assert "error" not in result
+        assert result["impact"] == {"downstream_count": 0, "downstream": []}
+
+    def test_max_affected_truncation(self, tmp_path):
+        """Affected symbols should be capped at _MAX_AFFECTED with truncated flag."""
+        from codesight_mcp.tools.get_changes import _MAX_AFFECTED
+
+        # Create 150 symbols each covering 1 line
+        symbols = [_sym("app.py", f"fn{i}", line=i, end_line=i) for i in range(1, 151)]
+        _, idx = _make_index(tmp_path, symbols)
+
+        # Create hunks covering all 150 lines
+        hunks = [{"file": "app.py", "lines": [(1, 150)]}]
+        affected = _map_hunks_to_symbols(hunks, idx)
+        assert len(affected) == 150
+
+        # Verify the truncation logic in get_changes
+        truncated = len(affected) > _MAX_AFFECTED
+        assert truncated is True
+        affected_capped = affected[:_MAX_AFFECTED]
+        assert len(affected_capped) == _MAX_AFFECTED

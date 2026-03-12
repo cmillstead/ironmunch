@@ -67,6 +67,9 @@ for _r in _raw_roots:
 from .tools.index_folder import set_allowed_roots_fn  # noqa: E402
 set_allowed_roots_fn(lambda: ALLOWED_ROOTS if ALLOWED_ROOTS else None)
 
+from .tools.get_changes import set_allowed_roots_fn as set_changes_allowed_roots_fn  # noqa: E402
+set_changes_allowed_roots_fn(lambda: ALLOWED_ROOTS if ALLOWED_ROOTS else None)
+
 # Integer parameter bounds used by _sanitize_arguments.
 # Maps parameter name -> (min_value, max_value).
 _INT_PARAM_BOUNDS: dict[str, tuple[int, int]] = {
@@ -147,6 +150,7 @@ def _sanitize_arguments(name: str, arguments: dict) -> dict | str:
     # Coerce boolean flags
     _BOOLEAN_FLAGS = (
         "follow_symlinks", "use_ai_summaries", "verify", "confirm",
+        "include_graph", "include_impact",
     )
     for flag in _BOOLEAN_FLAGS:
         if flag in arguments:

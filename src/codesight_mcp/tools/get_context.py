@@ -168,7 +168,7 @@ def get_context(
     # Build graph section if requested
     graph_section = None
     if include_graph:
-        graph = CodeGraph.build(index.symbols)
+        graph = CodeGraph.get_or_build(index.symbols)
         graph_section = _build_graph_section(graph, symbol_id, symbol)
 
     ms = elapsed_ms(start)

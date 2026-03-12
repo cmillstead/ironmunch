@@ -93,6 +93,8 @@ def search_references(
     """
     start = timed()
 
+    max_results = min(max(max_results, 1), MAX_SEARCH_RESULTS)
+
     if not isinstance(query, str) or not query.strip():
         return {"error": "query must be a non-empty string"}
 
