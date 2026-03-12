@@ -91,7 +91,7 @@ def _build_graph_section(
     return result
 
 
-def get_context(
+def get_symbol_context(
     repo: str,
     symbol_id: str,
     include_graph: bool = False,
@@ -200,7 +200,7 @@ def get_context(
 
 
 _spec = register(ToolSpec(
-    name="get_context",
+    name="get_symbol_context",
     description=(
         "Get a symbol plus its structural neighborhood: the target symbol "
         "(with source), its siblings in the same scope, and its parent "
@@ -228,7 +228,7 @@ _spec = register(ToolSpec(
         },
         "required": ["repo", "symbol_id"],
     },
-    handler=lambda args, storage_path: get_context(
+    handler=lambda args, storage_path: get_symbol_context(
         repo=args["repo"],
         symbol_id=args["symbol_id"],
         include_graph=args.get("include_graph", False),

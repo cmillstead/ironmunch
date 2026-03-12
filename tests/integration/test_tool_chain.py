@@ -15,7 +15,7 @@ from codesight_mcp.tools.get_repo_outline import get_repo_outline
 from codesight_mcp.tools.get_callers import get_callers
 from codesight_mcp.tools.get_callees import get_callees
 from codesight_mcp.tools.get_key_symbols import get_key_symbols
-from codesight_mcp.tools.get_hotspots import get_hotspots
+from codesight_mcp.tools.analyze_complexity import analyze_complexity
 from codesight_mcp.tools.get_dead_code import get_dead_code
 from codesight_mcp.tools.search_text import search_text
 
@@ -259,8 +259,8 @@ class TestIndexToKeySymbols:
 class TestIndexToHotspots:
 
     def test_hotspots_returns_complexity_data(self, multi_file_index):
-        """get_hotspots returns symbols with complexity metrics."""
-        result = get_hotspots(
+        """analyze_complexity returns symbols with complexity metrics."""
+        result = analyze_complexity(
             repo="test/multi",
             storage_path=multi_file_index,
         )

@@ -248,11 +248,11 @@ class TestAtomicWriteTempPath:
 
 
 # ---------------------------------------------------------------------------
-# ADV-LOW-3: Validate sort_by in get_hotspots
+# ADV-LOW-3: Validate sort_by in analyze_complexity
 # ---------------------------------------------------------------------------
 class TestHotspotsSortByValidation:
     def test_invalid_sort_by_returns_error(self, tmp_path):
-        from codesight_mcp.tools.get_hotspots import get_hotspots
+        from codesight_mcp.tools.analyze_complexity import analyze_complexity
         from codesight_mcp.storage import IndexStore
 
         store = IndexStore(base_path=str(tmp_path))
@@ -261,7 +261,7 @@ class TestHotspotsSortByValidation:
             symbols=[_make_symbol()], languages={"python": 1},
             raw_files={"a.py": "def foo(): pass"},
         )
-        result = get_hotspots("test/repo", sort_by="invalid", storage_path=str(tmp_path))
+        result = analyze_complexity("test/repo", sort_by="invalid", storage_path=str(tmp_path))
         assert "error" in result
 
 

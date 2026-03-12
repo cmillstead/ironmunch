@@ -16,7 +16,7 @@ This repo is indexed in codesight-mcp. **Always use codesight-mcp tools instead 
 - `get_file_outline` — all symbols in a file with signatures
 - `get_symbol` — full source of a specific symbol by ID
 - `get_symbols` — batch retrieve multiple symbols by ID
-- `get_context` — symbol + siblings + parent in one call; pass `include_graph=true` for callers/callees/hierarchy too
+- `get_symbol_context` — symbol + siblings + parent in one call; pass `include_graph=true` for callers/callees/hierarchy too
 
 ### Search
 - `search_symbols` — find functions, classes, methods by name, signature, or summary

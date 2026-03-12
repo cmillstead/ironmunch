@@ -147,7 +147,7 @@ Allow codesight-mcp tools to avoid a permission prompt on every call. Add to `~/
     "mcp__codesight-mcp__search_references",
     "mcp__codesight-mcp__get_symbol",
     "mcp__codesight-mcp__get_symbols",
-    "mcp__codesight-mcp__get_context",
+    "mcp__codesight-mcp__get_symbol_context",
     "mcp__codesight-mcp__get_file_outline",
     "mcp__codesight-mcp__get_file_tree",
     "mcp__codesight-mcp__get_repo_outline",
@@ -160,14 +160,14 @@ Allow codesight-mcp tools to avoid a permission prompt on every call. Add to `~/
     "mcp__codesight-mcp__get_type_hierarchy",
     "mcp__codesight-mcp__get_imports",
     "mcp__codesight-mcp__get_impact",
-    "mcp__codesight-mcp__get_hotspots",
+    "mcp__codesight-mcp__analyze_complexity",
     "mcp__codesight-mcp__get_key_symbols",
     "mcp__codesight-mcp__get_diagram",
     "mcp__codesight-mcp__get_dead_code",
     "mcp__codesight-mcp__get_dependencies",
     "mcp__codesight-mcp__compare_symbols",
     "mcp__codesight-mcp__get_changes",
-    "mcp__codesight-mcp__status"
+    "mcp__codesight-mcp__get_status"
   ]
 }
 ```
@@ -217,7 +217,7 @@ codesight-mcp exposes **27 MCP tools** organized into six categories:
 | `get_file_outline` | All symbols in a file with signatures and summaries |
 | `get_symbol` | Full source code of a specific symbol (byte-offset retrieval) |
 | `get_symbols` | Batch retrieval of multiple symbols in one call |
-| `get_context` | Symbol + sibling symbols + parent class info in one call |
+| `get_symbol_context` | Symbol + sibling symbols + parent class info in one call |
 
 ### Search
 
@@ -242,11 +242,11 @@ codesight-mcp exposes **27 MCP tools** organized into six categories:
 
 | Tool | Description |
 | :--- | :--- |
-| `get_hotspots` | Find the most complex/risky symbols — cyclomatic complexity, cognitive complexity, nesting depth, fan-in/fan-out, composite risk score. Supports path filtering and sort modes. |
+| `analyze_complexity` | Find the most complex/risky symbols — cyclomatic complexity, cognitive complexity, nesting depth, fan-in/fan-out, composite risk score. Supports path filtering and sort modes. |
 | `get_key_symbols` | Rank symbols by structural importance using PageRank on the call graph. Identifies the most connected and depended-upon symbols. |
 | `get_diagram` | Generate Mermaid diagrams — call graphs, type hierarchies, import trees, and impact diagrams from the code graph. |
 | `get_dead_code` | Find unreferenced symbols — functions and classes with zero callers or importers. |
-| `status` | Server status — storage configuration, index stats, and feature flags. |
+| `get_status` | Server status — storage configuration, index stats, and feature flags. |
 
 ### Dependencies & Diffing
 

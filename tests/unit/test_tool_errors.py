@@ -18,7 +18,7 @@ from codesight_mcp.tools.get_callees import get_callees
 from codesight_mcp.tools.get_imports import get_imports
 from codesight_mcp.tools.get_impact import get_impact
 from codesight_mcp.tools.get_type_hierarchy import get_type_hierarchy
-from codesight_mcp.tools.get_hotspots import get_hotspots
+from codesight_mcp.tools.analyze_complexity import analyze_complexity
 from codesight_mcp.tools.get_dead_code import get_dead_code
 
 
@@ -183,14 +183,14 @@ class TestGetTypeHierarchyErrors:
 
 
 # ---------------------------------------------------------------------------
-# get_hotspots errors
+# analyze_complexity errors
 # ---------------------------------------------------------------------------
 
 
 class TestGetHotspotsErrors:
 
     def test_repo_not_found(self, tmp_path):
-        result = get_hotspots(repo="ghost/repo", storage_path=str(tmp_path))
+        result = analyze_complexity(repo="ghost/repo", storage_path=str(tmp_path))
         _assert_error(result)
 
 
