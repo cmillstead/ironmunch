@@ -415,6 +415,16 @@ def _run_cli_tool(tool_name: str, argv: list[str]) -> None:
         print(json.dumps({"error": sanitize_error(e)}))
         sys.exit(1)
 
+    # Signal status line that codesight is active (same file the MCP hooks use)
+    import time as _time
+    _active_file = "/tmp/codesight-active"
+    try:
+        with open(_active_file, "w") as _f:
+            _f.write(str(_time.time()))
+    except OSError:
+        pass
+    print(f"[codesight] {tool_name.replace('_', '-')}", file=sys.stderr)
+
     try:
         result = spec.handler(arguments, storage_path)
         if asyncio.iscoroutine(result):
@@ -424,6 +434,12 @@ def _run_cli_tool(tool_name: str, argv: list[str]) -> None:
     except Exception as e:
         print(json.dumps({"error": sanitize_error(e)}))
         sys.exit(1)
+    finally:
+        # Clear active signal
+        try:
+            os.remove(_active_file)
+        except OSError:
+            pass
 
 
 def main():
