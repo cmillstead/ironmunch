@@ -1,1 +1,0 @@
-Load and execute the BMAD editorial-review-structure task from `_bmad/core/tasks/editorial-review-structure.xml`. Follow its instructions exactly.

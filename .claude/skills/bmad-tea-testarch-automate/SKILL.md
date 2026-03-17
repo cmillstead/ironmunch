@@ -1,1 +1,0 @@
-Load and execute the BMAD TEA testarch-automate workflow from `_bmad/tea/workflows/testarch/automate/workflow.yaml`. Follow its instructions exactly.

@@ -1,1 +1,0 @@
-Load and execute the BMAD editorial-review-prose task from `_bmad/core/tasks/editorial-review-prose.xml`. Follow its instructions exactly.

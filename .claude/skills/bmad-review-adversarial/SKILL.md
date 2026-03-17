@@ -1,1 +1,0 @@
-Load and execute the BMAD adversarial review task from `_bmad/core/tasks/review-adversarial-general.xml`. Follow its instructions exactly.

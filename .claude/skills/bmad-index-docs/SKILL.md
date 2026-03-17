@@ -1,1 +1,0 @@
-Load and execute the BMAD index-docs task from `_bmad/core/tasks/index-docs.xml`. Follow its instructions exactly.

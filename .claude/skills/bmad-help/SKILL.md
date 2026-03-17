@@ -1,1 +1,0 @@
-Load and execute the BMAD help task from `_bmad/core/tasks/help.md`. Follow its instructions exactly.

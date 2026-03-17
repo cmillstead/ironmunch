@@ -1,1 +1,0 @@
-Load and execute the BMAD TEA testarch-nfr workflow from `_bmad/tea/workflows/testarch/nfr-assess/workflow.yaml`. Follow its instructions exactly.
