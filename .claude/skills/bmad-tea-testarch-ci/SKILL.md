@@ -1,1 +1,0 @@
-Load and execute the BMAD TEA testarch-ci workflow from `_bmad/tea/workflows/testarch/ci/workflow.yaml`. Follow its instructions exactly.

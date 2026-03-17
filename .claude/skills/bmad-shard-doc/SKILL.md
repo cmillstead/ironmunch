@@ -1,1 +1,0 @@
-Load and execute the BMAD shard-doc task from `_bmad/core/tasks/shard-doc.xml`. Follow its instructions exactly.

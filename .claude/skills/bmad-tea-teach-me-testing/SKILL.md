@@ -1,1 +1,0 @@
-Load and execute the BMAD TEA teach-me-testing workflow from `_bmad/tea/workflows/testarch/teach-me-testing/workflow.md`. Follow its instructions exactly.

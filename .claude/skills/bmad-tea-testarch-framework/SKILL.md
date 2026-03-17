@@ -1,1 +1,0 @@
-Load and execute the BMAD TEA testarch-framework workflow from `_bmad/tea/workflows/testarch/framework/workflow.yaml`. Follow its instructions exactly.
