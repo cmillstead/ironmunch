@@ -53,3 +53,35 @@ uv lock                           # Regenerate lockfile after dependency changes
 - **After pushing**: `gh run list --limit 1`, `gh run view <id>`, fix CI failures immediately
 - **Common CI failures**: stale `uv.lock` after dependency changes
 - **Don't claim done until**: local tests pass, CI green, diff is intentional only
+
+
+## Boundaries
+
+### Always Do
+- Run tests and linting before committing — NEVER commit without verification
+- Follow the architectural layer structure defined above
+- Use real implementations in tests — NEVER use mocks, patches, or stubs
+- Use existing utilities before creating new ones — search before writing
+- Write tests alongside new code — NEVER ship untested business logic
+- Read the spec/plan before implementing — understand "done" before starting
+
+### Ask First
+- Adding a new external dependency
+- Modifying database schema or migrations
+- Changing public API contracts or interfaces
+- Deleting or moving files in shared directories
+- Any change affecting more than 3 modules
+
+### Never Do
+- NEVER commit secrets, tokens, API keys, or credentials
+- NEVER modify deployed migration files
+- NEVER skip or disable tests to make CI pass
+- NEVER force push to main or release branches
+- NEVER commit .env files or sensitive configuration
+- NEVER introduce a new framework or library without explicit approval
+- NEVER claim work is done without running verification
+- NEVER retry the same failed approach more than 3 times — escalate instead
+- NEVER expand task scope without asking — park new ideas separately
+
+## Golden Principles
+Read docs/golden-principles.md when: making architectural decisions, resolving ambiguity, or unsure which approach to take.

@@ -10,3 +10,4 @@ docs/plans/
 .env.*
 .worktrees/
 _bmad-output/
+.harness-verified
