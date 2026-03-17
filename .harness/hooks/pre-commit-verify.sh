@@ -18,6 +18,49 @@ set -euo pipefail
 STAMP_FILE=".harness-verified"
 MAX_AGE_MINUTES=30
 
+# Skip for docs-only repos (no build/test infrastructure)
+PROJECT_MARKERS=(
+    package.json tsconfig.json deno.json
+    pyproject.toml setup.py setup.cfg requirements.txt Pipfile tox.ini
+    Cargo.toml
+    go.mod
+    pom.xml build.gradle build.gradle.kts build.sbt
+    Directory.Build.props
+    Gemfile Rakefile
+    composer.json
+    Package.swift
+    pubspec.yaml
+    mix.exs
+    stack.yaml cabal.project
+    CMakeLists.txt meson.build configure.ac
+    build.zig
+    deps.edn project.clj
+    Project.toml
+    Makefile Justfile
+)
+
+is_docs_only=true
+for marker in "${PROJECT_MARKERS[@]}"; do
+    if [ -f "$marker" ]; then
+        is_docs_only=false
+        break
+    fi
+done
+
+# Also check glob patterns (.csproj, .sln, .xcodeproj)
+if $is_docs_only; then
+    for pattern in "*.csproj" "*.sln" "*.xcodeproj" "*.nimble"; do
+        if compgen -G "$pattern" > /dev/null 2>&1; then
+            is_docs_only=false
+            break
+        fi
+    done
+fi
+
+if $is_docs_only; then
+    exit 0  # docs-only repo, no verification needed
+fi
+
 # Check if stamp exists
 if [ ! -f "$STAMP_FILE" ]; then
     echo "============================================"
