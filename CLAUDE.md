@@ -1,8 +1,16 @@
 # CLAUDE.md
 
-## Code Navigation
+## Code Navigation — MANDATORY
 
-This repo is indexed in codesight-mcp. **Always use codesight-mcp tools instead of Grep, Bash search, or Read for code exploration.** Do NOT use Grep or Bash to search indexed repos — use `search_text` or `search_symbols` instead.
+**DO NOT use Grep to search this codebase. DO NOT use Bash grep, rg, or find.**
+**DO NOT use the Agent tool's Explore subagent for code search.**
+
+This repo is indexed in codesight-mcp. You MUST use codesight-mcp tools for ALL search:
+- **Text search**: `search_text` (replaces Grep)
+- **Symbol search**: `search_symbols` (replaces Grep for function/class names)
+- **Symbol source**: `get_symbol` or `get_symbol_context` when you know the symbol ID
+
+Use `Read` for reading files (code or config). Use codesight for *finding* things.
 
 ### Indexing
 - `index_repo` — index a local or GitHub repository

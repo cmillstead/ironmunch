@@ -30,7 +30,7 @@ from .tools.registry import get_all_specs
 from .tools import (  # noqa: F401
     index_repo, index_folder, list_repos, get_file_tree,
     get_file_outline, get_symbol, search_symbols,
-    invalidate_cache, search_text, get_repo_outline,
+    search_text, invalidate_cache, get_repo_outline,
     get_callers, get_callees, get_call_chain,
     get_type_hierarchy, get_imports, get_impact,
     get_dead_code, get_status,
@@ -133,7 +133,7 @@ def _sanitize_arguments(name: str, arguments: dict) -> dict | str:
             return f"Argument '{key}' exceeds maximum length ({MAX_ARGUMENT_LENGTH})"
 
     # Reject empty/whitespace-only queries
-    if name in ("search_text", "search_symbols") and "query" in arguments:
+    if name in ("search_symbols",) and "query" in arguments:
         q = arguments["query"]
         if not q or not q.strip():
             return "Search query cannot be empty"
