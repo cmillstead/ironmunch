@@ -130,18 +130,32 @@ class UsageLogger:
         finally:
             os.close(fd)
 
-    def get_records(self, tool_name: str | None = None) -> list[UsageRecord]:
-        """Return a copy of records, optionally filtered by tool_name."""
+    def _all_records(self) -> list[UsageRecord]:
+        """Merge file history + in-memory records, deduplicating current session."""
         with self._lock:
-            if tool_name is not None:
-                return [r for r in self._records if r.tool_name == tool_name]
-            return list(self._records)
+            memory = list(self._records)
+        if not self._log_path:
+            return memory
+        file_records = self.load_history()
+        if not file_records:
+            return memory
+        if not memory:
+            return list(file_records)
+        # Deduplicate: file records from before current session
+        earliest_memory_ts = memory[0].timestamp
+        history = [r for r in file_records if r.timestamp < earliest_memory_ts]
+        return history + memory
+
+    def get_records(self, tool_name: str | None = None) -> list[UsageRecord]:
+        """Return merged file + memory records, optionally filtered."""
+        records = self._all_records()
+        if tool_name is not None:
+            return [r for r in records if r.tool_name == tool_name]
+        return records
 
     def get_stats(self) -> dict:
-        """Return per-tool stats: total_calls, success_count, error_count, avg_response_time_ms."""
-        with self._lock:
-            records = list(self._records)
-
+        """Return per-tool stats from merged file + memory records."""
+        records = self._all_records()
         stats: dict[str, dict] = {}
         for rec in records:
             if rec.tool_name not in stats:
@@ -188,6 +202,9 @@ class UsageLogger:
                 if not chunk:
                     break
                 raw += chunk
+        except OSError:
+            self._history_cache = []
+            return self._history_cache
         finally:
             os.close(fd)
         records: list[UsageRecord] = []

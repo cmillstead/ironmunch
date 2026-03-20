@@ -492,3 +492,99 @@ class TestUsageLoggerLoadHistory:
         history = logger.load_history()
         assert len(history) == 1
         assert history[0].tool_name == "my_tool"
+
+
+# ---------------------------------------------------------------------------
+# TestUsageLoggerMergedStats
+# ---------------------------------------------------------------------------
+
+def _write_old_record(log_file, tool_name: str, timestamp: float,
+                      session_id: str = "old-session-999",
+                      success: bool = True, response_time_ms: int = 100):
+    """Write a JSONL record directly to a file (simulating a previous session)."""
+    data = {
+        "tool_name": tool_name,
+        "timestamp": timestamp,
+        "success": success,
+        "error_message": None if success else "err",
+        "response_time_ms": response_time_ms,
+        "argument_keys": [],
+        "session_id": session_id,
+    }
+    with open(log_file, "a") as f:
+        f.write(json.dumps(data) + "\n")
+    os.chmod(str(log_file), 0o600)
+
+
+class TestUsageLoggerMergedStats:
+    def _make_record(self, tool_name: str = "test_tool", success: bool = True,
+                     response_time_ms: int = 100, timestamp: float | None = None) -> UsageRecord:
+        return UsageRecord(
+            tool_name=tool_name,
+            timestamp=timestamp or time.time(),
+            success=success,
+            error_message=None if success else "err",
+            response_time_ms=response_time_ms,
+            argument_keys=[],
+        )
+
+    def test_get_records_includes_file_history(self, tmp_path):
+        log_file = tmp_path / "usage.jsonl"
+        _write_old_record(log_file, "old_tool", timestamp=100.0)
+        logger = UsageLogger(log_path=str(log_file))
+        logger.record(self._make_record(tool_name="new_tool", timestamp=200.0))
+        records = logger.get_records()
+        assert len(records) == 2
+        assert records[0].tool_name == "old_tool"
+        assert records[1].tool_name == "new_tool"
+
+    def test_get_records_no_duplicates(self, tmp_path):
+        log_file = tmp_path / "usage.jsonl"
+        logger = UsageLogger(log_path=str(log_file))
+        logger.record(self._make_record(tool_name="a", timestamp=100.0))
+        logger.record(self._make_record(tool_name="b", timestamp=200.0))
+        records = logger.get_records()
+        assert len(records) == 2
+
+    def test_get_records_file_history_before_memory(self, tmp_path):
+        log_file = tmp_path / "usage.jsonl"
+        _write_old_record(log_file, "old_tool", timestamp=100.0)
+        logger = UsageLogger(log_path=str(log_file))
+        logger.record(self._make_record(tool_name="new_tool", timestamp=200.0))
+        records = logger.get_records()
+        assert records[0].timestamp == 100.0
+        assert records[1].timestamp == 200.0
+
+    def test_get_records_filtered_spans_file_and_memory(self, tmp_path):
+        log_file = tmp_path / "usage.jsonl"
+        _write_old_record(log_file, "alpha", timestamp=100.0)
+        _write_old_record(log_file, "beta", timestamp=101.0)
+        logger = UsageLogger(log_path=str(log_file))
+        logger.record(self._make_record(tool_name="alpha", timestamp=200.0))
+        logger.record(self._make_record(tool_name="gamma", timestamp=201.0))
+        alpha_records = logger.get_records(tool_name="alpha")
+        assert len(alpha_records) == 2
+        assert alpha_records[0].timestamp == 100.0
+        assert alpha_records[1].timestamp == 200.0
+
+    def test_get_stats_includes_file_history(self, tmp_path):
+        log_file = tmp_path / "usage.jsonl"
+        _write_old_record(log_file, "my_tool", timestamp=100.0, response_time_ms=100)
+        logger = UsageLogger(log_path=str(log_file))
+        logger.record(self._make_record(tool_name="my_tool", timestamp=200.0, response_time_ms=200))
+        stats = logger.get_stats()
+        assert stats["my_tool"]["total_calls"] == 2
+
+    def test_get_stats_no_double_counting(self, tmp_path):
+        log_file = tmp_path / "usage.jsonl"
+        logger = UsageLogger(log_path=str(log_file))
+        logger.record(self._make_record(tool_name="my_tool", timestamp=100.0))
+        stats = logger.get_stats()
+        assert stats["my_tool"]["total_calls"] == 1
+
+    def test_get_records_no_file_path_returns_memory_only(self):
+        logger = UsageLogger(log_path=None)
+        logger.record(self._make_record(tool_name="mem_tool", timestamp=100.0))
+        records = logger.get_records()
+        assert len(records) == 1
+        assert records[0].tool_name == "mem_tool"
