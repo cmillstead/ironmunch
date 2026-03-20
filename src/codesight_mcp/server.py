@@ -462,16 +462,39 @@ def _run_cli_tool(tool_name: str, argv: list[str]) -> None:
         pass
     print(f"[codesight] {tool_name.replace('_', '-')}", file=sys.stderr)
 
+    call_start = _time.perf_counter()
+    success = False
+    error_msg = None
+
     try:
         result = spec.handler(arguments, storage_path)
         if asyncio.iscoroutine(result):
             result = asyncio.run(result)
+        if isinstance(result, dict) and "error" in result:
+            error_msg = result["error"]
+        else:
+            success = True
         print(json.dumps(result, indent=2))
-        sys.exit(0 if not isinstance(result, dict) or "error" not in result else 1)
+        sys.exit(0 if success else 1)
     except Exception as e:
-        print(json.dumps({"error": sanitize_error(e)}))
+        error_msg = sanitize_error(e)
+        print(json.dumps({"error": error_msg}))
         sys.exit(1)
     finally:
+        # Usage logging — excludes get_usage_stats from its own log
+        if tool_name != "get_usage_stats":
+            try:
+                call_ms = round((_time.perf_counter() - call_start) * 1000)
+                _usage_logger.record(UsageRecord(
+                    tool_name=tool_name,
+                    timestamp=_time.time(),
+                    success=success,
+                    error_message=error_msg,
+                    response_time_ms=call_ms,
+                    argument_keys=sorted(arguments.keys()),
+                ))
+            except Exception:
+                pass  # Never break CLI dispatch
         # Clear active signal
         try:
             os.remove(_active_file)

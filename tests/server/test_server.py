@@ -8,7 +8,7 @@ import pytest
 from codesight_mcp.server import (
     call_tool,
     list_tools,
-    server,
+    _usage_logger,
 )
 from codesight_mcp.core.rate_limiting import _rate_limit
 
@@ -1017,9 +1017,6 @@ class TestCLISubcommands:
 
 # -- Usage logging integration tests ------------------------------------------
 
-import time
-from codesight_mcp.server import _usage_logger
-
 
 @pytest.mark.asyncio
 async def test_call_tool_records_usage():
@@ -1060,3 +1057,43 @@ async def test_call_tool_logs_arg_keys_not_values():
     assert "repo" in rec.argument_keys
     # Values should NOT be in the record
     assert not hasattr(rec, 'argument_values')
+
+
+class TestCLIUsageLogging:
+    """CLI dispatch (_run_cli_tool) records usage."""
+
+    def test_cli_tool_records_usage(self):
+        """_run_cli_tool records a UsageRecord for the dispatched tool."""
+        from codesight_mcp.server import _run_cli_tool, _usage_logger
+        with _usage_logger._lock:
+            _usage_logger._records.clear()
+        with pytest.raises(SystemExit):
+            _run_cli_tool("get_status", [])
+        records = _usage_logger.get_records(tool_name="get_status")
+        # Filter to current session to avoid file history
+        current = [r for r in records if r.session_id == _usage_logger._session_id]
+        assert len(current) >= 1
+        assert current[-1].tool_name == "get_status"
+        assert current[-1].response_time_ms >= 0
+
+    def test_cli_tool_does_not_log_get_usage_stats(self):
+        """get_usage_stats via CLI is excluded from its own logging."""
+        from codesight_mcp.server import _run_cli_tool, _usage_logger
+        with _usage_logger._lock:
+            _usage_logger._records.clear()
+        with pytest.raises(SystemExit):
+            _run_cli_tool("get_usage_stats", [])
+        records = _usage_logger.get_records(tool_name="get_usage_stats")
+        current = [r for r in records if r.session_id == _usage_logger._session_id]
+        assert len(current) == 0
+
+    def test_cli_tool_logs_failure(self):
+        """CLI tool that fails still gets a usage record."""
+        from codesight_mcp.server import _run_cli_tool, _usage_logger
+        with _usage_logger._lock:
+            _usage_logger._records.clear()
+        with pytest.raises(SystemExit):
+            _run_cli_tool("get_symbol", ["--repo", "nonexistent/repo", "--symbol-id", "fake"])
+        records = _usage_logger.get_records(tool_name="get_symbol")
+        current = [r for r in records if r.session_id == _usage_logger._session_id]
+        assert len(current) >= 1
