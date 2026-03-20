@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from pathlib import Path
 
 from mcp.server import Server
@@ -24,7 +25,9 @@ from .core.limits import (
     MAX_CONTEXT_LINES, MAX_SEARCH_RESULTS,
 )
 from .core.rate_limiting import _rate_limit
+from .core.usage_logging import UsageLogger, UsageRecord
 from .tools.registry import get_all_specs
+from .tools.get_usage_stats import _make_handler as _make_usage_handler
 
 # Import all tool modules to trigger ToolSpec registration
 from .tools import (  # noqa: F401
@@ -37,6 +40,7 @@ from .tools import (  # noqa: F401
     analyze_complexity, get_key_symbols, get_diagram,
     get_symbol_context, search_references, get_dependencies,
     compare_symbols, get_changes,
+    get_usage_stats,
 )
 
 # ADV-LOW-7: Read CODE_INDEX_PATH once at startup so subsequent env mutations
@@ -104,6 +108,16 @@ _WARNINGS = {
 
 # Create server
 server = Server("codesight-mcp")
+
+# Usage logging — initialized from environment variables at import time.
+_usage_logger = UsageLogger.from_env()
+
+# Wire get_usage_stats handler to the live logger
+from .tools.get_usage_stats import _spec as _usage_spec  # noqa: E402
+_usage_spec.handler = _make_usage_handler(
+    logger_ref=lambda: _usage_logger,
+    specs_ref=get_all_specs,
+)
 
 
 @server.list_tools()
@@ -274,6 +288,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             "error": "Rate limit exceeded. Try again in a moment."
         }))]
 
+    call_start = time.perf_counter()
+    success = False
+    error_msg = None
+
     try:
         handler = specs[name].handler
         result = handler(arguments, storage_path)
@@ -286,13 +304,32 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         text = json.dumps(result, indent=2)
         if len(text.encode("utf-8")) > MAX_RESPONSE_BYTES:
+            error_msg = "Response too large"
             return [TextContent(type="text", text=json.dumps({
                 "error": "Response too large. Try a more specific query."
             }))]
+        success = True
         return [TextContent(type="text", text=text)]
 
     except Exception as e:
-        return [TextContent(type="text", text=json.dumps({"error": sanitize_error(e)}))]
+        error_msg = sanitize_error(e)
+        return [TextContent(type="text", text=json.dumps({"error": error_msg}))]
+
+    finally:
+        # Usage logging — excludes get_usage_stats from its own log
+        if name != "get_usage_stats":
+            try:
+                call_ms = round((time.perf_counter() - call_start) * 1000)
+                _usage_logger.record(UsageRecord(
+                    tool_name=name,
+                    timestamp=time.time(),
+                    success=success,
+                    error_message=error_msg,
+                    response_time_ms=call_ms,
+                    argument_keys=sorted(arguments.keys()),
+                ))
+            except Exception:
+                pass  # Never break dispatch
 
 
 async def run_server():
