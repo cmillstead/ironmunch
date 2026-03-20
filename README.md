@@ -9,7 +9,7 @@
   </a>
   <img src="https://img.shields.io/badge/MCP-Compatible-green?style=flat-square" alt="MCP Compatible">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square&logo=python" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-1593-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1621-brightgreen?style=flat-square" alt="Tests">
 </p>
 
 An **MCP server** that indexes local and GitHub codebases via tree-sitter AST parsing, then exposes 28 tools for symbol retrieval, code graph traversal, and impact analysis — all with byte-offset precision to cut token costs by ~99% compared to sending full files. Supports 15 languages.
