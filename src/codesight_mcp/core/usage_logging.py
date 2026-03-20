@@ -153,33 +153,6 @@ class UsageLogger:
             return [r for r in records if r.tool_name == tool_name]
         return records
 
-    def get_stats(self) -> dict:
-        """Return per-tool stats from merged file + memory records."""
-        records = self._all_records()
-        stats: dict[str, dict] = {}
-        for rec in records:
-            if rec.tool_name not in stats:
-                stats[rec.tool_name] = {
-                    "total_calls": 0,
-                    "success_count": 0,
-                    "error_count": 0,
-                    "_total_ms": 0,
-                }
-            s = stats[rec.tool_name]
-            s["total_calls"] += 1
-            if rec.success:
-                s["success_count"] += 1
-            else:
-                s["error_count"] += 1
-            s["_total_ms"] += rec.response_time_ms
-
-        for s in stats.values():
-            s["avg_response_time_ms"] = round(
-                s.pop("_total_ms") / s["total_calls"], 1
-            )
-
-        return stats
-
     def load_history(self) -> list[UsageRecord]:
         """Read all records from the JSONL log file.
 

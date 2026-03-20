@@ -5,8 +5,6 @@ import os
 import threading
 import time
 
-import pytest
-
 from codesight_mcp.core.usage_logging import UsageLogger, UsageRecord
 
 
@@ -212,25 +210,6 @@ class TestUsageLoggerMemory:
         assert len(logger.get_records(tool_name="alpha")) == 2
         assert len(logger.get_records(tool_name="beta")) == 1
         assert len(logger.get_records(tool_name="gamma")) == 0
-
-    def test_get_stats_summary(self):
-        logger = UsageLogger()
-        logger.record(self._make_record(tool_name="a", success=True, response_time_ms=100))
-        logger.record(self._make_record(tool_name="a", success=True, response_time_ms=200))
-        logger.record(self._make_record(tool_name="a", success=False, response_time_ms=50))
-        logger.record(self._make_record(tool_name="b", success=True, response_time_ms=300))
-
-        stats = logger.get_stats()
-        assert stats["a"]["total_calls"] == 3
-        assert stats["a"]["success_count"] == 2
-        assert stats["a"]["error_count"] == 1
-        # avg of 100, 200, 50 = 116.67 → but these get rounded to 100, 200, 50 by bucket
-        assert stats["a"]["avg_response_time_ms"] == pytest.approx(
-            (100 + 200 + 50) / 3, abs=1
-        )
-        assert stats["b"]["total_calls"] == 1
-        assert stats["b"]["success_count"] == 1
-        assert stats["b"]["error_count"] == 0
 
     def test_thread_safety(self):
         logger = UsageLogger(max_memory=10_000)
@@ -566,21 +545,6 @@ class TestUsageLoggerMergedStats:
         assert len(alpha_records) == 2
         assert alpha_records[0].timestamp == 100.0
         assert alpha_records[1].timestamp == 200.0
-
-    def test_get_stats_includes_file_history(self, tmp_path):
-        log_file = tmp_path / "usage.jsonl"
-        _write_old_record(log_file, "my_tool", timestamp=100.0, response_time_ms=100)
-        logger = UsageLogger(log_path=str(log_file))
-        logger.record(self._make_record(tool_name="my_tool", timestamp=200.0, response_time_ms=200))
-        stats = logger.get_stats()
-        assert stats["my_tool"]["total_calls"] == 2
-
-    def test_get_stats_no_double_counting(self, tmp_path):
-        log_file = tmp_path / "usage.jsonl"
-        logger = UsageLogger(log_path=str(log_file))
-        logger.record(self._make_record(tool_name="my_tool", timestamp=100.0))
-        stats = logger.get_stats()
-        assert stats["my_tool"]["total_calls"] == 1
 
     def test_get_records_no_file_path_returns_memory_only(self):
         logger = UsageLogger(log_path=None)
