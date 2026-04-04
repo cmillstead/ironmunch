@@ -32,7 +32,7 @@ The threat model assumes:
 | Secret exposure via control chars | `assert_no_control_chars` rejects bytes 0x01–0x1F, 0x7F (DEL), and 0x80–0x9F (C1) |
 | Binary confusion | Dual-stage detection: extension-based filtering plus null-byte content sniffing |
 | Credential logging | `_RedactAuthFilter` suppresses httpx log records containing auth headers at all log levels |
-| Supply chain | `uv.lock` pinned with hashes; CI uses `uv sync --frozen --verify-hashes`; GitHub Actions are SHA-pinned; dependency upper bounds prevent surprise major upgrades |
+| Supply chain | `uv.lock` pinned with hashes; CI uses `uv sync --frozen`; GitHub Actions are SHA-pinned; dependency upper bounds prevent surprise major upgrades |
 | Summarizer injection | Injection phrases stripped from summaries (full substring scan, not prefix-only); degraded-mode parse returns empty on missing nonce delimiters; symbol kind validated against allowlist before prompt interpolation; system/user prompt split uses per-batch nonce marker |
 | Env var redirection | `ANTHROPIC_BASE_URL`, `GITHUB_TOKEN`, `CODE_INDEX_PATH`, `CODESIGHT_NO_REDACT`, and `ALLOWED_ROOTS` frozen at module import time; runtime mutation cannot redirect API calls or bypass restrictions |
 | Graph traversal DoS | BFS call-chain capped at 5 paths; all traversal depths clamped to [1, 50]; SHA-256 fingerprint for cache keys |
@@ -53,8 +53,9 @@ The threat model assumes:
 
 ## Validation Chain
 
-Every file access runs through a 6-step validation chain (`core/validation.py`):
+Every file access runs through `validate_path()` in `core/validation.py`, which applies NFC normalization before the 6-step chain:
 
+0. **NFC normalization** -- Unicode NFC normalization to canonical form; BOM (U+FEFF) stripping; backslash rejection
 1. **Control character rejection** -- Reject paths containing control bytes (0x01–0x1F, 0x7F, 0x80–0x9F)
 2. **Segment safety** -- Reject `..` traversal and dot-prefixed segments (hidden files)
 3. **Length and depth limits** -- Max 512 characters, max 10 directory levels
@@ -62,7 +63,7 @@ Every file access runs through a 6-step validation chain (`core/validation.py`):
 5. **Containment check** -- Resolved path must start with `root + os.sep` (strict prefix)
 6. **Symlink parent walk** -- `lstat` every parent directory from file up to root; reject any symlinks
 
-Steps 1-3 run on the raw input (before resolution). Steps 4-6 run on the resolved path. This ordering prevents TOCTOU races where resolution could change what steps 1-3 validated.
+Step 0 runs first to ensure all subsequent checks operate on normalized input. Steps 1-3 run on the raw (post-normalization) input before resolution. Steps 4-6 run on the resolved path. This ordering prevents TOCTOU races where resolution could change what steps 1-3 validated.
 
 All file opens use `O_NOFOLLOW` to prevent symlink races at the OS level.
 
@@ -73,12 +74,12 @@ All limits are defined in `core/limits.py` and enforced server-side:
 | Limit | Value | Purpose |
 |-------|-------|---------|
 | `MAX_FILE_SIZE` | 500 KB | Prevent memory exhaustion from large files |
-| `MAX_FILE_COUNT` | 500 | Cap files per index |
+| `MAX_FILE_COUNT` | 5,000 | Cap files per index |
 | `MAX_PATH_LENGTH` | 512 chars | Prevent buffer-related issues |
 | `MAX_DIRECTORY_DEPTH` | 10 levels | Prevent deeply nested traversal |
 | `MAX_CONTEXT_LINES` | 100 lines | Cap context around symbol retrieval |
 | `MAX_SEARCH_RESULTS` | 50 results | Bound search output size |
-| `MAX_INDEX_SIZE` | 50 MB | Cap stored index JSON |
+| `MAX_INDEX_SIZE` | 200 MB | Cap stored index JSON (supports gzip) |
 | `GITHUB_API_TIMEOUT` | 30 seconds | Prevent hanging on GitHub requests |
 | `MAX_BATCHES_PER_INDEX` | 50 | Cap AI summarization rounds per index |
 | `MAX_GITIGNORE_PATTERNS` | 20 patterns × 200 chars | Prevent regex bomb via extra_ignore_patterns |
@@ -177,11 +178,11 @@ All tools are rate-limited at 60 calls per minute per tool and 300 calls per min
 | Adversarial (4th round) | 2026-03-08 | 18 findings, 11 fixed | +14 |
 | Adversarial v2 (5th round) | 2026-03-08b | 16 findings fixed (2 HIGH, 6 MED, 8 LOW) | +20 |
 | Adversarial v3 (6th round) | 2026-03-08c | 8 findings (1 MED, 3 LOW, 4 INFO) | +22 |
-| **Total** | | | **1,558 tests** |
+| **Total** | | | **1,618 tests** |
 
 ## Testing
 
-The test suite contains **1,558 tests** across adversarial, security, integration, and unit categories covering:
+The test suite contains **1,618 tests** across adversarial, security, integration, and unit categories covering:
 
 - Control character and DEL byte injection in paths, repo IDs, and queries
 - `../` traversal in direct arguments and via poisoned index entries
@@ -220,3 +221,7 @@ Four security issues were identified in the original jcodemunch-mcp and addresse
 3. **Raw error messages exposed to AI** -- Exceptions were returned as-is, potentially leaking filesystem paths, usernames, and internal structure. codesight-mcp sanitizes all errors through `sanitize_error()`, which passes through only pre-approved ValidationError messages or known errno mappings.
 
 4. **No content boundary markers** -- Source code was returned as plain text with no indication that it was untrusted. codesight-mcp wraps all source code and metadata fields in cryptographic boundary markers and includes `_meta` trust envelopes.
+
+## Reporting Vulnerabilities
+
+To report a security vulnerability, please open a GitHub Security Advisory at https://github.com/cmillstead/codesight-mcp/security/advisories/new

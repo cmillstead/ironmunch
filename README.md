@@ -167,7 +167,8 @@ Allow codesight-mcp tools to avoid a permission prompt on every call. Add to `~/
     "mcp__codesight-mcp__get_dependencies",
     "mcp__codesight-mcp__compare_symbols",
     "mcp__codesight-mcp__get_changes",
-    "mcp__codesight-mcp__get_status"
+    "mcp__codesight-mcp__get_status",
+    "mcp__codesight-mcp__get_usage_stats"
   ]
 }
 ```
@@ -197,7 +198,7 @@ Use `Read` only for content that isn't a named symbol (config files, etc).
 
 ## Tools
 
-codesight-mcp exposes **27 MCP tools** organized into six categories:
+codesight-mcp exposes **28 MCP tools** organized into six categories:
 
 ### Indexing
 
@@ -247,6 +248,7 @@ codesight-mcp exposes **27 MCP tools** organized into six categories:
 | `get_diagram` | Generate Mermaid diagrams — call graphs, type hierarchies, import trees, and impact diagrams from the code graph. |
 | `get_dead_code` | Find unreferenced symbols — functions and classes with zero callers or importers. |
 | `get_status` | Server status — storage configuration, index stats, and feature flags. |
+| `get_usage_stats` | Per-tool call counts, error rates, average response times, and uncalled tools. |
 
 ### Dependencies & Diffing
 
@@ -359,6 +361,12 @@ See [SECURITY.md](SECURITY.md) for the full threat model, defense matrix, and va
 
 ---
 
+## Data Handling
+
+When `ANTHROPIC_API_KEY` is set, codesight-mcp sends function and class signatures to the Anthropic API for AI-generated summaries during indexing. No source code is sent — only signatures. To disable, omit the `ANTHROPIC_API_KEY` environment variable.
+
+---
+
 ## Environment Variables
 
 | Variable | Description |
@@ -367,6 +375,11 @@ See [SECURITY.md](SECURITY.md) for the full threat model, defense matrix, and va
 | `GITHUB_TOKEN` | GitHub personal access token. Required for private repos; strongly recommended to avoid rate limits on public repos. |
 | `ANTHROPIC_API_KEY` | Anthropic API key for AI-generated symbol summaries. Optional — falls back to docstrings if unset. |
 | `CODE_INDEX_PATH` | Custom storage directory for indexes. Default: `~/.code-index/` |
+| `CODESIGHT_NO_REDACT` | Set to `1` to disable secret redaction in tool output. Logs a warning; `search_text` is disabled entirely when set. |
+| `CODESIGHT_READ_ONLY` | Set to `1` to skip filesystem permission operations (fchmod/mkdir). Used automatically for non-destructive CLI commands in sandboxed environments. |
+| `CODESIGHT_USAGE_LOG` | File path for persistent JSONL usage log. Without this, usage records are in-memory only (lost on restart). |
+| `CODESIGHT_USAGE_ENABLED` | Set to `0` to disable usage logging. Default: `1` (enabled). |
+| `CODESIGHT_USAGE_MAX_MEMORY` | Maximum number of in-memory usage records before eviction. Default: `10000`. |
 
 ---
 
