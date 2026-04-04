@@ -29,6 +29,7 @@ from .core.rate_limiting import _rate_limit
 from .core.usage_logging import UsageLogger, UsageRecord
 from .tools.registry import get_all_specs
 from .tools.get_usage_stats import _make_handler as _make_usage_handler
+from .cli_format import format_result as _format_result
 
 # Import all tool modules to trigger ToolSpec registration
 from .tools import (  # noqa: F401
@@ -42,6 +43,8 @@ from .tools import (  # noqa: F401
     get_symbol_context, search_references, get_dependencies,
     compare_symbols, get_changes,
     get_usage_stats,
+    verify,
+    lint_index,
 )
 
 # ADV-LOW-7: Read CODE_INDEX_PATH once at startup so subsequent env mutations
@@ -410,6 +413,38 @@ def _parse_cli_args(argv: list[str], schema: dict) -> dict:
     return arguments
 
 
+def _extract_format_flag(argv: list[str]) -> tuple[list[str], str]:
+    """Extract --format flag from argv, return (clean_argv, fmt).
+
+    Supports --format value and --format=value syntax.
+    Errors on missing value or flag-like value (starts with -).
+    """
+    clean: list[str] = []
+    fmt = "json"
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--format":
+            if i + 1 >= len(argv):
+                print(json.dumps({"error": "Missing value for --format. Use json|table|tsv|compact"}))
+                sys.exit(1)
+            value = argv[i + 1]
+            if value.startswith("-"):
+                print(json.dumps({"error": f"Invalid --format value: {value}. Use json|table|tsv|compact"}))
+                sys.exit(1)
+            fmt = value
+            i += 2
+        elif argv[i].startswith("--format="):
+            fmt = argv[i].split("=", 1)[1]
+            i += 1
+        else:
+            clean.append(argv[i])
+            i += 1
+    if fmt not in ("json", "table", "tsv", "compact"):
+        print(json.dumps({"error": f"Unknown format: {fmt}. Use json|table|tsv|compact"}))
+        sys.exit(1)
+    return clean, fmt
+
+
 def _run_cli_tool(tool_name: str, argv: list[str]) -> None:
     """Dispatch a tool by name with CLI arguments. Prints JSON result."""
     import sys
@@ -433,6 +468,10 @@ def _run_cli_tool(tool_name: str, argv: list[str]) -> None:
         lines = [f"Usage: codesight-mcp {tool_name.replace('_', '-')} [OPTIONS]", ""]
         lines.append(spec.description)
         lines.append("")
+        lines.append("Global options:")
+        lines.append("  --format <string>")
+        lines.append("      Output format [json, table, tsv, compact]")
+        lines.append("")
         lines.append("Options:")
         for pname, pdef in props.items():
             flag = f"  --{pname.replace('_', '-')}"
@@ -448,7 +487,8 @@ def _run_cli_tool(tool_name: str, argv: list[str]) -> None:
         print("\n".join(lines))
         sys.exit(0)
 
-    arguments = _parse_cli_args(argv, spec.input_schema)
+    format_argv, cli_format = _extract_format_flag(argv)
+    arguments = _parse_cli_args(format_argv, spec.input_schema)
 
     # F-DA-001: Strip unknown keys not defined in the tool's input schema
     schema_keys = set(spec.input_schema.get("properties", {}).keys())
@@ -507,7 +547,10 @@ def _run_cli_tool(tool_name: str, argv: list[str]) -> None:
             error_msg = result["error"]
         else:
             success = True
-        print(json.dumps(result, indent=2))
+        print(_format_result(result, cli_format))
+        if spec.ci_exit_key and isinstance(result, dict) and not result.get(spec.ci_exit_key):
+            success = False
+            sys.exit(1)
         sys.exit(0 if success else 1)
     except Exception as e:
         # RC-011: Intentionally broad — outer error boundary for CLI tool dispatch.

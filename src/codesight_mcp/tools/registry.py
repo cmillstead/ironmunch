@@ -19,6 +19,7 @@ class ToolSpec:
     destructive: bool = False
     required_args: list[str] = field(default_factory=list)
     annotations: ToolAnnotations | None = None
+    ci_exit_key: str | None = None
 
 
 _REGISTRY: dict[str, ToolSpec] = {}

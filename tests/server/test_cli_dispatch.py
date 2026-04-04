@@ -231,7 +231,7 @@ class TestMainEntryPoint:
         assert result.returncode == 0
         tools_list = json.loads(result.stdout)
         assert isinstance(tools_list, list)
-        assert len(tools_list) == 28
+        assert len(tools_list) == 30
         names = {tool["name"] for tool in tools_list}
         assert "get_status" in names
         assert "search_symbols" in names
@@ -247,3 +247,82 @@ class TestMainEntryPoint:
         assert result.returncode == 0
         data = json.loads(result.stdout)
         assert "version" in data
+
+
+# ---------------------------------------------------------------------------
+# --format flag tests
+# ---------------------------------------------------------------------------
+
+
+class TestCliFormatFlag:
+    """Tests for --format flag extraction and dispatch."""
+
+    def test_format_flag_extracted(self, capsys):
+        """--format compact produces single-line JSON output."""
+        with pytest.raises(SystemExit):
+            _run_cli_tool("get_status", ["--format", "compact"])
+        captured = capsys.readouterr()
+        # Compact = single-line JSON (no newlines in the JSON part)
+        # Skip the stderr line, check stdout
+        lines = captured.out.strip().split("\n")
+        # Should be exactly one line of JSON
+        assert len(lines) == 1
+        data = json.loads(lines[0])
+        assert "version" in data
+
+    def test_format_flag_equals_syntax(self, capsys):
+        """--format=compact syntax works."""
+        with pytest.raises(SystemExit):
+            _run_cli_tool("get_status", ["--format=compact"])
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split("\n")
+        assert len(lines) == 1
+        json.loads(lines[0])  # should parse as valid JSON
+
+    def test_format_flag_invalid(self, capsys):
+        """Invalid format value exits 1 with error."""
+        with pytest.raises(SystemExit) as exc_info:
+            _run_cli_tool("get_status", ["--format", "xml"])
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        result = json.loads(captured.out)
+        assert "error" in result
+        assert "xml" in result["error"]
+
+    def test_format_flag_missing_value(self, capsys):
+        """--format with no value exits 1 with error."""
+        with pytest.raises(SystemExit) as exc_info:
+            _run_cli_tool("get_status", ["--format"])
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        result = json.loads(captured.out)
+        assert "error" in result
+        assert "Missing" in result["error"]
+
+    def test_format_flag_rejects_flag_value(self, capsys):
+        """--format --repo rejects flag-like value."""
+        with pytest.raises(SystemExit) as exc_info:
+            _run_cli_tool("get_status", ["--format", "--repo"])
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        result = json.loads(captured.out)
+        assert "error" in result
+
+    def test_default_json_unchanged(self, capsys):
+        """Default (no --format) produces indented JSON."""
+        with pytest.raises(SystemExit):
+            _run_cli_tool("get_status", [])
+        captured = capsys.readouterr()
+        # Default JSON is indented (multiple lines)
+        lines = captured.out.strip().split("\n")
+        assert len(lines) > 1
+        data = json.loads(captured.out)
+        assert "version" in data
+
+    def test_help_includes_format_option(self, capsys):
+        """--help output includes --format global option."""
+        with pytest.raises(SystemExit):
+            _run_cli_tool("get_status", ["--help"])
+        captured = capsys.readouterr()
+        assert "--format" in captured.out
+        assert "Global options" in captured.out

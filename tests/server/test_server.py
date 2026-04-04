@@ -15,10 +15,10 @@ from codesight_mcp.core.rate_limiting import _rate_limit
 
 @pytest.mark.asyncio
 async def test_server_lists_all_tools():
-    """Test that server lists all 28 tools."""
+    """Test that server lists all 30 tools."""
     tools = await list_tools()
 
-    assert len(tools) == 28
+    assert len(tools) == 30
 
     names = {t.name for t in tools}
     expected = {
@@ -31,7 +31,7 @@ async def test_server_lists_all_tools():
         "analyze_complexity", "get_key_symbols", "get_diagram",
         "get_symbol_context", "search_references", "get_dependencies",
         "compare_symbols", "get_changes",
-        "get_usage_stats",
+        "get_usage_stats", "verify", "lint_index",
     }
     assert names == expected
 
