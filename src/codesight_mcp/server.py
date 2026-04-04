@@ -365,11 +365,20 @@ def _parse_cli_args(argv: list[str], schema: dict) -> dict:
                         arguments[key] = True
                         i += 1
                 elif prop_type == "integer":
+                    # F-DA-004: Handle non-integer values gracefully
                     if i + 1 < len(argv):
-                        arguments[key] = int(argv[i + 1])
+                        try:
+                            arguments[key] = int(argv[i + 1])
+                        except (ValueError, IndexError):
+                            raise SystemExit(
+                                f"Error: --{key} requires an integer value"
+                            )
                         i += 2
                     else:
-                        i += 1
+                        raise SystemExit(
+                            f"Error: --{key} requires an integer value"
+                        )
+
                 elif prop_type == "array":
                     # Collect comma-separated values
                     if i + 1 < len(argv):
@@ -432,6 +441,15 @@ def _run_cli_tool(tool_name: str, argv: list[str]) -> None:
 
     arguments = _parse_cli_args(argv, spec.input_schema)
 
+    # F-DA-001: Strip unknown keys not defined in the tool's input schema
+    schema_keys = set(spec.input_schema.get("properties", {}).keys())
+    unknown = set(arguments.keys()) - schema_keys
+    if unknown:
+        logging.getLogger(__name__).warning(
+            "Ignoring unknown CLI arguments: %s", unknown,
+        )
+        arguments = {k: v for k, v in arguments.items() if k in schema_keys}
+
     # Sanitize
     sanitized = _sanitize_arguments(tool_name, arguments)
     if isinstance(sanitized, str):
@@ -455,11 +473,17 @@ def _run_cli_tool(tool_name: str, argv: list[str]) -> None:
     # Signal status line that codesight is active (same file the MCP hooks use)
     import time as _time
     _active_file = "/tmp/codesight-active"
+    # F-DA-002: Use O_NOFOLLOW to prevent symlink race
     try:
-        with open(_active_file, "w") as _f:
+        fd = os.open(
+            _active_file,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+            0o600,
+        )
+        with os.fdopen(fd, "w") as _f:
             _f.write(str(_time.time()))
     except OSError:
-        pass
+        pass  # Non-critical status indicator
     print(f"[codesight] {tool_name.replace('_', '-')}", file=sys.stderr)
 
     call_start = _time.perf_counter()
@@ -495,9 +519,10 @@ def _run_cli_tool(tool_name: str, argv: list[str]) -> None:
                 ))
             except Exception:
                 pass  # Never break CLI dispatch
-        # Clear active signal
+        # Clear active signal — verify not a symlink before removing
         try:
-            os.remove(_active_file)
+            if not os.path.islink(_active_file):
+                os.unlink(_active_file)
         except OSError:
             pass
 
@@ -561,7 +586,12 @@ def main():
         allowed = ALLOWED_ROOTS or [str(Path(path).expanduser().resolve())]
 
         storage_path = _CODE_INDEX_PATH or None
-        result = _index_folder(path, use_ai_summaries=use_ai, storage_path=storage_path, allowed_roots=allowed)
+        # F-DA-003: Wrap index exceptions with sanitized error output
+        try:
+            result = _index_folder(path, use_ai_summaries=use_ai, storage_path=storage_path, allowed_roots=allowed)
+        except Exception as exc:
+            print(json.dumps({"error": sanitize_error(exc)}))
+            sys.exit(1)
         print(json.dumps(result, indent=2))
         sys.exit(0 if result.get("success") else 1)
 
@@ -574,7 +604,12 @@ def main():
             sys.exit(1)
         url = url_args[0]
         storage_path = _CODE_INDEX_PATH or None
-        result = asyncio.run(_index_repo(url, use_ai_summaries=use_ai, storage_path=storage_path))
+        # F-DA-003: Wrap index-repo exceptions with sanitized error output
+        try:
+            result = asyncio.run(_index_repo(url, use_ai_summaries=use_ai, storage_path=storage_path))
+        except Exception as exc:
+            print(json.dumps({"error": sanitize_error(exc)}))
+            sys.exit(1)
         print(json.dumps(result, indent=2))
         sys.exit(0 if result.get("success") else 1)
 
