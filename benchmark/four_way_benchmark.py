@@ -23,7 +23,6 @@ import tempfile
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Optional
 
 
 # ---------------------------------------------------------------------------
@@ -385,11 +384,11 @@ def print_table(results: list[ToolResult], baseline_tokens: int, file_count: int
     if cs and jcm:
         overhead = cs.avg_tokens - jcm.avg_tokens
         pct = (overhead / jcm.avg_tokens) * 100 if jcm.avg_tokens else 0
-        print(f"Spotlighting Overhead (codesight-mcp vs jcodemunch)")
+        print("Spotlighting Overhead (codesight-mcp vs jcodemunch)")
         print("-" * 40)
         print(f"  +{overhead:,} tokens avg/query ({pct:.0f}% overhead)")
-        print(f"  This is the cost of security boundary markers")
-        print(f"  that prevent prompt injection attacks.")
+        print("  This is the cost of security boundary markers")
+        print("  that prevent prompt injection attacks.")
         print()
 
     # --- Security features ---
@@ -460,7 +459,7 @@ def main() -> None:
         print(f"Error: {target} does not exist", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Measuring baseline...", file=sys.stderr)
+    print("Measuring baseline...", file=sys.stderr)
     baseline_tokens, file_count, loc = count_baseline_tokens(target)
 
     results: list[ToolResult] = []

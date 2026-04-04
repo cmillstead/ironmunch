@@ -10,6 +10,11 @@ echo ""
 echo "--- Installing dependencies (frozen) ---"
 uv sync --frozen --extra test
 
+# Run linting
+echo ""
+echo "--- Running ruff lint ---"
+uv run ruff check .
+
 # Run tests with same flags as CI
 echo ""
 echo "--- Running tests ---"
