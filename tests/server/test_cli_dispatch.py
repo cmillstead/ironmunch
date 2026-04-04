@@ -10,7 +10,6 @@ import sys
 
 import pytest
 
-import codesight_mcp.server as server_mod
 from codesight_mcp.server import (
     _parse_cli_args,
     _run_cli_tool,
