@@ -479,9 +479,17 @@ class IndexStore:
                     except OSError:
                         continue  # Symlink or permission error — skip
 
-                # Phase 2: write the compressed JSON index to its .tmp path
-                # NOTE: ENOSPC or other OS error here leaves Phase-1 content .tmp files orphaned.
-                # _cleanup_stale_temps() (called on next IndexStore.__init__) recovers them.
+                # Phase 2: rename all content .tmp → final so content files are
+                # committed before the index references them.  A crash after this
+                # point but before Phase 3 leaves valid content on disk; the old
+                # index still works and _cleanup_stale_temps() handles orphans.
+                for final, tmp in content_tmp_paths:
+                    tmp.replace(final)
+                content_tmp_paths.clear()  # Mark all as renamed — nothing left to clean
+
+                # Phase 3: write the compressed JSON index to its .tmp path
+                # The index now points to already-committed content files, so a
+                # crash here cannot leave the index referencing missing content.
                 index_path = self._index_path(owner, name)
                 json_bytes = json.dumps(self._index_to_dict(index), indent=2).encode("utf-8")
                 compressed = gzip.compress(json_bytes, compresslevel=6)
@@ -494,11 +502,6 @@ class IndexStore:
 
                 # Write metadata sidecar (after index write succeeded)
                 self._write_metadata_sidecar(index)
-
-                # Phase 3: rename all content .tmp → final (after JSON succeeded)
-                for final, tmp in content_tmp_paths:
-                    tmp.replace(final)
-                content_tmp_paths.clear()  # Mark all as renamed — nothing left to clean
 
             finally:
                 # Clean up any content .tmp files that were not yet renamed
@@ -881,19 +884,11 @@ class IndexStore:
                     except OSError:
                         continue  # Symlink or permission error — skip
 
-                # Phase 2: write the compressed JSON index to its .tmp path
-                index_path = self._index_path(owner, name)
-                json_bytes = json.dumps(self._index_to_dict(updated), indent=2).encode("utf-8")
-                compressed = gzip.compress(json_bytes, compresslevel=6)
-                self._atomic_write(index_path, compressed)
-
-                # Remove legacy uncompressed index if it exists
-                legacy = self._legacy_index_path(owner, name)
-                if legacy.exists():
-                    legacy.unlink(missing_ok=True)
-
-                # Write metadata sidecar (after index write succeeded)
-                self._write_metadata_sidecar(updated)
+                # Phase 2: rename all content .tmp → final so content files are
+                # committed before the index references them (RC-007).
+                for final, tmp in content_tmp_paths:
+                    tmp.replace(final)
+                content_tmp_paths.clear()  # Mark all as renamed — nothing left to clean
 
                 # Phase 3: remove deleted files from content dir (containment-validated)
                 for fp in deleted_files:
@@ -911,10 +906,21 @@ class IndexStore:
                                 "Failed to unlink stale content file: %s", exc
                             )
 
-                # Phase 4: rename all content .tmp → final (after JSON succeeded)
-                for final, tmp in content_tmp_paths:
-                    tmp.replace(final)
-                content_tmp_paths.clear()  # Mark all as renamed — nothing left to clean
+                # Phase 4: write the compressed JSON index last — it now points
+                # to already-committed content files, so a crash here cannot
+                # leave the index referencing missing content.
+                index_path = self._index_path(owner, name)
+                json_bytes = json.dumps(self._index_to_dict(updated), indent=2).encode("utf-8")
+                compressed = gzip.compress(json_bytes, compresslevel=6)
+                self._atomic_write(index_path, compressed)
+
+                # Remove legacy uncompressed index if it exists
+                legacy = self._legacy_index_path(owner, name)
+                if legacy.exists():
+                    legacy.unlink(missing_ok=True)
+
+                # Write metadata sidecar (after index write succeeded)
+                self._write_metadata_sidecar(updated)
 
             finally:
                 # Clean up any content .tmp files that were not yet renamed

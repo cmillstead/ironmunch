@@ -47,7 +47,7 @@ def _save_simple_index(store: IndexStore, owner: str, name: str, sym_name: str =
 
 
 class TestCrashDuringSecondSave:
-    """Simulate a crash during Phase 2 (_atomic_write) of a second save_index.
+    """Simulate a crash during Phase 3 (_atomic_write) of a second save_index.
 
     The original index must remain loadable and intact.
     """
@@ -94,19 +94,24 @@ class TestCrashDuringSecondSave:
         assert len(idx2.symbols) == 1
         assert idx2.symbols[0]["name"] == "original"
 
-    def test_original_content_file_survives_index_write_failure(self, tmp_path):
-        """If the index JSON write fails, the original content files must
-        still be retrievable via the original index."""
+    def test_old_index_survives_when_index_write_fails(self, tmp_path):
+        """If the index JSON write fails (Phase 3), the old index must still load.
+
+        With the corrected phase ordering (RC-007), content files are
+        committed (renamed from .tmp) in Phase 2 BEFORE the index JSON
+        is written in Phase 3.  So when the index write fails, content
+        on disk has been updated but the old index metadata is preserved.
+        The key safety property: the old index remains loadable.
+        """
         store = IndexStore(base_path=str(tmp_path))
         _save_simple_index(store, "local", "proj", sym_name="original")
 
-        # Read original content to verify later
+        # Verify first index loads
         idx = store.load_index("local", "proj")
-        content = store.get_symbol_content("local", "proj", "test.py::original#function", index=idx)
-        assert content is not None
-        assert "original" in content
+        assert idx is not None
+        assert idx.symbols[0]["name"] == "original"
 
-        # Fail the second save during the index JSON write
+        # Fail the second save during the index JSON write (Phase 3)
         original_replace = Path.replace
 
         def failing_replace(self_path, target):
@@ -128,12 +133,12 @@ class TestCrashDuringSecondSave:
                     languages={"python": 1},
                 )
 
-        # Original content must still be readable
+        # The old index metadata must still be intact
         store2 = IndexStore(base_path=str(tmp_path))
         idx2 = store2.load_index("local", "proj")
-        content2 = store2.get_symbol_content("local", "proj", "test.py::original#function", index=idx2)
-        assert content2 is not None
-        assert "original" in content2
+        assert idx2 is not None
+        assert len(idx2.symbols) == 1
+        assert idx2.symbols[0]["name"] == "original"
 
 
 class TestTmpFileCleanup:
@@ -169,7 +174,7 @@ class TestTmpFileCleanup:
         assert tmp_files == [], f"Leftover .tmp files: {tmp_files}"
 
     def test_no_content_tmp_after_failed_index_write(self, tmp_path):
-        """Content .tmp files from Phase 1 are cleaned up if Phase 2 fails."""
+        """Content .tmp files are already renamed (Phase 2) before index write (Phase 3) fails."""
         store = IndexStore(base_path=str(tmp_path))
 
         original_replace = Path.replace
@@ -179,8 +184,8 @@ class TestTmpFileCleanup:
             nonlocal call_count
             if ".json.gz.tmp" in str(self_path):
                 raise OSError("Simulated index write failure")
-            # Allow content .tmp renames in Phase 1 — but those haven't
-            # happened yet since Phase 2 comes before Phase 3.
+            # Content .tmp renames (Phase 2) succeed before the index
+            # write (Phase 3) triggers this failure.
             return original_replace(self_path, target)
 
         src = "def foo():\n    return 42\n"
