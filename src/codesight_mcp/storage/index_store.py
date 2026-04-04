@@ -1,5 +1,6 @@
 """Index storage with save/load, byte-offset content retrieval, and incremental indexing."""
 
+import copy
 import errno
 import gzip
 import hashlib
@@ -11,6 +12,7 @@ import re
 import stat as stat_module
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -266,6 +268,13 @@ class IndexStore:
         else:
             self.base_path = Path.home() / ".code-index"
 
+        # LRU cache for load_index — keyed on (owner, name), values are (mtime, size, CodeIndex)
+        self._index_cache: "OrderedDict[tuple[str, str], tuple[float, int, CodeIndex]]" = OrderedDict()
+        self._cache_lock = threading.Lock()
+        self._cache_max_size = 4
+        self._cache_hits = 0
+        self._cache_misses = 0
+
         # CODESIGHT_READ_ONLY env var allows CLI queries to skip fchmod/mkdir
         # in sandboxed environments where filesystem permission ops are blocked.
         if read_only or os.environ.get("CODESIGHT_READ_ONLY", "").lower() in ("1", "true", "yes"):
@@ -322,6 +331,23 @@ class IndexStore:
                         entry.unlink()
                 except OSError:
                     pass
+
+    def _evict_cache(self, owner: str, name: str) -> None:
+        """Remove a repository's cached index before a write or delete operation."""
+        with self._cache_lock:
+            self._index_cache.pop((owner, name), None)
+
+    @property
+    def cache_stats(self) -> dict:
+        """Return cache hit/miss statistics."""
+        with self._cache_lock:
+            return {
+                "size": len(self._index_cache),
+                "max_size": self._cache_max_size,
+                "hits": self._cache_hits,
+                "misses": self._cache_misses,
+                "hit_rate": self._cache_hits / max(1, self._cache_hits + self._cache_misses),
+            }
 
     def _index_path(self, owner: str, name: str) -> Path:
         """Path to compressed index file (.json.gz)."""
@@ -446,84 +472,119 @@ class IndexStore:
                 git_head=git_head,
             )
 
-            # Prepare content directory
-            content_dir = self._content_dir(owner, name)
-            _makedirs_0o700(str(content_dir))
-
-            # Phase 1: write all content files to .tmp paths first so that any
-            # write failure leaves the existing index intact (no split state).
-            content_tmp_paths: list[tuple[Path, Path]] = []  # (final, tmp)
-            skipped_count = 0
-            try:
-                for file_path, content in raw_files.items():
-                    dest = (content_dir / file_path).resolve()
-                    resolved_root = content_dir.resolve()
-                    if not is_within(resolved_root, dest):
-                        skipped_count += 1
-                        logger.warning(
-                            "Skipped content file due to path traversal: destination outside content dir"
-                        )
-                        continue
-                    _makedirs_0o700(str(dest.parent))
-                    tmp_dest = dest.with_name(f"{dest.name}.tmp.{os.getpid()}.{threading.get_ident()}")
-                    try:
-                        fd = os.open(
-                            str(tmp_dest),
-                            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
-                            0o600,
-                        )
-                        with os.fdopen(fd, "w", encoding="utf-8") as f:
-                            f.write(content)
-                        content_tmp_paths.append((dest, tmp_dest))
-                    except OSError:
-                        continue  # Symlink or permission error — skip
-
-                # Phase 2: rename all content .tmp → final so content files are
-                # committed before the index references them.  A crash after this
-                # point but before Phase 3 leaves valid content on disk; the old
-                # index still works and _cleanup_stale_temps() handles orphans.
-                for final, tmp in content_tmp_paths:
-                    tmp.replace(final)
-                content_tmp_paths.clear()  # Mark all as renamed — nothing left to clean
-
-                # Phase 3: write the compressed JSON index to its .tmp path
-                # The index now points to already-committed content files, so a
-                # crash here cannot leave the index referencing missing content.
-                index_path = self._index_path(owner, name)
-                json_bytes = json.dumps(self._index_to_dict(index), indent=2).encode("utf-8")
-                compressed = gzip.compress(json_bytes, compresslevel=6)
-                self._atomic_write(index_path, compressed)
-
-                # Remove legacy uncompressed index if it exists
-                legacy = self._legacy_index_path(owner, name)
-                if legacy.exists():
-                    legacy.unlink(missing_ok=True)
-
-                # Write metadata sidecar (after index write succeeded)
-                self._write_metadata_sidecar(index)
-
-            finally:
-                # Clean up any content .tmp files that were not yet renamed
-                for _final, tmp in content_tmp_paths:
-                    tmp.unlink(missing_ok=True)
-
+            self._commit_index_to_storage(index, raw_files)
             return index
 
-    def load_index(self, owner: str, name: str) -> Optional[CodeIndex]:
-        """Load index from storage. Supports both gzip and legacy JSON formats."""
+    def _commit_index_to_storage(
+        self,
+        index: "CodeIndex",
+        raw_files: dict[str, str],
+        deleted_files: list[str] | None = None,
+    ) -> None:
+        """Commit content files and compressed index to storage atomically.
+
+        Handles: content tmp write → rename → optional delete → gzip index write
+        → legacy cleanup → metadata sidecar → finally cleanup.
+        """
+        owner = index.owner
+        name = index.name
+
+        # Evict cache BEFORE write — prevents stale reads during the write window
+        self._evict_cache(owner, name)
+
+        # Prepare content directory
+        content_dir = self._content_dir(owner, name)
+        _makedirs_0o700(str(content_dir))
+        resolved_root = content_dir.resolve()
+
+        # Phase 1: write all content files to .tmp paths first so that any
+        # write failure leaves the existing index intact (no split state).
+        content_tmp_paths: list[tuple[Path, Path]] = []  # (final, tmp)
+        skipped_count = 0
+        try:
+            for file_path, content in raw_files.items():
+                dest = (content_dir / file_path).resolve()
+                if not is_within(resolved_root, dest):
+                    skipped_count += 1
+                    logger.warning(
+                        "Skipped content file due to path traversal: destination outside content dir"
+                    )
+                    continue
+                _makedirs_0o700(str(dest.parent))
+                tmp_dest = dest.with_name(f"{dest.name}.tmp.{os.getpid()}.{threading.get_ident()}")
+                try:
+                    fd = os.open(
+                        str(tmp_dest),
+                        os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+                        0o600,
+                    )
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    content_tmp_paths.append((dest, tmp_dest))
+                except OSError:
+                    continue  # Symlink or permission error — skip
+
+            # Phase 2: rename all content .tmp → final so content files are
+            # committed before the index references them (RC-007).
+            for final, tmp in content_tmp_paths:
+                tmp.replace(final)
+            content_tmp_paths.clear()  # Mark all as renamed — nothing left to clean
+
+            # Phase 3: write the compressed JSON index — it now points to
+            # already-committed content files, so a crash here cannot leave
+            # the index referencing missing content.
+            index_path = self._index_path(owner, name)
+            json_bytes = json.dumps(self._index_to_dict(index), indent=2).encode("utf-8")
+            compressed = gzip.compress(json_bytes, compresslevel=6)
+            self._atomic_write(index_path, compressed)
+
+            # Phase 4: remove deleted files from content dir AFTER index is durable.
+            # If the index write above fails (ENOSPC etc.), the old index still
+            # references the old content — no split-brain. Deletion only proceeds
+            # after the new index is safely on disk.
+            if deleted_files is not None:
+                for fp in deleted_files:
+                    dead = (content_dir / fp).resolve()
+                    if not is_within(resolved_root, dead):
+                        logger.warning(
+                            "Skipped deleting content file due to path traversal: destination outside content dir"
+                        )
+                        continue
+                    if dead.exists():
+                        try:
+                            dead.unlink()
+                        except OSError as exc:
+                            logging.getLogger(__name__).warning(
+                                "Failed to unlink stale content file: %s", exc
+                            )
+
+            # Remove legacy uncompressed index if it exists
+            legacy = self._legacy_index_path(owner, name)
+            if legacy.exists():
+                legacy.unlink(missing_ok=True)
+
+            # Write metadata sidecar (after index write succeeded)
+            self._write_metadata_sidecar(index)
+
+        finally:
+            # Clean up any content .tmp files that were not yet renamed
+            for _final, tmp in content_tmp_paths:
+                tmp.unlink(missing_ok=True)
+
+    def _resolve_index_path(self, owner: str, name: str) -> Optional[tuple[Path, bool]]:
+        """Resolve index file path, preferring compressed format over legacy JSON."""
         index_path = self._index_path(owner, name)
         legacy_path = self._legacy_index_path(owner, name)
 
         # Try compressed first, fall back to legacy
         if index_path.exists():
-            load_path = index_path
-            compressed = True
+            return (index_path, True)
         elif legacy_path.exists():
-            load_path = legacy_path
-            compressed = False
-        else:
-            return None
+            return (legacy_path, False)
+        return None
 
+    def _read_raw_index(self, load_path: Path, compressed: bool) -> Optional[dict]:
+        """Read, decompress, and JSON-parse an index file from disk."""
         # Open with O_NOFOLLOW first, then fstat on the open fd to avoid
         # TOCTOU between stat() and open() (the old code called stat() which
         # follows symlinks, then open() with O_NOFOLLOW).
@@ -556,6 +617,10 @@ class IndexStore:
             except (UnicodeDecodeError, json.JSONDecodeError):
                 return None  # FUZZ-11: corrupt JSON returns None gracefully
 
+        return data
+
+    def _validate_index_schema(self, data: dict) -> Optional[tuple[dict, int]]:
+        """Check version compatibility and validate structural schema of parsed index data."""
         # Version check
         stored_version = data.get("index_version", 1)
         if not isinstance(stored_version, int) or stored_version > INDEX_VERSION:
@@ -597,6 +662,10 @@ class IndexStore:
         ):
             return None
 
+        return (data, stored_version)
+
+    def _sanitize_loaded_symbols(self, symbols: list[dict]) -> None:
+        """Re-sanitize symbol text fields and validate kinds/hashes on load."""
         # SEC-LOW-5: Re-sanitize symbol text fields on load to catch secrets
         # written before current redaction rules or tampered on disk.
         # ADV-MED-3: Also check summaries for injection phrases.
@@ -604,7 +673,7 @@ class IndexStore:
         # ADV-LOW-6: Validate content_hash format — must be a 64-char lowercase hex
         # string (SHA-256). Discard malformed hashes to prevent verify=True from
         # reporting a spurious mismatch against an arbitrary attacker-controlled string.
-        for sym in data["symbols"]:
+        for sym in symbols:
             for fld in ("signature", "docstring", "summary", "name", "file"):
                 if fld in sym and isinstance(sym[fld], str):
                     sym[fld] = sanitize_signature_for_api(sym[fld])
@@ -633,8 +702,50 @@ class IndexStore:
                 if not isinstance(hash_val, str) or not _HASH_RE.fullmatch(hash_val):
                     sym["content_hash"] = ""
 
+    def load_index(self, owner: str, name: str) -> Optional[CodeIndex]:
+        """Load index from storage. Supports both gzip and legacy JSON formats."""
+        resolved = self._resolve_index_path(owner, name)
+        if resolved is None:
+            return None
+        load_path, compressed = resolved
+
+        # Get file mtime and size for cache key
         try:
-            return CodeIndex(
+            st = load_path.stat()
+            file_mtime = st.st_mtime
+            file_size = st.st_size
+        except OSError:
+            file_mtime = 0.0
+            file_size = 0
+
+        # Check cache
+        with self._cache_lock:
+            cached = self._index_cache.get((owner, name))
+            if cached is not None:
+                cached_mtime, cached_size, cached_index = cached
+                if cached_mtime == file_mtime and cached_size == file_size:
+                    self._cache_hits += 1
+                    logger.debug("Cache hit for %s/%s", owner, name)
+                    self._index_cache.move_to_end((owner, name))
+                    return copy.deepcopy(cached_index)
+
+        # Cache miss — run full pipeline
+        self._cache_misses += 1
+        logger.debug("Cache miss for %s/%s", owner, name)
+
+        data = self._read_raw_index(load_path, compressed)
+        if data is None:
+            return None
+
+        validated = self._validate_index_schema(data)
+        if validated is None:
+            return None
+        data, stored_version = validated
+
+        self._sanitize_loaded_symbols(data["symbols"])
+
+        try:
+            index = CodeIndex(
                 repo=data["repo"],
                 owner=data["owner"],
                 name=data["name"],
@@ -648,6 +759,25 @@ class IndexStore:
             )
         except (KeyError, TypeError, ValueError):
             return None
+
+        # Re-stat for accurate cache key (file may have changed during pipeline)
+        try:
+            st_post = load_path.stat()
+            cache_mtime = st_post.st_mtime
+            cache_size = st_post.st_size
+        except OSError:
+            cache_mtime = file_mtime
+            cache_size = file_size
+
+        # Cache the result — store the original, return a deep copy.
+        # This prevents callers (e.g. incremental_save) from mutating the cached object.
+        with self._cache_lock:
+            if len(self._index_cache) >= self._cache_max_size and (owner, name) not in self._index_cache:
+                self._index_cache.popitem(last=False)  # Remove least recently used
+            self._index_cache[(owner, name)] = (cache_mtime, cache_size, index)
+            self._index_cache.move_to_end((owner, name))
+
+        return copy.deepcopy(index)
 
     def get_symbol_content(
         self,
@@ -851,81 +981,7 @@ class IndexStore:
                 git_head=git_head,
             )
 
-            # Prepare content directory
-            content_dir = self._content_dir(owner, name)
-            _makedirs_0o700(str(content_dir))
-            resolved_root = content_dir.resolve()
-
-            # Phase 1: write changed + new content files to .tmp paths first so
-            # that any write failure leaves the existing index intact (no split state).
-            content_tmp_paths: list[tuple[Path, Path]] = []  # (final, tmp)
-            skipped_count = 0
-            try:
-                for fp, content in raw_files.items():
-                    dest = (content_dir / fp).resolve()
-                    if not is_within(resolved_root, dest):
-                        skipped_count += 1
-                        logger.warning(
-                            "Skipped content file due to path traversal: destination outside content dir"
-                        )
-                        continue
-                    _makedirs_0o700(str(dest.parent))
-                    tmp_dest = dest.with_name(f"{dest.name}.tmp.{os.getpid()}.{threading.get_ident()}")
-                    try:
-                        fd = os.open(
-                            str(tmp_dest),
-                            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
-                            0o600,
-                        )
-                        with os.fdopen(fd, "w", encoding="utf-8") as f:
-                            f.write(content)
-                        content_tmp_paths.append((dest, tmp_dest))
-                    except OSError:
-                        continue  # Symlink or permission error — skip
-
-                # Phase 2: rename all content .tmp → final so content files are
-                # committed before the index references them (RC-007).
-                for final, tmp in content_tmp_paths:
-                    tmp.replace(final)
-                content_tmp_paths.clear()  # Mark all as renamed — nothing left to clean
-
-                # Phase 3: remove deleted files from content dir (containment-validated)
-                for fp in deleted_files:
-                    dead = (content_dir / fp).resolve()
-                    if not is_within(resolved_root, dead):
-                        logger.warning(
-                            "Skipped deleting content file due to path traversal: destination outside content dir"
-                        )
-                        continue
-                    if dead.exists():
-                        try:
-                            dead.unlink()
-                        except OSError as exc:
-                            logging.getLogger(__name__).warning(
-                                "Failed to unlink stale content file: %s", exc
-                            )
-
-                # Phase 4: write the compressed JSON index last — it now points
-                # to already-committed content files, so a crash here cannot
-                # leave the index referencing missing content.
-                index_path = self._index_path(owner, name)
-                json_bytes = json.dumps(self._index_to_dict(updated), indent=2).encode("utf-8")
-                compressed = gzip.compress(json_bytes, compresslevel=6)
-                self._atomic_write(index_path, compressed)
-
-                # Remove legacy uncompressed index if it exists
-                legacy = self._legacy_index_path(owner, name)
-                if legacy.exists():
-                    legacy.unlink(missing_ok=True)
-
-                # Write metadata sidecar (after index write succeeded)
-                self._write_metadata_sidecar(updated)
-
-            finally:
-                # Clean up any content .tmp files that were not yet renamed
-                for _final, tmp in content_tmp_paths:
-                    tmp.unlink(missing_ok=True)
-
+            self._commit_index_to_storage(updated, raw_files, deleted_files=deleted_files)
             return updated
 
     _MAX_REPOS: int = 500
@@ -1056,6 +1112,9 @@ class IndexStore:
         content_dir = self._content_dir(owner, name)
 
         with exclusive_file_lock(self._repo_lock_path(owner, name)):
+            # Evict cache BEFORE delete
+            self._evict_cache(owner, name)
+
             deleted = False
 
             for ipath in (index_path, legacy_path, meta_path):

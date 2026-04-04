@@ -6,6 +6,8 @@ build/
 .venv/
 .pytest_cache/
 docs/plans/
+.aegis/
+.paul/
 .env
 .env.*
 .worktrees/

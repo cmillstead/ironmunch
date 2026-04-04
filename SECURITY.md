@@ -32,7 +32,7 @@ The threat model assumes:
 | Secret exposure via control chars | `assert_no_control_chars` rejects bytes 0x01–0x1F, 0x7F (DEL), and 0x80–0x9F (C1) |
 | Binary confusion | Dual-stage detection: extension-based filtering plus null-byte content sniffing |
 | Credential logging | `_RedactAuthFilter` suppresses httpx log records containing auth headers at all log levels |
-| Supply chain | `uv.lock` pinned with hashes; CI uses `uv sync --frozen`; GitHub Actions are SHA-pinned; dependency upper bounds prevent surprise major upgrades |
+| Supply chain | `uv.lock` pins exact versions; CI uses `uv sync --frozen` for lockfile integrity; GitHub Actions are SHA-pinned; dependency upper bounds prevent surprise major upgrades |
 | Summarizer injection | Injection phrases stripped from summaries (full substring scan, not prefix-only); degraded-mode parse returns empty on missing nonce delimiters; symbol kind validated against allowlist before prompt interpolation; system/user prompt split uses per-batch nonce marker |
 | Env var redirection | `ANTHROPIC_BASE_URL`, `GITHUB_TOKEN`, `CODE_INDEX_PATH`, `CODESIGHT_NO_REDACT`, and `ALLOWED_ROOTS` frozen at module import time; runtime mutation cannot redirect API calls or bypass restrictions |
 | Graph traversal DoS | BFS call-chain capped at 5 paths; all traversal depths clamped to [1, 50]; SHA-256 fingerprint for cache keys |

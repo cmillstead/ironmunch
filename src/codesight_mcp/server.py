@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -535,6 +536,43 @@ def _run_cli_tool(tool_name: str, argv: list[str]) -> None:
             pass
 
 
+def _configure_logging() -> None:
+    """Configure structured logging with CODESIGHT_LOG_LEVEL support.
+
+    CODESIGHT_LOG_LEVEL takes precedence over LOG_LEVEL.
+    CODESIGHT_LOG_LEVEL allows DEBUG/INFO (operator explicitly opted in).
+    LOG_LEVEL is restricted to WARNING/ERROR/CRITICAL (ADV-LOW-10).
+    """
+    # ADV-LOW-10: Restrict LOG_LEVEL to safe values — DEBUG/INFO leak internals.
+    # CODESIGHT_LOG_LEVEL explicitly unlocks DEBUG/INFO for operators who opt in.
+    _SAFE_LOG_LEVELS = {"WARNING", "ERROR", "CRITICAL"}
+    _ALL_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+
+    _codesight_explicit = bool(os.environ.get("CODESIGHT_LOG_LEVEL", ""))
+    _log_level = (
+        os.environ.get("CODESIGHT_LOG_LEVEL", "").upper()
+        or os.environ.get("LOG_LEVEL", "WARNING").upper()
+    )
+    _allowed = _ALL_LOG_LEVELS if _codesight_explicit else _SAFE_LOG_LEVELS
+    if _log_level not in _allowed:
+        _log_level = "WARNING"
+
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    ))
+    root_logger = logging.getLogger()
+    # Clear ALL existing handlers before adding ours.
+    # This ensures:
+    # (a) Idempotency — repeated calls don't accumulate handlers
+    # (b) No stdout leakage — pre-existing stdout handlers are removed
+    # (c) Only our stderr handler remains
+    root_logger.handlers.clear()
+    root_logger.setLevel(getattr(logging, _log_level, logging.WARNING))
+    root_logger.addHandler(handler)
+
+
 def main():
     """Main entry point.
 
@@ -552,15 +590,7 @@ def main():
     """
     import sys
 
-    # ADV-LOW-10: Restrict LOG_LEVEL to safe values — DEBUG/INFO leak internals.
-    _ALLOWED_LOG_LEVELS = {"WARNING", "ERROR", "CRITICAL"}
-    _log_level = os.environ.get("LOG_LEVEL", "WARNING").upper()
-    if _log_level not in _ALLOWED_LOG_LEVELS:
-        _log_level = "WARNING"
-    logging.basicConfig(
-        level=getattr(logging, _log_level, logging.WARNING),
-        format="%(levelname)s %(name)s: %(message)s",
-    )
+    _configure_logging()
 
     from .tools.index_folder import index_folder as _index_folder
     from .tools.index_repo import index_repo as _index_repo
