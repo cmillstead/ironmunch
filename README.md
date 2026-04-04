@@ -140,43 +140,17 @@ Once indexed, the AI uses `get_repo_outline`, `search_symbols`, and `get_symbol`
 
 ### Step 5 (Claude Code): Configure permissions
 
-Allow codesight-mcp tools to avoid a permission prompt on every call. Add to `~/.claude/settings.json`:
+All 28 tools include [MCP ToolAnnotations](https://modelcontextprotocol.io/docs/concepts/tools#annotations) (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`), so MCP clients can make informed permission decisions. For Claude Code, allow all tools with a single wildcard in `~/.claude/settings.json`:
 
 ```json
 "permissions": {
   "allow": [
-    "mcp__codesight-mcp__search_symbols",
-    "mcp__codesight-mcp__search_text",
-    "mcp__codesight-mcp__search_references",
-    "mcp__codesight-mcp__get_symbol",
-    "mcp__codesight-mcp__get_symbols",
-    "mcp__codesight-mcp__get_symbol_context",
-    "mcp__codesight-mcp__get_file_outline",
-    "mcp__codesight-mcp__get_file_tree",
-    "mcp__codesight-mcp__get_repo_outline",
-    "mcp__codesight-mcp__list_repos",
-    "mcp__codesight-mcp__index_repo",
-    "mcp__codesight-mcp__index_folder",
-    "mcp__codesight-mcp__get_callers",
-    "mcp__codesight-mcp__get_callees",
-    "mcp__codesight-mcp__get_call_chain",
-    "mcp__codesight-mcp__get_type_hierarchy",
-    "mcp__codesight-mcp__get_imports",
-    "mcp__codesight-mcp__get_impact",
-    "mcp__codesight-mcp__analyze_complexity",
-    "mcp__codesight-mcp__get_key_symbols",
-    "mcp__codesight-mcp__get_diagram",
-    "mcp__codesight-mcp__get_dead_code",
-    "mcp__codesight-mcp__get_dependencies",
-    "mcp__codesight-mcp__compare_symbols",
-    "mcp__codesight-mcp__get_changes",
-    "mcp__codesight-mcp__get_status",
-    "mcp__codesight-mcp__get_usage_stats"
+    "mcp__codesight-mcp__*"
   ]
 }
 ```
 
-(`invalidate_cache` is intentionally omitted — prompting before deleting an index is desirable.)
+Claude Code will auto-approve read-only tools and prompt for confirmation on write (`index_repo`, `index_folder`) and destructive (`invalidate_cache`) operations based on the annotations.
 
 Add a `CLAUDE.md` to each indexed repo so Claude Code prefers codesight-mcp over reading full files:
 
