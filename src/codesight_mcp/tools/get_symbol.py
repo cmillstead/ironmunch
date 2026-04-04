@@ -11,7 +11,7 @@ from typing import Optional
 from ..security import validate_file_access, safe_read_file, sanitize_signature_for_api
 from ..core.limits import MAX_CONTEXT_LINES
 from ..core.boundaries import wrap_untrusted_content, make_meta
-from ..core.errors import sanitize_error, RepoNotFoundError
+from ..core.errors import sanitize_error
 from ..core.validation import ValidationError
 from ._common import RepoContext, timed, elapsed_ms
 from .registry import ToolSpec, register
@@ -91,7 +91,7 @@ def get_symbol(
     # Get source via byte-offset read
     try:
         source = store.get_symbol_content(owner, name, symbol_id, index=index)
-    except Exception as exc:
+    except (OSError, KeyError, ValueError) as exc:
         return {"error": sanitize_error(exc)}
 
     # --- security gate: clamp context_lines ---
@@ -188,7 +188,7 @@ def get_symbols(
 
         try:
             source = store.get_symbol_content(owner, name, symbol_id, index=index)
-        except Exception as exc:
+        except (OSError, KeyError, ValueError) as exc:
             errors.append({"id": symbol_id, "error": sanitize_error(exc)})
             continue
 

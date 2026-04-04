@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import stat as stat_module
 import threading
 import time
@@ -19,12 +18,12 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from ..parser.symbols import Symbol
-from ..security import sanitize_repo_identifier, sanitize_signature_for_api
-from ..summarizer.batch_summarize import _contains_injection_phrase, _VALID_KINDS
-from ..core.limits import MAX_INDEX_SIZE, MAX_FILE_SIZE
-from ..core.locking import exclusive_file_lock, _UMASK_LOCK
-from ..core.validation import validate_path, ValidationError, is_within
+from ..parser.symbols import Symbol  # noqa: E402
+from ..security import sanitize_repo_identifier, sanitize_signature_for_api  # noqa: E402
+from ..summarizer.batch_summarize import _contains_injection_phrase, _VALID_KINDS  # noqa: E402
+from ..core.limits import MAX_INDEX_SIZE, MAX_FILE_SIZE  # noqa: E402
+from ..core.locking import exclusive_file_lock, _UMASK_LOCK  # noqa: E402
+from ..core.validation import validate_path, ValidationError, is_within  # noqa: E402
 
 # Bump this when the index schema changes in an incompatible way.
 INDEX_VERSION = 2
@@ -93,7 +92,7 @@ def _open_nofollow_text(path: "Path") -> "io.TextIOWrapper":
     fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW)
     try:
         return io.open(fd, "r", encoding="utf-8")
-    except Exception:
+    except (OSError, ValueError):
         os.close(fd)
         raise
 
@@ -398,7 +397,7 @@ class IndexStore:
                     f.write(data)
             # Atomic rename (POSIX-atomic; best-effort on Windows)
             tmp_path.replace(final_path)
-        except Exception:
+        except OSError:
             tmp_path.unlink(missing_ok=True)
             raise
 
@@ -937,7 +936,8 @@ class IndexStore:
             fd = os.open(str(meta_path), os.O_RDONLY | os.O_NOFOLLOW)
             with os.fdopen(fd, "r", encoding="utf-8") as f:
                 data = json.load(f)
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logger.debug("Failed to read metadata sidecar %s: %s", meta_path, exc)
             return None
         required = ("repo", "indexed_at", "symbol_count", "file_count", "languages", "index_version")
         if not all(k in data for k in required):
@@ -1041,7 +1041,9 @@ class IndexStore:
                         "languages": data["languages"],
                         "index_version": data.get("index_version", 1),
                     })
-                except Exception:
+                except (OSError, gzip.BadGzipFile, json.JSONDecodeError, KeyError,
+                        UnicodeDecodeError, ValueError) as exc:
+                    logger.debug("Skipping corrupt index file %s: %s", index_file, exc)
                     continue
 
         return repos
@@ -1096,7 +1098,7 @@ class IndexStore:
         # failure (file object owns fd) to prevent double-close.
         try:
             fh = os.fdopen(fd, "w", encoding="utf-8")
-        except Exception:
+        except OSError:
             os.close(fd)  # fdopen failed — we still own the fd
             return False
         with fh:

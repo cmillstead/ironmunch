@@ -23,6 +23,8 @@ from .core.limits import MAX_FILE_SIZE, MAX_FILE_COUNT, MAX_DIRECTORY_DEPTH, GIT
 from .core.validation import is_within, assert_no_control_chars, assert_safe_segments, ValidationError
 from .parser.languages import LANGUAGE_EXTENSIONS
 
+logger = logging.getLogger(__name__)
+
 
 # File patterns to always skip (directories, generated files, lock files)
 SKIP_PATTERNS = [
@@ -136,8 +138,8 @@ def _load_gitignore(folder_path: Path) -> Optional[pathspec.PathSpec]:
             # ADV-MED-12: drop per-pattern overlong entries to prevent ReDoS
             lines = [p for p in lines if len(p) <= MAX_GITIGNORE_PATTERN_LEN]
             return _safe_pathspec_from_lines(lines)
-        except Exception:
-            pass
+        except (OSError, ValueError) as exc:
+            logger.debug("Failed to load .gitignore at %s: %s", gitignore_path, exc)
     return None
 
 
@@ -211,8 +213,8 @@ def discover_local_files(
         bounded = [p[:MAX_PATTERN_LENGTH] for p in extra_ignore_patterns[:MAX_IGNORE_PATTERNS]]
         try:
             extra_spec = pathspec.PathSpec.from_lines("gitignore", bounded)
-        except Exception:
-            pass
+        except ValueError as exc:
+            logger.debug("Failed to parse extra ignore patterns: %s", exc)
 
     visited_dirs: set[str] = set()
     for dirpath, dirnames, filenames in os.walk(root, followlinks=follow_symlinks):
@@ -499,7 +501,8 @@ async def fetch_gitignore(
     """
     try:
         return await fetch_file_content(owner, repo, ".gitignore", token)
-    except Exception:
+    except (httpx.HTTPError, OSError, ValueError) as exc:
+        logger.debug("Failed to fetch .gitignore for %s/%s: %s", owner, repo, exc)
         return None
 
 
@@ -543,8 +546,8 @@ def discover_source_files(
             # ADV-LOW-2: drop overlong patterns to prevent ReDoS (matches local _load_gitignore)
             lines = [p for p in lines if len(p) <= MAX_GITIGNORE_PATTERN_LEN]
             gitignore_spec = _safe_pathspec_from_lines(lines)
-        except Exception:
-            pass
+        except ValueError as exc:
+            logger.debug("Failed to parse gitignore content: %s", exc)
 
     files: list[str] = []
 

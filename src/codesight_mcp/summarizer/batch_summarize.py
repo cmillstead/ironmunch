@@ -1,14 +1,19 @@
 """Three-tier summarization: docstring > AI (Haiku) > signature fallback."""
 
+from __future__ import annotations
+
 import logging
 import math
 import os
 import re
 import secrets
+from typing import TYPE_CHECKING
 import unicodedata
-from typing import Optional
 
 import httpx as _httpx
+
+if TYPE_CHECKING:
+    import anthropic
 
 from ..core.validation import ValidationError
 from ..parser.symbols import Symbol
@@ -301,7 +306,8 @@ class BatchSummarizer:
                     sym.summary = signature_fallback(sym)
 
         except Exception as exc:
-            # On any error, fall back to signature
+            # RC-011: Intentionally broad — AI summarization must gracefully degrade
+            # on any error (API timeout, auth failure, malformed response, etc.).
             logger.warning("AI summarization failed, falling back to signatures: %s", exc)
             for sym in batch:
                 if not sym.summary:

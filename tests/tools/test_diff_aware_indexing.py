@@ -1,10 +1,8 @@
 """Tests for diff-aware (git-based) indexing in index_folder (Task 19)."""
 
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 import subprocess
 
-import pytest
 
 from codesight_mcp.tools.index_folder import (
     _is_git_repo,
@@ -59,7 +57,7 @@ class TestGitHeadCommit:
             assert _git_head_commit(tmp_path) is None
 
     def test_returns_none_on_exception(self, tmp_path):
-        with patch("codesight_mcp.tools.index_folder.subprocess.run", side_effect=Exception("boom")):
+        with patch("codesight_mcp.tools.index_folder.subprocess.run", side_effect=OSError("boom")):
             assert _git_head_commit(tmp_path) is None
 
 
@@ -85,7 +83,7 @@ class TestGitChangedFiles:
             assert _git_changed_files(tmp_path, "abc123") is None
 
     def test_returns_none_on_exception(self, tmp_path):
-        with patch("codesight_mcp.tools.index_folder.subprocess.run", side_effect=Exception("boom")):
+        with patch("codesight_mcp.tools.index_folder.subprocess.run", side_effect=OSError("boom")):
             assert _git_changed_files(tmp_path, "abc123") is None
 
     def test_empty_diff_returns_empty_set(self, tmp_path):
@@ -241,7 +239,7 @@ class TestDiffAwareIndexing:
         git_check = MagicMock(returncode=0, stdout="true\n")
         head_result = MagicMock(returncode=0, stdout="abc123\n")
 
-        call_count = [0]
+        _call_count = [0]
 
         def mock_run_first(cmd, **kwargs):
             if "rev-parse" in cmd and "--is-inside-work-tree" in cmd:

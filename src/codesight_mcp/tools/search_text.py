@@ -11,7 +11,6 @@ from typing import Optional
 from ..security import validate_file_access, sanitize_signature_for_api, safe_read_file, _no_redact
 from ..core.limits import MAX_SEARCH_RESULTS
 from ..core.boundaries import wrap_untrusted_content, make_meta
-from ..core.errors import RepoNotFoundError
 from ..core.validation import ValidationError
 from ._common import RepoContext, timed, elapsed_ms
 from .registry import ToolSpec, register
@@ -56,7 +55,7 @@ def _search_text_single_repo(
 
         try:
             content = safe_read_file(validated, str(content_dir))
-        except Exception:
+        except (OSError, ValidationError):
             continue
 
         files_searched += 1

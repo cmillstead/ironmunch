@@ -4,9 +4,8 @@ import asyncio
 import logging
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 from codesight_mcp.discovery import _RedactAuthFilter
 from codesight_mcp.tools.search_symbols import search_symbols
@@ -161,7 +160,7 @@ class TestIndexFolderParsedWarningsNoPath:
         with patch("codesight_mcp.tools._indexing_common.parse_file") as mock_parse:
             def side_effect(content, path, language):
                 if "bad.py" in path:
-                    raise RuntimeError("simulated parse error")
+                    raise ValueError("simulated parse error")
                 # Return minimal symbol list for good file
                 from codesight_mcp.parser.symbols import Symbol
                 return [Symbol(
@@ -207,8 +206,7 @@ class TestIndexRepoParsedWarningsNoPath:
 
     def test_parse_failure_warning_has_count_not_path(self):
         """When a repo file fails to parse, the warning must not contain the path."""
-        from unittest.mock import AsyncMock, patch
-        import asyncio
+        from unittest.mock import patch
 
         tree_entries = [
             {"path": "good.py", "type": "blob", "size": 50},
@@ -236,7 +234,7 @@ class TestIndexRepoParsedWarningsNoPath:
             from codesight_mcp.parser.symbols import Symbol
             def side_effect(content, path, language):
                 if "bad.py" in path:
-                    raise RuntimeError("simulated parse error")
+                    raise ValueError("simulated parse error")
                 return [Symbol(
                     id=f"{path}::ok#function",
                     file=path, name="ok", qualified_name="ok",

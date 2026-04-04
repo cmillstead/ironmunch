@@ -11,6 +11,7 @@ from typing import Optional, Union
 from ..security import sanitize_repo_identifier
 from ..storage import CodeIndex, IndexStore
 from ..core.errors import sanitize_error, RepoNotFoundError
+from ..core.validation import ValidationError
 from ..parser.graph import CodeGraph
 
 
@@ -36,7 +37,7 @@ def parse_repo(
         store = IndexStore(base_path=storage_path)
         try:
             repos = store.list_repos()
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             raise RepoNotFoundError(f"Failed to list repositories: {exc}") from exc
         # 1. Exact name match (e.g. "myproject" matches "acme/myproject")
         matching = [r for r in repos if r["repo"].endswith(f"/{repo}")]
@@ -64,7 +65,7 @@ def parse_repo(
     try:
         sanitize_repo_identifier(owner)
         sanitize_repo_identifier(name)
-    except Exception as exc:
+    except (ValueError, ValidationError) as exc:
         raise RepoNotFoundError(sanitize_error(exc)) from exc
 
     return owner, name
@@ -198,7 +199,7 @@ def prepare_graph_query(
     # Build graph from index
     try:
         graph = CodeGraph.get_or_build(index.symbols)
-    except Exception:
+    except (ValueError, TypeError, KeyError):
         return {"error": "Failed to build code graph"}
 
     return (owner, name, index, graph, symbol_info)

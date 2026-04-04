@@ -139,7 +139,7 @@ def search_references(
 
         try:
             content = safe_read_file(validated, str(content_dir))
-        except Exception:
+        except (OSError, ValidationError):
             continue
 
         files_searched += 1

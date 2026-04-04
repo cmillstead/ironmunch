@@ -9,7 +9,11 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import logging
+
 from .locking import ensure_private_dir
+
+logger = logging.getLogger(__name__)
 
 _MAX_LOG_BYTES = 50 * 1024 * 1024
 
@@ -95,12 +99,12 @@ class UsageLogger:
                 if len(self._records) > self._max_memory:
                     evict_count = max(1, int(self._max_memory * 0.2))
                     self._records = self._records[evict_count:]
-        except Exception:
-            pass
+        except (RuntimeError, MemoryError) as exc:
+            logger.debug("Usage record memory append failed: %s", exc)
         try:
             self._write_to_file(rec)
-        except Exception:
-            pass
+        except OSError as exc:
+            logger.debug("Usage record file write failed: %s", exc)
 
     def _write_to_file(self, rec: UsageRecord) -> None:
         """Write a record as JSONL to the log file."""

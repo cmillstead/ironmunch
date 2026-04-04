@@ -81,7 +81,7 @@ def atomic_write_nofollow(path: str | Path, data: str) -> None:
             tmp_path.unlink(missing_ok=True)
             tmp_path = None
             raise
-    except Exception:
+    except OSError:
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
         raise

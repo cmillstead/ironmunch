@@ -135,7 +135,7 @@ def get_symbol_context(
     # Retrieve source code for the target symbol
     try:
         source = store.get_symbol_content(owner, name, symbol_id, index=index)
-    except Exception as exc:
+    except (OSError, KeyError, ValueError) as exc:
         return {"error": sanitize_error(exc)}
 
     target_file = symbol.get("file", "")

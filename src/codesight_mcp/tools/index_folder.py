@@ -7,23 +7,25 @@ path traversal) is handled by ``discover_local_files()``.
 
 import errno
 import hashlib
+import logging
 import os
 import re
 import subprocess
 from pathlib import Path
 from typing import Optional
 
+logger = logging.getLogger(__name__)
+
 _GIT_HASH_RE = re.compile(r"^[0-9a-f]{40}$")
 
-from ..discovery import discover_local_files
-from ..parser import LANGUAGE_EXTENSIONS
-from ..security import sanitize_repo_identifier
-from ..core.errors import sanitize_error
-from ..core.limits import MAX_FILE_COUNT
-from ..core.validation import validate_path, ValidationError, is_within
-from ..storage import IndexStore
-from .registry import ToolSpec, register
-from ._indexing_common import parse_source_files, finalize_index
+from ..discovery import discover_local_files  # noqa: E402
+from ..parser import LANGUAGE_EXTENSIONS  # noqa: E402
+from ..security import sanitize_repo_identifier  # noqa: E402
+from ..core.errors import sanitize_error  # noqa: E402
+from ..core.validation import is_within, ValidationError  # noqa: E402
+from ..storage import IndexStore  # noqa: E402
+from .registry import ToolSpec, register  # noqa: E402
+from ._indexing_common import parse_source_files, finalize_index  # noqa: E402
 
 
 def _is_git_repo(folder_path: Path) -> bool:
@@ -40,7 +42,8 @@ def _is_git_repo(folder_path: Path) -> bool:
             timeout=5,
         )
         return result.returncode == 0 and result.stdout.strip() == "true"
-    except Exception:
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug("git repo check failed for %s: %s", folder_path, exc)
         return False
 
 
@@ -56,8 +59,8 @@ def _git_head_commit(folder_path: Path) -> Optional[str]:
         )
         if result.returncode == 0:
             return result.stdout.strip()
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug("git HEAD check failed for %s: %s", folder_path, exc)
     return None
 
 
@@ -99,7 +102,8 @@ def _git_changed_files(folder_path: Path, since_commit: str) -> Optional[set[str
                 if line:
                     changed.add(line)
         return changed
-    except Exception:
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug("git diff failed for %s since %s: %s", folder_path, since_commit, exc)
         return None
 
 
@@ -178,7 +182,7 @@ def index_folder(
         try:
             sanitize_repo_identifier(owner)
             sanitize_repo_identifier(repo_name)
-        except Exception as exc:
+        except (ValueError, ValidationError) as exc:
             return {"success": False, "error": sanitize_error(exc)}
 
         # --- Diff-aware indexing: skip unchanged files in git repos ---
@@ -198,8 +202,8 @@ def index_folder(
                         changed = _git_changed_files(folder_path, prev_index.git_head)
                         if changed is not None:
                             git_changed_set = changed
-                except Exception:
-                    pass  # Fall back to full re-index silently
+                except (OSError, ValueError, KeyError) as exc:
+                    logger.debug("Diff-aware check failed, falling back to full re-index: %s", exc)
 
         # Build (rel_path, content) iterator with security gates
         def _read_files(only_files: Optional[set[str]] = None):
@@ -234,7 +238,7 @@ def index_folder(
                     else:
                         warnings.append("Failed to read file")
                     continue
-                except Exception:
+                except (ValueError, UnicodeDecodeError):
                     warnings.append("Failed to read file")
                     continue
 
@@ -338,6 +342,7 @@ def index_folder(
         )
 
     except Exception as e:
+        # RC-011: Intentionally broad — outer error boundary for indexing pipeline.
         return {"success": False, "error": sanitize_error(e)}
 
 

@@ -102,7 +102,7 @@ def safe_read_file(abs_path: str, root: str) -> str:
     # owns the fd and we use a with-block for cleanup.
     try:
         fh = os.fdopen(fd, encoding="utf-8", errors="replace")
-    except Exception:
+    except OSError:
         os.close(fd)
         raise
 
@@ -256,7 +256,7 @@ def sanitize_repo_identifier(identifier: str) -> str:
         raise ValidationError("Repository identifier contains reserved separator")
     if not _REPO_ID_PATTERN.match(identifier):
         raise ValidationError(
-            f"Repository identifier contains unsafe characters"
+            "Repository identifier contains unsafe characters"
         )
     if identifier in (".", ".."):
         raise ValidationError("Reserved path name")

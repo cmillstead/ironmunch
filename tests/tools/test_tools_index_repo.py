@@ -1,7 +1,7 @@
 """HTTP error and validation tests for the index_repo tool (TEST-MED-5)."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -122,7 +122,7 @@ async def test_index_repo_warnings_not_overwritten(tmp_path, monkeypatch):
                     signature="def foo():", summary="",
                     byte_offset=0, byte_length=len(content),
                 )]
-            raise RuntimeError("parse boom")
+            raise ValueError("parse boom")
 
         mock_parse.side_effect = fake_parse
         mock_sum.side_effect = lambda syms, use_ai: syms

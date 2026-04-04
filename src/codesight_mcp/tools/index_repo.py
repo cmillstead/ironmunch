@@ -20,7 +20,7 @@ from ..discovery import (
 )
 from ..security import sanitize_repo_identifier
 from ..core.errors import sanitize_error
-from ..core.limits import MAX_FILE_COUNT, GITHUB_API_TIMEOUT
+from ..core.validation import ValidationError
 from .registry import ToolSpec, register
 from ._indexing_common import parse_source_files, finalize_index
 
@@ -56,7 +56,7 @@ async def index_repo(
     try:
         sanitize_repo_identifier(owner)
         sanitize_repo_identifier(repo)
-    except Exception as exc:
+    except (ValueError, ValidationError) as exc:
         return {"success": False, "error": sanitize_error(exc)}
 
     # Get GitHub token from frozen env if not provided
@@ -79,7 +79,7 @@ async def index_repo(
         # Fetch .gitignore
         try:
             gitignore_content = await fetch_gitignore(owner, repo, github_token)
-        except Exception:
+        except (httpx.HTTPError, OSError, ValueError):
             gitignore_content = ""
 
         # Discover source files (uses codesight_mcp.discovery)
@@ -96,7 +96,7 @@ async def index_repo(
                 try:
                     content = await fetch_file_content(owner, repo, path, github_token)
                     return path, content
-                except Exception:
+                except (httpx.HTTPError, OSError, ValueError):
                     return path, ""
 
         tasks = [fetch_with_limit(path) for path in source_files]
@@ -131,6 +131,7 @@ async def index_repo(
         return result
 
     except Exception as e:
+        # RC-011: Intentionally broad — outer error boundary for indexing pipeline.
         return {"success": False, "error": sanitize_error(e)}
 
 
