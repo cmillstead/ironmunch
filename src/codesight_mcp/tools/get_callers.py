@@ -88,7 +88,6 @@ def get_callers(
         "symbol_name": wrap_untrusted_content(target_name),
         "max_depth": max_depth,
         "caller_count": len(callers),
-        "truncated": truncated,
         "callers": callers,
         "truncated": truncated,
         "_meta": {

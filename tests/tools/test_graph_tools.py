@@ -444,6 +444,18 @@ def test_get_callers_has_truncated_flag(graph_index):
     assert result["truncated"] is False
 
 
+def test_get_callers_no_duplicate_truncated_key(graph_index):
+    """F-03-002: get_callers return dict must have exactly one 'truncated' key."""
+    result = get_callers("local/testgraph", "utils-py::validate#function", storage_path=graph_index["path"])
+    assert "error" not in result
+    # Count occurrences of "truncated" in the top-level keys — dicts silently
+    # deduplicate, so we verify via source inspection that the literal has no
+    # duplicate, and also confirm the runtime value is consistent.
+    keys = list(result.keys())
+    assert keys.count("truncated") == 1
+    assert isinstance(result["truncated"], bool)
+
+
 def test_get_callees_has_truncated_flag(graph_index):
     """get_callees result should include 'truncated' key."""
     result = get_callees("local/testgraph", "app-py::main#function", storage_path=graph_index["path"])

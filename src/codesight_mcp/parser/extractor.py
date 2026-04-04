@@ -35,7 +35,7 @@ _LANGUAGE_FUNC_MAP = {
 # Languages only available via tree-sitter-language-pack (no standalone PyPI package)
 _LANGUAGE_PACK_LANGUAGES = {"dart", "perl"}
 
-def _get_parser(lang_name: str) -> Parser:
+def _get_parser(lang_name: str) -> Parser | None:
     """Get a tree-sitter parser for a language, loading binding on first use."""
     if lang_name not in _ALLOWED_LANGUAGES:
         raise ValueError(f"Unsupported language: {lang_name}")
