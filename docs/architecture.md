@@ -4,7 +4,7 @@
 
 ## Executive Summary
 
-codesight-mcp is a security-hardened MCP server that indexes codebases via tree-sitter AST parsing and exposes 22 tools for symbol retrieval, code graph traversal, complexity analysis, and impact assessment. It follows a **layered library architecture** with a declarative tool registry, defense-in-depth security, and gzip-compressed persistent indexes.
+codesight-mcp is a security-hardened MCP server that indexes codebases via tree-sitter AST parsing and exposes 28 tools for symbol retrieval, code graph traversal, complexity analysis, and impact assessment. It follows a **layered library architecture** with a declarative tool registry, defense-in-depth security, and gzip-compressed persistent indexes.
 
 The architecture prioritizes:
 - **Security first** — 6-step path validation, content boundary markers, error sanitization, rate limiting
@@ -18,15 +18,15 @@ The architecture prioritizes:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  MCP Protocol Layer (server.py — 286 lines)             │
+│  MCP Protocol Layer (server.py — 593 lines)             │
 │  Dispatcher: sanitize args → rate limit → route → wrap  │
 └────────────────────────┬────────────────────────────────┘
                          │ ToolSpec registry
 ┌────────────────────────▼────────────────────────────────┐
-│  Tool Layer (tools/ — 22 modules)                       │
+│  Tool Layer (tools/ — 28 modules)                       │
 │  Each tool: validate → resolve repo → query → format    │
 │  Categories: Indexing | Navigation | Search | Graph |   │
-│              Analysis                                   │
+│              Analysis | Dependencies & Diffing          │
 └────┬──────────┬──────────┬──────────┬──────────────────┘
      │          │          │          │
 ┌────▼───┐ ┌───▼────┐ ┌───▼────┐ ┌───▼──────────┐
@@ -45,7 +45,7 @@ The architecture prioritizes:
 
 ### 1. Server / Dispatcher (`server.py`)
 
-The server is intentionally thin (286 lines). It handles:
+The server is intentionally thin (593 lines). It handles:
 
 - **MCP protocol** — stdio transport via `mcp.server.stdio`
 - **Tool registration** — Auto-discovers `ToolSpec` instances from `tools/registry.py`
@@ -63,15 +63,16 @@ MCP request → _sanitize_arguments() → rate_limit check → tool function →
 
 ### 2. Tool Layer (`tools/`)
 
-22 tools organized into 5 categories, each implemented as a standalone module exporting a `ToolSpec`:
+28 tools organized into 5 categories, each implemented as a standalone module exporting a `ToolSpec`:
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
 | **Indexing** | `index_repo`, `index_folder`, `list_repos`, `invalidate_cache` | Create, list, delete code indexes |
-| **Navigation** | `get_repo_outline`, `get_file_tree`, `get_file_outline`, `get_symbol`, `get_symbols` | Browse repository structure and retrieve symbols |
-| **Search** | `search_symbols`, `search_text` | Find symbols by name/signature or full-text content search |
+| **Navigation** | `get_repo_outline`, `get_file_tree`, `get_file_outline`, `get_symbol`, `get_symbols`, `get_symbol_context` | Browse repository structure and retrieve symbols |
+| **Search** | `search_symbols`, `search_text`, `search_references` | Find symbols by name/signature or full-text content search |
 | **Code Graph** | `get_callers`, `get_callees`, `get_call_chain`, `get_type_hierarchy`, `get_imports`, `get_impact`, `get_dead_code` | Navigate call relationships, inheritance, imports, and change impact |
-| **Analysis** | `analyze_complexity`, `get_key_symbols`, `get_diagram`, `get_status` | Complexity metrics, PageRank importance, Mermaid visualization |
+| **Analysis** | `analyze_complexity`, `get_key_symbols`, `get_diagram`, `get_status`, `get_usage_stats` | Complexity metrics, PageRank importance, Mermaid visualization, usage telemetry |
+| **Dependencies & Diffing** | `get_dependencies`, `compare_symbols`, `get_changes` | External vs internal imports, symbol-level diffs, git change impact |
 
 **Tool registration pattern:**
 ```python
@@ -136,7 +137,7 @@ Security and infrastructure primitives used by all other layers:
 | `validation.py` | Path validation | 6-step chain: normalize → traversal check → component check → extension check → symlink check → containment check |
 | `boundaries.py` | Content wrapping | `wrap_untrusted_content()` adds boundary markers to prevent prompt injection (fan-in: 47) |
 | `errors.py` | Error sanitization | `sanitize_error()` strips system paths, replaces with generic messages |
-| `limits.py` | Resource constants | MAX_FILE_SIZE=500KB, MAX_SYMBOLS=50000, MAX_INDEX_SIZE=200MB |
+| `limits.py` | Resource constants | MAX_FILE_SIZE=500KB, MAX_FILE_COUNT=5000, MAX_INDEX_SIZE=200MB |
 | `rate_limiting.py` | Rate limiter | Persistent file-backed, per-tool (60/min) + global (300/min) |
 | `locking.py` | File locking | `exclusive_file_lock()` context manager, `ensure_private_dir()` |
 | `security.py` | Secret detection | `is_secret_file()`, `sanitize_repo_identifier()`, `sanitize_signature_for_api()` |
@@ -246,20 +247,20 @@ graph LR
 
 | Category | Tests | Coverage Focus |
 |----------|-------|----------------|
-| Security/Adversarial | 417 (39%) | Path traversal, injection, chaos testing, real filesystem |
-| Unit (Parser/Analysis) | 276 (26%) | AST extraction, graph algorithms, complexity metrics |
-| Tools | 201 (19%) | Each tool's input validation, output format, edge cases |
-| Core Infrastructure | 79 (7%) | Validation chain, rate limiting, locking, error handling |
-| Server/Registry | 76 (7%) | Dispatch, sanitization, tool registration |
-| Storage | 15 (1%) | Index read/write, gzip, incremental updates |
-| Integration | 9 (1%) | Full pipeline: index → query → verify |
-| **Total** | **1,073** | |
+| Security/Adversarial | 630 (39%) | Path traversal, injection, chaos testing, real filesystem |
+| Unit (Parser/Analysis) | 421 (26%) | AST extraction, graph algorithms, complexity metrics |
+| Tools | 307 (19%) | Each tool's input validation, output format, edge cases |
+| Core Infrastructure | 113 (7%) | Validation chain, rate limiting, locking, error handling |
+| Server/Registry | 113 (7%) | Dispatch, sanitization, tool registration |
+| Storage | 18 (1%) | Index read/write, gzip, incremental updates |
+| Integration | 16 (1%) | Full pipeline: index → query → verify |
+| **Total** | **1,618** | |
 
 Testing philosophy: security tests use real filesystems with no mocking, adversarial tests attempt to break security boundaries.
 
 ## Design Decisions
 
-1. **Thin server, fat tools** — Server is 286 lines; all business logic lives in tool modules. This keeps the dispatch layer auditable and makes tools independently testable.
+1. **Thin server, fat tools** — Server dispatcher is thin; all business logic lives in tool modules. This keeps the dispatch layer auditable and makes tools independently testable.
 
 2. **Declarative registries** — Both `ToolSpec` and `LanguageSpec` use dataclass-based declarations rather than inheritance. Adding a new tool or language requires no changes to existing code.
 
