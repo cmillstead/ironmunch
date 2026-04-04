@@ -84,39 +84,13 @@ uv sync            # recommended — uses lockfile with pinned versions
 # or: pip install -e .  (uses version ranges, not the lockfile)
 ```
 
-### Step 2: Configure your MCP client
+### Step 2: Register the MCP server
 
-Add codesight-mcp to your MCP client configuration. For **Claude Desktop**:
-
-```json
-{
-  "mcpServers": {
-    "codesight-mcp": {
-      "command": "codesight-mcp",
-      "env": {
-        "CODESIGHT_ALLOWED_ROOTS": "/Users/you/src",
-        "GITHUB_TOKEN": "ghp_...",
-        "ANTHROPIC_API_KEY": "sk-ant-..."
-      }
-    }
-  }
-}
-```
-
-For **Claude Code**, add to `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "codesight-mcp": {
-      "command": "/path/to/.venv/bin/codesight-mcp",
-      "env": {
-        "CODESIGHT_ALLOWED_ROOTS": "/Users/you/src",
-        "GITHUB_TOKEN": "ghp_..."
-      }
-    }
-  }
-}
+```bash
+claude mcp add codesight-mcp \
+  -e CODESIGHT_ALLOWED_ROOTS=/Users/you/src \
+  -e GITHUB_TOKEN=ghp_... \
+  -- /path/to/codesight-mcp/.venv/bin/codesight-mcp
 ```
 
 | Variable | Required | Description |
@@ -124,6 +98,15 @@ For **Claude Code**, add to `~/.claude/settings.json`:
 | `CODESIGHT_ALLOWED_ROOTS` | Yes (local) | Colon-separated directories `index_folder` may access. Denied by default if unset. |
 | `GITHUB_TOKEN` | Yes (GitHub) | Required for private repos; recommended to avoid rate limits on public repos. |
 | `ANTHROPIC_API_KEY` | No | Enables AI-generated symbol summaries. Falls back to docstrings if unset. |
+
+All 28 tools include [MCP ToolAnnotations](https://modelcontextprotocol.io/docs/concepts/tools#annotations) so your client can make permission decisions automatically:
+
+| Annotation | Meaning | Tools |
+|------------|---------|-------|
+| `readOnlyHint: true` | Does not modify any state | 25 tools (search, navigation, analysis) |
+| `destructiveHint: false, idempotentHint: true` | Creates/updates state, safe to retry | `index_repo`, `index_folder` |
+| `destructiveHint: true, idempotentHint: true` | Deletes data, safe to retry | `invalidate_cache` |
+| `openWorldHint: true` | Accesses external services (GitHub, Anthropic) | `index_repo`, `index_folder` |
 
 ### Step 3: Index a repository
 
@@ -138,19 +121,7 @@ The AI calls `index_folder` or `index_repo`, which fetches files, parses ASTs, a
 
 Once indexed, the AI uses `get_repo_outline`, `search_symbols`, and `get_symbol` to navigate your codebase — retrieving only the symbols it needs instead of entire files.
 
-### Step 5 (Claude Code): Configure permissions
-
-All 28 tools include [MCP ToolAnnotations](https://modelcontextprotocol.io/docs/concepts/tools#annotations) (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`), so MCP clients can make informed permission decisions. For Claude Code, allow all tools with a single wildcard in `~/.claude/settings.json`:
-
-```json
-"permissions": {
-  "allow": [
-    "mcp__codesight-mcp__*"
-  ]
-}
-```
-
-Claude Code will auto-approve read-only tools and prompt for confirmation on write (`index_repo`, `index_folder`) and destructive (`invalidate_cache`) operations based on the annotations.
+### Step 5 (optional): Add a CLAUDE.md to indexed repos
 
 Add a `CLAUDE.md` to each indexed repo so Claude Code prefers codesight-mcp over reading full files:
 
