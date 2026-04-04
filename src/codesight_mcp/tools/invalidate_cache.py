@@ -7,6 +7,7 @@ from ..parser.graph import CodeGraph
 from ..storage import IndexStore
 from ._common import parse_repo
 from .registry import ToolSpec, register
+from mcp.types import ToolAnnotations
 
 
 def invalidate_cache(
@@ -104,4 +105,5 @@ _spec = register(ToolSpec(
     ),
     destructive=True,
     required_args=["repo"],
+    annotations=ToolAnnotations(title="Delete Repository Index", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False),
 ))

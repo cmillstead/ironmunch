@@ -5,6 +5,7 @@ from typing import Optional
 from ..core.boundaries import make_meta, wrap_untrusted_content
 from ..core.validation import ValidationError
 from ._common import prepare_graph_query, timed, elapsed_ms
+from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
 
@@ -141,4 +142,5 @@ _spec = register(ToolSpec(
     ),
     untrusted=True,
     required_args=["repo", "file"],
+    annotations=ToolAnnotations(title="Get Imports", readOnlyHint=True, openWorldHint=False),
 ))

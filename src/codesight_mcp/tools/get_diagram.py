@@ -7,6 +7,7 @@ from ..core.boundaries import make_meta, wrap_untrusted_content
 from ..parser.graph import CodeGraph
 from ..security import sanitize_signature_for_api
 from ._common import RepoContext, timed, elapsed_ms
+from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
 
@@ -428,4 +429,5 @@ _spec = register(ToolSpec(
     ),
     untrusted=True,
     required_args=["repo", "type"],
+    annotations=ToolAnnotations(title="Get Diagram", readOnlyHint=True, openWorldHint=False),
 ))

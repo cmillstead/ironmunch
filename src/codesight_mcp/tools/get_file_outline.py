@@ -5,6 +5,7 @@ from typing import Optional
 from ..core.boundaries import make_meta, wrap_untrusted_content
 from ..parser import Symbol, SymbolNode, build_symbol_tree
 from ._common import RepoContext, timed, elapsed_ms
+from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
 
@@ -147,4 +148,5 @@ _spec = register(ToolSpec(
     ),
     untrusted=True,
     required_args=["repo", "file_path"],
+    annotations=ToolAnnotations(title="Get File Outline", readOnlyHint=True, openWorldHint=False),
 ))

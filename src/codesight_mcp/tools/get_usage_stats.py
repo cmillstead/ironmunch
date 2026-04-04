@@ -5,6 +5,7 @@ from __future__ import annotations
 from ..core.boundaries import make_meta
 from ..core.usage_logging import UsageLogger
 from ._common import timed, elapsed_ms
+from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
 
@@ -100,4 +101,5 @@ _spec = register(ToolSpec(
     },
     handler=lambda args, storage_path: {"error": "Usage logger not initialized"},
     required_args=[],
+    annotations=ToolAnnotations(title="Get Usage Stats", readOnlyHint=True, openWorldHint=False),
 ))

@@ -5,6 +5,7 @@ from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
 from ._common import prepare_graph_query, timed, elapsed_ms
+from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
 
@@ -130,4 +131,5 @@ _spec = register(ToolSpec(
     ),
     untrusted=True,
     required_args=["repo", "symbol_id"],
+    annotations=ToolAnnotations(title="Get Callers", readOnlyHint=True, openWorldHint=False),
 ))

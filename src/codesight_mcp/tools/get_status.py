@@ -7,6 +7,7 @@ from ..core.boundaries import make_meta
 from ..security import _NO_REDACT
 from ..storage import IndexStore, INDEX_VERSION
 from ._common import timed, elapsed_ms
+from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
 
@@ -53,4 +54,5 @@ _spec = register(ToolSpec(
     },
     handler=lambda args, storage_path: get_status(storage_path=storage_path),
     required_args=[],
+    annotations=ToolAnnotations(title="Get Status", readOnlyHint=True, openWorldHint=False),
 ))

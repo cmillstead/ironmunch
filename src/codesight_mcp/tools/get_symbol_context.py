@@ -13,6 +13,7 @@ from ..core.boundaries import wrap_untrusted_content, make_meta
 from ..core.errors import sanitize_error
 from ..parser.graph import CodeGraph
 from ._common import RepoContext, timed, elapsed_ms
+from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
 
@@ -236,4 +237,5 @@ _spec = register(ToolSpec(
     ),
     untrusted=True,
     required_args=["repo", "symbol_id"],
+    annotations=ToolAnnotations(title="Get Symbol Context", readOnlyHint=True, openWorldHint=False),
 ))

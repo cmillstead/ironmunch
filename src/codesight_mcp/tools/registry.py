@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from mcp.types import ToolAnnotations
+
 
 @dataclass
 class ToolSpec:
@@ -16,6 +18,7 @@ class ToolSpec:
     index_gate: bool = False
     destructive: bool = False
     required_args: list[str] = field(default_factory=list)
+    annotations: ToolAnnotations | None = None
 
 
 _REGISTRY: dict[str, ToolSpec] = {}

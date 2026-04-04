@@ -6,6 +6,7 @@ from typing import Optional
 from ..core.boundaries import make_meta, wrap_untrusted_content
 from ..security import sanitize_signature_for_api
 from ._common import RepoContext, timed, elapsed_ms
+from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
 
@@ -108,4 +109,5 @@ _spec = register(ToolSpec(
         storage_path=storage_path,
     ),
     required_args=["repo"],
+    annotations=ToolAnnotations(title="Get Dependencies", readOnlyHint=True, openWorldHint=False),
 ))

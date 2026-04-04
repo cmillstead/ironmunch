@@ -11,6 +11,7 @@ from ..embeddings.providers import get_embedding_provider, get_embedding_provide
 from ..parser.extractor import SUPPORTED_LANGUAGES
 from ..security import sanitize_signature_for_api
 from ._common import RepoContext, timed, elapsed_ms, calculate_symbol_score
+from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
 _MAX_CROSS_REPO = 5
@@ -448,4 +449,5 @@ _spec = register(ToolSpec(
     ),
     untrusted=True,
     required_args=["query"],
+    annotations=ToolAnnotations(title="Search Symbols", readOnlyHint=True, openWorldHint=False),
 ))

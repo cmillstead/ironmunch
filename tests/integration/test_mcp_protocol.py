@@ -135,6 +135,90 @@ class TestListToolsHandler:
 
 
 
+class TestMCPProtocol:
+    """Verify MCP tool annotations are present and correctly classified."""
+
+    async def test_list_tools_annotations_present(self):
+        """Every tool returned by list_tools has ToolAnnotations."""
+        tools = await list_tools()
+        for tool in tools:
+            assert tool.annotations is not None, f"Tool {tool.name} missing annotations"
+            assert isinstance(tool.annotations.readOnlyHint, bool), (
+                f"Tool {tool.name} readOnlyHint not set"
+            )
+
+    async def test_list_tools_read_only_tools(self):
+        """Read-only tools have readOnlyHint=True."""
+        tools = await list_tools()
+        tools_by_name = {t.name: t for t in tools}
+        read_only = [
+            "get_callers", "get_callees", "get_call_chain", "get_type_hierarchy",
+            "get_imports", "get_impact", "get_dead_code", "get_status",
+            "get_file_outline", "get_file_tree", "get_repo_outline",
+            "get_symbol", "get_symbols", "get_symbol_context", "get_key_symbols",
+            "get_diagram", "get_dependencies", "get_changes", "get_usage_stats",
+            "search_symbols", "search_text", "search_references",
+            "analyze_complexity", "compare_symbols", "list_repos",
+        ]
+        for name in read_only:
+            ann = tools_by_name[name].annotations
+            assert ann.readOnlyHint is True, f"{name} should be readOnlyHint=True"
+            assert ann.openWorldHint is False, f"{name} should be openWorldHint=False"
+
+    async def test_list_tools_write_tools(self):
+        """Write tools have correct destructive/idempotent hints."""
+        tools = await list_tools()
+        tools_by_name = {t.name: t for t in tools}
+
+        ann = tools_by_name["index_repo"].annotations
+        assert ann.readOnlyHint is False
+        assert ann.destructiveHint is False
+        assert ann.idempotentHint is True
+        assert ann.openWorldHint is True
+
+        ann = tools_by_name["index_folder"].annotations
+        assert ann.readOnlyHint is False
+        assert ann.destructiveHint is False
+        assert ann.idempotentHint is True
+        assert ann.openWorldHint is True
+
+        ann = tools_by_name["invalidate_cache"].annotations
+        assert ann.readOnlyHint is False
+        assert ann.destructiveHint is True
+        assert ann.idempotentHint is True
+        assert ann.openWorldHint is False
+
+    async def test_list_tools_annotations_have_titles(self):
+        """Every tool has a human-readable title in annotations."""
+        tools = await list_tools()
+        for tool in tools:
+            assert tool.annotations.title, f"Tool {tool.name} missing title"
+            assert tool.annotations.title != tool.name, (
+                f"Tool {tool.name} title should be human-readable, not the tool name"
+            )
+
+    async def test_list_tools_annotation_classification_exhaustive(self):
+        """Every tool is classified in exactly one annotation bucket."""
+        tools = await list_tools()
+        read_only = {
+            "get_callers", "get_callees", "get_call_chain", "get_type_hierarchy",
+            "get_imports", "get_impact", "get_dead_code", "get_status",
+            "get_file_outline", "get_file_tree", "get_repo_outline",
+            "get_symbol", "get_symbols", "get_symbol_context", "get_key_symbols",
+            "get_diagram", "get_dependencies", "get_changes", "get_usage_stats",
+            "search_symbols", "search_text", "search_references",
+            "analyze_complexity", "compare_symbols", "list_repos",
+        }
+        write_tools = {"index_repo", "index_folder"}
+        destructive_tools = {"invalidate_cache"}
+        classified = read_only | write_tools | destructive_tools
+        actual = {t.name for t in tools}
+        assert classified == actual, (
+            f"Unclassified tools: {actual - classified}, "
+            f"Extra classifications: {classified - actual}"
+        )
+
+
 class TestUnknownToolDispatch:
     """Verify calling an unknown tool returns an error."""
 

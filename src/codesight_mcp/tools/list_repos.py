@@ -5,6 +5,7 @@ from typing import Optional
 from ..core.boundaries import make_meta, wrap_untrusted_content
 from ..storage import IndexStore
 from ._common import timed, elapsed_ms
+from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
 
@@ -56,4 +57,5 @@ _spec = register(ToolSpec(
     },
     handler=lambda args, storage_path: list_repos(storage_path=storage_path),
     required_args=[],
+    annotations=ToolAnnotations(title="List Repositories", readOnlyHint=True, openWorldHint=False),
 ))

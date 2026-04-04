@@ -13,6 +13,7 @@ from ..core.limits import MAX_SEARCH_RESULTS
 from ..core.boundaries import wrap_untrusted_content, make_meta
 from ..core.validation import ValidationError
 from ._common import RepoContext, timed, elapsed_ms
+from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
 _REDACTION_SENTINEL = "<REDACTED>"
@@ -239,4 +240,5 @@ _spec = register(ToolSpec(
     ),
     untrusted=True,
     required_args=["query"],
+    annotations=ToolAnnotations(title="Search Text", readOnlyHint=True, openWorldHint=False),
 ))

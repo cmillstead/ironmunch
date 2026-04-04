@@ -16,3 +16,5 @@ _bmad-output/
 .DS_Store
 docs/superpowers/
 usage.jsonl*
+.base/
+.mcp.json

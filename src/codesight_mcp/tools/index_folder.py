@@ -25,6 +25,7 @@ from ..core.errors import sanitize_error  # noqa: E402
 from ..core.validation import is_within, ValidationError  # noqa: E402
 from ..storage import IndexStore  # noqa: E402
 from .registry import ToolSpec, register  # noqa: E402
+from mcp.types import ToolAnnotations  # noqa: E402
 from ._indexing_common import parse_source_files, finalize_index  # noqa: E402
 
 
@@ -434,4 +435,5 @@ _spec = register(ToolSpec(
     handler=_handle_index_folder,
     index_gate=True,
     required_args=["path"],
+    annotations=ToolAnnotations(title="Index Folder", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True),
 ))

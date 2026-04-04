@@ -14,6 +14,7 @@ from ..core.boundaries import wrap_untrusted_content, make_meta
 from ..core.errors import sanitize_error
 from ..core.validation import ValidationError
 from ._common import RepoContext, timed, elapsed_ms
+from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
 
@@ -271,6 +272,7 @@ _spec_get_symbol = register(ToolSpec(
     ),
     untrusted=True,
     required_args=["repo"],
+    annotations=ToolAnnotations(title="Get Symbol", readOnlyHint=True, openWorldHint=False),
 ))
 
 _spec_get_symbols = register(ToolSpec(
@@ -301,4 +303,5 @@ _spec_get_symbols = register(ToolSpec(
     ),
     untrusted=True,
     required_args=["repo", "symbol_ids"],
+    annotations=ToolAnnotations(title="Get Symbols (Batch)", readOnlyHint=True, openWorldHint=False),
 ))

@@ -22,6 +22,7 @@ from ..security import sanitize_repo_identifier
 from ..core.errors import sanitize_error
 from ..core.validation import ValidationError
 from .registry import ToolSpec, register
+from mcp.types import ToolAnnotations
 from ._indexing_common import parse_source_files, finalize_index
 
 # ADV-INFO-2: Freeze GITHUB_TOKEN at import time for consistency with other
@@ -169,4 +170,5 @@ _spec = register(ToolSpec(
     ),
     index_gate=True,
     required_args=["url"],
+    annotations=ToolAnnotations(title="Index Repository", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True),
 ))

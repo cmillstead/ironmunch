@@ -10,6 +10,7 @@ from ..core.boundaries import make_meta, wrap_untrusted_content
 from ..core.validation import ValidationError, is_within
 from ..parser.graph import CodeGraph
 from ._common import RepoContext, elapsed_ms, timed
+from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
 # Allowed characters in a git ref (no shell metacharacters)
@@ -352,4 +353,5 @@ _spec = register(ToolSpec(
     handler=lambda args, storage_path: _handle_get_changes(args, storage_path),
     untrusted=True,
     required_args=["repo"],
+    annotations=ToolAnnotations(title="Get Changes", readOnlyHint=True, openWorldHint=False),
 ))

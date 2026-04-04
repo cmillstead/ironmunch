@@ -5,6 +5,7 @@ from typing import Optional
 from ..core.boundaries import make_meta, wrap_untrusted_content
 from ..security import sanitize_signature_for_api
 from ._common import RepoContext, timed, elapsed_ms
+from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
 
@@ -154,4 +155,5 @@ _spec = register(ToolSpec(
     ),
     untrusted=True,
     required_args=["base_repo", "head_repo"],
+    annotations=ToolAnnotations(title="Compare Symbols", readOnlyHint=True, openWorldHint=False),
 ))

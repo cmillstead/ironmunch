@@ -131,10 +131,13 @@ async def list_tools() -> list[Tool]:
         for flag, suffix in _WARNINGS.items():
             if getattr(spec, flag, False):
                 desc += suffix
+        title = spec.annotations.title if spec.annotations else None
         tools.append(Tool(
             name=spec.name,
             description=desc,
             inputSchema=spec.input_schema,
+            annotations=spec.annotations,
+            title=title,
         ))
     return tools
 
