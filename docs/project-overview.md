@@ -4,7 +4,7 @@
 
 ## Summary
 
-codesight-mcp is a security-hardened MCP (Model Context Protocol) server that indexes local and GitHub codebases via tree-sitter AST parsing. It exposes 22 tools for symbol retrieval, code graph traversal, and impact analysis — all with byte-offset precision to cut token costs by ~99% compared to sending full files. Supports 15 programming languages.
+codesight-mcp is a security-hardened MCP (Model Context Protocol) server that indexes local and GitHub codebases via tree-sitter AST parsing. It exposes 34 tools for symbol retrieval, code graph traversal, and impact analysis — all with byte-offset precision to cut token costs by ~99% compared to sending full files. Supports 66 programming languages.
 
 Based on [jcodemunch-mcp](https://github.com/jgravelle/jcodemunch-mcp) by J. Gravelle, with code graph techniques from [CodeGraphContext](https://github.com/CodeGraphContext/CodeGraphContext) and security patterns from [basalt-mcp](https://github.com/cmillstead/basalt-mcp).
 
@@ -46,7 +46,7 @@ server.py (286 lines)
   ├── Dispatcher: argument sanitization, rate limiting, error sanitization
   ├── Tool Registry: declarative ToolSpec dataclass, auto-registration
   │
-  ├── tools/           (22 tool modules, each exports a ToolSpec)
+  ├── tools/           (34 tool modules, each exports a ToolSpec)
   │   ├── Indexing:    index_repo, index_folder, list_repos, invalidate_cache
   │   ├── Navigation:  get_repo_outline, get_file_tree, get_file_outline, get_symbol, get_symbols
   │   ├── Search:      search_symbols, search_text
@@ -54,7 +54,7 @@ server.py (286 lines)
   │   └── Analysis:    analyze_complexity, get_key_symbols, get_diagram, get_status
   │
   ├── parser/          (AST parsing, symbol extraction, code graph)
-  │   ├── languages.py    — LanguageSpec registry for 15 languages
+  │   ├── languages.py    — LanguageSpec registry for 66 languages
   │   ├── extractor.py    — tree-sitter AST → Symbol extraction
   │   ├── symbols.py      — Symbol dataclass, ID generation, content hashing
   │   ├── hierarchy.py    — Symbol tree (nesting) from flat symbol lists
@@ -83,7 +83,7 @@ server.py (286 lines)
 
 | Document | Description |
 |----------|-------------|
-| [README.md](../README.md) | Comprehensive user guide: features, 22-tool reference, quick start, security model, env vars, git hooks |
+| [README.md](../README.md) | Comprehensive user guide: features, 34-tool reference, quick start, security model, env vars, git hooks |
 | [SECURITY.md](../SECURITY.md) | Full threat model, 53-row defense matrix, validation chain, resource limits, scan history |
 | [CLAUDE.md](../CLAUDE.md) | AI-context: tells Claude Code to use codesight-mcp tools instead of reading files |
 | [docs/plans/](./plans/) | 19 historical plan documents covering security scans, adversarial testing, feature designs, refactoring |
@@ -95,9 +95,9 @@ server.py (286 lines)
 |--------|-------|
 | Source files | ~47 Python files |
 | Test files | ~40 Python files |
-| Test count | 1089+ |
-| Tools | 22 MCP tools |
-| Languages supported | 15 |
+| Test count | 2,495 |
+| Tools | 34 MCP tools |
+| Languages supported | 66 |
 | Security scan rounds | 12 |
 | Entry point | `codesight_mcp.server:main` |
 

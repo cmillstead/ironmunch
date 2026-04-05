@@ -4,7 +4,7 @@
 
 ## Executive Summary
 
-codesight-mcp is a security-hardened MCP server that indexes codebases via tree-sitter AST parsing and exposes 28 tools for symbol retrieval, code graph traversal, complexity analysis, and impact assessment. It follows a **layered library architecture** with a declarative tool registry, defense-in-depth security, and gzip-compressed persistent indexes.
+codesight-mcp is a security-hardened MCP server that indexes codebases via tree-sitter AST parsing and exposes 34 tools for symbol retrieval, code graph traversal, complexity analysis, and impact assessment. It follows a **layered library architecture** with a declarative tool registry, defense-in-depth security, and gzip-compressed persistent indexes.
 
 The architecture prioritizes:
 - **Security first** — 6-step path validation, content boundary markers, error sanitization, rate limiting
@@ -63,7 +63,7 @@ MCP request → _sanitize_arguments() → rate_limit check → tool function →
 
 ### 2. Tool Layer (`tools/`)
 
-28 tools organized into 5 categories, each implemented as a standalone module exporting a `ToolSpec`:
+34 tools organized into 5 categories, each implemented as a standalone module exporting a `ToolSpec`:
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
@@ -102,7 +102,7 @@ The AST parsing engine converts source files to structured symbol data:
 | `complexity.py` | Complexity metrics | Language-agnostic cyclomatic/cognitive complexity from AST |
 | `hierarchy.py` | Symbol nesting | Converts flat symbol list to parent-child tree |
 
-**15 supported languages:** Python, JavaScript, TypeScript, Go, Rust, Java, PHP, C, C++, C#, Ruby, Swift, Kotlin, Dart, Perl
+**66 supported languages:** Python, JavaScript, TypeScript, Go, Rust, Java, PHP, C, C++, C#, Ruby, Swift, Kotlin, Dart, Perl, Haskell, Scala, Erlang, and 48 more
 
 **Language extension pattern:**
 ```python
@@ -255,7 +255,7 @@ graph LR
 | Server/Registry | 109 (6%) | Dispatch, sanitization, tool registration, structured logging |
 | Integration | 67 (4%) | Full pipeline: index → query → verify |
 | Stress/Fuzz/Benchmark | 33 (2%) | Load testing, fuzzing, performance benchmarks |
-| **Total** | **1,818** | |
+| **Total** | **2,495** | |
 
 Testing philosophy: security tests use real filesystems with no mocking, adversarial tests attempt to break security boundaries.
 

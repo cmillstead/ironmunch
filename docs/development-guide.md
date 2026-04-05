@@ -65,7 +65,7 @@ The server communicates via MCP protocol (stdio). It's typically configured in a
 # Install test dependencies
 uv sync --extra test
 
-# Run all tests (1,818 tests)
+# Run all tests (2,495 tests)
 uv run pytest --tb=short -q
 
 # Run specific test categories
@@ -109,10 +109,10 @@ src/codesight_mcp/
 ├── discovery.py        # File discovery (local + GitHub)
 ├── security.py         # Secret/binary classification, redaction
 ├── core/               # Infrastructure primitives
-├── parser/             # AST parsing (15 languages)
+├── parser/             # AST parsing (66 languages)
 ├── storage/            # Index persistence (gzip)
 ├── summarizer/         # AI symbol summarization
-└── tools/              # 22 MCP tool implementations
+└── tools/              # 34 MCP tool implementations
 ```
 
 See [source-tree-analysis.md](./source-tree-analysis.md) for the full annotated directory tree.

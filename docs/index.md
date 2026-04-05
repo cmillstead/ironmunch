@@ -11,11 +11,11 @@
 
 ## Quick Reference
 
-- **Tech Stack:** Python 3.10+, MCP SDK, tree-sitter (15 languages), httpx, Anthropic SDK
+- **Tech Stack:** Python 3.10+, MCP SDK, tree-sitter (66 languages), httpx, Anthropic SDK
 - **Entry Point:** `codesight_mcp.server:main`
-- **Architecture Pattern:** Layered library — thin server dispatcher + 28 tool modules
-- **Tools:** 28 MCP tools (indexing, navigation, search, code graph, analysis, dependencies)
-- **Tests:** 1,818 tests (31% security/adversarial)
+- **Architecture Pattern:** Layered library — thin server dispatcher + 34 tool modules
+- **Tools:** 34 MCP tools (indexing, navigation, search, code graph, analysis, security, dependencies)
+- **Tests:** 2,495 tests (31% security/adversarial)
 - **Build:** hatchling + uv lockfile
 
 ## Generated Documentation
@@ -27,7 +27,7 @@
 
 ## Existing Documentation
 
-- [README.md](../README.md) — User guide: features, 28-tool reference, quick start, security model, env vars, git hooks
+- [README.md](../README.md) — User guide: features, 34-tool reference, quick start, security model, env vars, git hooks
 - [docs/decisions/](./decisions/) — 5 security Architecture Decision Records
 - [SECURITY.md](../SECURITY.md) — Threat model, 53-row defense matrix, validation chain, resource limits
 - [CLAUDE.md](../CLAUDE.md) — AI navigation guide (use codesight-mcp tools instead of reading files)

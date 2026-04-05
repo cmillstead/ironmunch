@@ -27,8 +27,8 @@ codesight-mcp/
 │   │   └── validation.py       # 6-step path validation chain (traversal, symlinks, containment)
 │   ├── parser/                 # AST parsing engine
 │   │   ├── symbols.py          # Symbol dataclass (id, kind, name, signature, calls, imports, etc.)
-│   │   ├── extractor.py        # tree-sitter AST parsing → Symbol extraction (15 languages)
-│   │   ├── languages.py        # LanguageSpec definitions for all 15 languages
+│   │   ├── extractor.py        # tree-sitter AST parsing → Symbol extraction (66 languages)
+│   │   ├── languages.py        # LanguageSpec definitions for all 66 languages
 │   │   ├── complexity.py       # Cyclomatic, cognitive complexity, nesting depth metrics
 │   │   ├── graph.py            # CodeGraph: call graph, type hierarchy, PageRank, impact analysis
 │   │   └── hierarchy.py        # Flat symbol list → nested tree conversion
@@ -36,7 +36,7 @@ codesight-mcp/
 │   │   └── index_store.py      # CodeIndex + IndexStore: gzip indexes, atomic writes, incremental updates
 │   ├── summarizer/             # Symbol documentation
 │   │   └── batch_summarize.py  # 3-tier summarization: docstring → AI (Claude Haiku) → signature fallback
-│   └── tools/                  # MCP tool implementations (22 tools)
+│   └── tools/                  # MCP tool implementations (34 tools)
 │       ├── registry.py         # Declarative ToolSpec registry
 │       ├── _common.py          # RepoContext resolution, parse_repo (fuzzy matching), graph query setup
 │       ├── _indexing_common.py  # Shared indexing: parse_source_files, finalize_index
@@ -61,7 +61,7 @@ codesight-mcp/
 │       ├── get_key_symbols.py  # PageRank-based structural importance ranking
 │       ├── get_diagram.py      # Mermaid diagram generation (call_graph, hierarchy, imports, impact)
 │       └── get_dead_code.py    # Unused symbol detection (zero callers)
-├── tests/                      # Test suite (1,818 tests)
+├── tests/                      # Test suite (2,495 tests)
 │   ├── conftest.py             # Shared fixtures (tmp_index_store, python_index)
 │   ├── core/                   # Core infrastructure tests (85 tests)
 │   │   ├── test_core_boundaries.py
@@ -130,10 +130,10 @@ codesight-mcp/
 | Folder | Purpose | Key Insight |
 |--------|---------|-------------|
 | `src/codesight_mcp/core/` | Security & infrastructure primitives | 6-step path validation chain, atomic I/O, rate limiting |
-| `src/codesight_mcp/parser/` | AST parsing engine | 15-language support via declarative LanguageSpec pattern |
+| `src/codesight_mcp/parser/` | AST parsing engine | 66-language support via declarative LanguageSpec pattern |
 | `src/codesight_mcp/storage/` | Index persistence | Gzip compression, atomic writes, incremental updates |
 | `src/codesight_mcp/summarizer/` | Symbol documentation | 3-tier: docstring → AI → signature fallback |
-| `src/codesight_mcp/tools/` | MCP tool implementations | 27 tools with declarative ToolSpec registry |
+| `src/codesight_mcp/tools/` | MCP tool implementations | 34 tools with declarative ToolSpec registry |
 | `tests/security/` | Adversarial testing | 563 tests (36% of suite), real filesystem, no mocking |
 
 ## Entry Points
