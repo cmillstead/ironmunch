@@ -6,13 +6,27 @@ from collections import defaultdict, deque
 from typing import Optional
 
 
+# Extensions whose languages use dotted module imports (e.g., import pkg.utils).
+# Other languages (C/C++, etc.) use path-based includes and should NOT get
+# dotted keys to avoid cross-language collisions (e.g., pkg/utils.h -> pkg.utils
+# would incorrectly match a Python import of an external "pkg.utils" package).
+_DOTTED_IMPORT_EXTENSIONS: frozenset[str] = frozenset({
+    ".py", ".java", ".kt", ".kts", ".scala", ".groovy",
+    ".clj", ".cljs", ".cljc",  # Clojure
+    ".ex", ".exs",  # Elixir
+    ".erl", ".hrl",  # Erlang
+    ".jl",  # Julia
+})
+
+
 def _build_import_resolution_map(source_files: list[str]) -> dict[str, str | None]:
     """Build a multi-key lookup mapping import strings to source file paths.
 
-    For each source file, generates four match keys:
+    For each source file, generates up to four match keys:
     - Original path: the full file path (Foo.h -> Foo.h, for C-family #include)
     - Full path stem: strip extension (pkg/utils.py -> pkg/utils)
     - Dotted form: replace / with . in stem (pkg/utils -> pkg.utils)
+      — only for languages that use dotted module imports
     - Basename: filename without extension (utils)
 
     Keys that map to multiple files are marked as ambiguous (None).
@@ -22,11 +36,15 @@ def _build_import_resolution_map(source_files: list[str]) -> dict[str, str | Non
 
     for f in source_files:
         stem = f.rsplit(".", 1)[0] if "." in f else f
+        ext = f[f.rfind("."):] if "." in f else ""
         basename = stem.rsplit("/", 1)[-1] if "/" in stem else stem
-        dotted = stem.replace("/", ".")
 
         # Include the original path so C-family #include "Foo.h" resolves
-        for key in (f, stem, dotted, basename):
+        keys = [f, stem, basename]
+        # Only add dotted form for languages that use dotted module imports
+        if ext in _DOTTED_IMPORT_EXTENSIONS:
+            keys.append(stem.replace("/", "."))
+        for key in keys:
             key_to_files[key].append(f)
 
     # Resolve: single file = unambiguous, multiple = ambiguous (None)

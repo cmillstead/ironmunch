@@ -54,6 +54,18 @@ _LANGUAGE_BRANCH_EXTRAS: dict[str, frozenset[str]] = {
     "ruby": frozenset({
         "case", "when_clause", "rescue", "unless",
     }),
+    "erlang": frozenset({
+        "case_expr", "if_expr", "receive_expr",
+    }),
+    "scala": frozenset({
+        "match_expression", "case_clause",
+    }),
+    "haskell": frozenset({
+        "alternative", "guards",
+    }),
+    "lua": frozenset({
+        "repeat_statement",
+    }),
 }
 
 # Language-specific additions to nesting nodes.
@@ -61,6 +73,10 @@ _LANGUAGE_NESTING_EXTRAS: dict[str, frozenset[str]] = {
     "go": frozenset({"select_statement", "type_switch_statement"}),
     "rust": frozenset({"match_expression", "if_let_expression", "while_let_expression"}),
     "kotlin": frozenset({"when_expression"}),
+    "erlang": frozenset({"case_expr", "if_expr", "receive_expr"}),
+    "scala": frozenset({"match_expression"}),
+    "haskell": frozenset({"alternative"}),
+    "lua": frozenset({"repeat_statement"}),
 }
 
 # Node types for boolean operators that add to cyclomatic complexity.

@@ -254,6 +254,106 @@ def _extract_import_perl(node, source_bytes: bytes) -> list[str]:
     return []
 
 
+def _extract_import_haskell(node, source_bytes: bytes) -> list[str]:
+    """Haskell: import Data.Map, import qualified Data.Map as Map."""
+    imports = []
+    for child in node.named_children:
+        if child.type == "import":
+            module_node = child.child_by_field_name("module")
+            if module_node:
+                text = source_bytes[module_node.start_byte:module_node.end_byte].decode("utf-8")
+                imports.append(text)
+    return imports
+
+
+def _extract_import_nim(node, source_bytes: bytes) -> list[str]:
+    """Nim: import std/strutils, include othermod."""
+    imports = []
+    for child in node.named_children:
+        if child.type == "expression_list":
+            for expr in child.named_children:
+                text = source_bytes[expr.start_byte:expr.end_byte].decode("utf-8")
+                imports.append(text)
+        elif child.type in ("infix_expression", "identifier"):
+            text = source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+            imports.append(text)
+    return imports
+
+
+def _extract_import_julia(node, source_bytes: bytes) -> list[str]:
+    """Julia: using LinearAlgebra, import Base.Iterators: take, import Base.Iterators."""
+    imports = []
+    for child in node.named_children:
+        if child.type == "identifier":
+            imports.append(source_bytes[child.start_byte:child.end_byte].decode("utf-8"))
+        elif child.type == "import_path":
+            # Dotted imports: import Base.Iterators → import_path with identifier children
+            imports.append(source_bytes[child.start_byte:child.end_byte].decode("utf-8"))
+        elif child.type == "selected_import":
+            # Selective imports: import Base.Iterators: take → selected_import → import_path
+            path_node = child.child_by_field_name("path") or _find_child_by_type(child, "import_path")
+            if path_node:
+                imports.append(source_bytes[path_node.start_byte:path_node.end_byte].decode("utf-8"))
+    return imports
+
+
+def _find_child_by_type(node, child_type: str):
+    """Find the first named child of the given type."""
+    for child in node.named_children:
+        if child.type == child_type:
+            return child
+    return None
+
+
+def _extract_import_elm(node, source_bytes: bytes) -> list[str]:
+    """Elm: import Html exposing (text), import Foo.Bar as Bar."""
+    module_node = node.child_by_field_name("moduleName")
+    if module_node:
+        text = source_bytes[module_node.start_byte:module_node.end_byte].decode("utf-8")
+        return [text]
+    return []
+
+
+def _extract_import_d(node, source_bytes: bytes) -> list[str]:
+    """D: import std.stdio;"""
+    imports = []
+    for child in node.named_children:
+        if child.type == "imported":
+            for sub in child.named_children:
+                if sub.type == "module_fqn":
+                    parts = [
+                        source_bytes[ident.start_byte:ident.end_byte].decode("utf-8")
+                        for ident in sub.named_children
+                        if ident.type == "identifier"
+                    ]
+                    if parts:
+                        imports.append(".".join(parts))
+    return imports
+
+
+def _extract_import_ocaml(node, source_bytes: bytes) -> list[str]:
+    """OCaml: open Core."""
+    for child in node.named_children:
+        if child.type not in ("open",):
+            text = source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+            return [text]
+    return []
+
+
+def _extract_import_fsharp(node, source_bytes: bytes) -> list[str]:
+    """F#: open System.IO."""
+    for child in node.named_children:
+        if child.type == "long_identifier":
+            parts = [
+                source_bytes[ident.start_byte:ident.end_byte].decode("utf-8")
+                for ident in child.named_children
+                if ident.type == "identifier"
+            ]
+            if parts:
+                return [".".join(parts)]
+    return []
+
+
 def _make_import_dispatcher(handlers: dict[str, Callable]) -> Callable:
     """Create a single extract_import function that dispatches by node type."""
     def _extract(node, source_bytes: bytes) -> list[str]:
@@ -892,6 +992,54 @@ def _extract_call_ruby(node, spec, source_bytes: bytes, calls: list) -> bool:
         method_node = node.child_by_field_name("method")
         if method_node:
             calls.append(source_bytes[method_node.start_byte:method_node.end_byte].decode("utf-8"))
+        return True
+    return False
+
+
+def _extract_call_d(node, spec, source_bytes: bytes, calls: list) -> bool:
+    """D call_expression: writeln("x") or foo.bar(1)."""
+    if node.type == "call_expression":
+        first = node.named_children[0] if node.named_children else None
+        if first:
+            if first.type == "identifier":
+                calls.append(source_bytes[first.start_byte:first.end_byte].decode("utf-8"))
+            elif first.type == "type":
+                # Qualified calls like foo.bar(1) — the callee is a "type" node
+                text = source_bytes[first.start_byte:first.end_byte].decode("utf-8")
+                calls.append(text)
+            else:
+                text = source_bytes[first.start_byte:first.end_byte].decode("utf-8")
+                if text:
+                    calls.append(text)
+        return True
+    return False
+
+
+def _extract_call_objc(node, spec, source_bytes: bytes, calls: list) -> bool:
+    """ObjC message_expression: [obj doThing:1 with:2] → 'doThing:with:'."""
+    if node.type == "message_expression":
+        method_parts = node.children_by_field_name("method")
+        if method_parts:
+            names = [
+                source_bytes[m.start_byte:m.end_byte].decode("utf-8")
+                for m in method_parts
+            ]
+            if len(names) > 1:
+                # Multi-part selector: join with ":" and append trailing ":"
+                calls.append(":".join(names) + ":")
+            elif len(names) == 1:
+                # Check if this single-method call has a colon (takes arguments)
+                has_colon = any(
+                    c.type == ":" or (
+                        not c.is_named
+                        and source_bytes[c.start_byte:c.end_byte].decode("utf-8") == ":"
+                    )
+                    for c in node.children
+                )
+                if has_colon:
+                    calls.append(names[0] + ":")
+                else:
+                    calls.append(names[0])
         return True
     return False
 
@@ -1751,8 +1899,12 @@ JULIA_SPEC = LanguageSpec(
     constant_patterns=[],
     type_patterns=["struct_definition"],
     call_node_types=["call_expression"],
-    import_node_types=[],  # Julia uses using/import statements — TODO: add if needed
+    import_node_types=["import_statement", "using_statement"],
     extract_name=_extract_name_julia,
+    extract_import=_make_import_dispatcher({
+        "import_statement": _extract_import_julia,
+        "using_statement": _extract_import_julia,
+    }),
 )
 
 
@@ -1803,8 +1955,12 @@ NIM_SPEC = LanguageSpec(
     constant_patterns=[],
     type_patterns=["type_declaration"],
     call_node_types=["call"],
-    import_node_types=[],  # Nim uses import/include statements — TODO: add if needed
+    import_node_types=["import_statement", "include_statement"],
     extract_name=_extract_name_nim,
+    extract_import=_make_import_dispatcher({
+        "import_statement": _extract_import_nim,
+        "include_statement": _extract_import_nim,
+    }),
 )
 
 
@@ -1829,8 +1985,11 @@ HASKELL_SPEC = LanguageSpec(
     constant_patterns=[],
     type_patterns=["data_type"],
     call_node_types=[],  # Haskell function application has no distinct call node type
-    import_node_types=[],  # Haskell uses import statements — TODO: add if needed
+    import_node_types=["imports"],
     resolve_kind=_resolve_kind_haskell,
+    extract_import=_make_import_dispatcher({
+        "imports": _extract_import_haskell,
+    }),
 )
 
 
@@ -1905,9 +2064,15 @@ D_SPEC = LanguageSpec(
     container_node_types=["class_declaration", "struct_declaration", "interface_declaration"],
     constant_patterns=[],
     type_patterns=["struct_declaration", "interface_declaration", "enum_declaration"],
-    call_node_types=[],  # D function calls — skip for now
-    import_node_types=[],  # D uses import statements — TODO: add if needed
+    call_node_types=["call_expression"],
+    import_node_types=["import_declaration"],
     extract_name=_extract_name_d,
+    extract_import=_make_import_dispatcher({
+        "import_declaration": _extract_import_d,
+    }),
+    extract_call_target=_make_call_extractor({
+        "call_expression": _extract_call_d,
+    }),
 )
 
 
@@ -1934,9 +2099,15 @@ OBJC_SPEC = LanguageSpec(
     container_node_types=["class_interface", "class_implementation", "implementation_definition"],
     constant_patterns=[],
     type_patterns=[],
-    call_node_types=[],  # ObjC message sends — complex, skip for now
-    import_node_types=[],  # ObjC uses #import — similar to C includes
+    call_node_types=["message_expression"],
+    import_node_types=["preproc_include"],
     extract_name=_extract_name_objc,
+    extract_import=_make_import_dispatcher({
+        "preproc_include": _extract_import_c_include,
+    }),
+    extract_call_target=_make_call_extractor({
+        "message_expression": _extract_call_objc,
+    }),
 )
 
 
@@ -1959,8 +2130,11 @@ OCAML_SPEC = LanguageSpec(
     constant_patterns=[],
     type_patterns=["type_definition"],
     call_node_types=[],  # OCaml function application has no distinct call node
-    import_node_types=[],  # OCaml uses open statements — TODO: add if needed
+    import_node_types=["open_module"],
     extract_name=_extract_name_ocaml,
+    extract_import=_make_import_dispatcher({
+        "open_module": _extract_import_ocaml,
+    }),
 )
 
 
@@ -1983,9 +2157,12 @@ FSHARP_SPEC = LanguageSpec(
     constant_patterns=[],
     type_patterns=["type_definition"],
     call_node_types=[],  # F# function application — skip for now
-    import_node_types=[],  # F# uses open statements — TODO: add if needed
+    import_node_types=["import_decl"],
     extract_name=_extract_name_fsharp,
     resolve_kind=_resolve_kind_fsharp,
+    extract_import=_make_import_dispatcher({
+        "import_decl": _extract_import_fsharp,
+    }),
 )
 
 
@@ -2010,8 +2187,11 @@ ELM_SPEC = LanguageSpec(
     constant_patterns=[],
     type_patterns=["type_declaration", "type_alias_declaration"],
     call_node_types=[],  # Elm function application — no distinct call node
-    import_node_types=[],  # Elm uses import statements — TODO: add if needed
+    import_node_types=["import_clause"],
     extract_name=_extract_name_elm,
+    extract_import=_make_import_dispatcher({
+        "import_clause": _extract_import_elm,
+    }),
 )
 
 
@@ -2717,6 +2897,31 @@ def _extract_name_fortran(node, source_bytes: bytes):
     return None
 
 
+def _extract_import_fortran(node, source_bytes: bytes) -> list[str]:
+    """Fortran: subroutine/function/program wrapper → find use_statement children → module_name."""
+    imports = []
+    for child in node.named_children:
+        if child.type == "use_statement":
+            mod = child.child_by_field_name("module_name")
+            if mod is None:
+                mod = _find_child_by_type(child, "module_name")
+            if mod:
+                imports.append(source_bytes[mod.start_byte:mod.end_byte].decode("utf-8"))
+    return imports
+
+
+def _extract_call_target_fortran(node, spec, source_bytes: bytes, calls: list) -> bool:
+    """Fortran: subroutine_call → field 'subroutine' (identifier)."""
+    if node.type == "subroutine_call":
+        sub = node.child_by_field_name("subroutine")
+        if sub is None:
+            sub = _find_child_by_type(node, "identifier")
+        if sub:
+            calls.append(source_bytes[sub.start_byte:sub.end_byte].decode("utf-8"))
+        return True
+    return False
+
+
 FORTRAN_SPEC = LanguageSpec(
     ts_language="fortran",
     symbol_node_types={
@@ -2733,6 +2938,14 @@ FORTRAN_SPEC = LanguageSpec(
     constant_patterns=[],
     type_patterns=[],
     extract_name=_extract_name_fortran,
+    call_node_types=["subroutine_call"],
+    import_node_types=["subroutine", "function", "program"],
+    extract_import=_make_import_dispatcher({
+        "subroutine": _extract_import_fortran,
+        "function": _extract_import_fortran,
+        "program": _extract_import_fortran,
+    }),
+    extract_call_target=_extract_call_target_fortran,
 )
 
 
@@ -2810,6 +3023,16 @@ def _extract_name_matlab(node, source_bytes: bytes):
     return None
 
 
+def _extract_call_target_matlab(node, spec, source_bytes: bytes, calls: list) -> bool:
+    """MATLAB: function_call → 'name' field (NOT 'function' field)."""
+    if node.type == "function_call":
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            calls.append(source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8"))
+        return True
+    return False
+
+
 MATLAB_SPEC = LanguageSpec(
     ts_language="matlab",
     symbol_node_types={"function_definition": "function"},
@@ -2822,6 +3045,8 @@ MATLAB_SPEC = LanguageSpec(
     constant_patterns=[],
     type_patterns=[],
     extract_name=_extract_name_matlab,
+    call_node_types=["function_call"],
+    extract_call_target=_extract_call_target_matlab,
 )
 
 
@@ -2848,6 +3073,11 @@ CUDA_SPEC = LanguageSpec(
     constant_patterns=[],
     type_patterns=["struct_specifier"],
     extract_name=_extract_name_c_cpp,
+    call_node_types=["call_expression"],
+    import_node_types=["preproc_include"],
+    extract_import=_make_import_dispatcher({
+        "preproc_include": _extract_import_c_include,
+    }),
 )
 
 
@@ -2873,6 +3103,18 @@ def _extract_name_v(node, source_bytes: bytes):
     return None
 
 
+def _extract_import_v(node, source_bytes: bytes) -> list[str]:
+    """V: import_declaration → field 'path' (import_path) → text."""
+    path_node = node.child_by_field_name("path")
+    if path_node:
+        return [source_bytes[path_node.start_byte:path_node.end_byte].decode("utf-8")]
+    # Fallback: first named child of type import_path
+    for child in node.named_children:
+        if child.type == "import_path":
+            return [source_bytes[child.start_byte:child.end_byte].decode("utf-8")]
+    return []
+
+
 V_SPEC = LanguageSpec(
     ts_language="v",
     symbol_node_types={
@@ -2888,6 +3130,11 @@ V_SPEC = LanguageSpec(
     constant_patterns=[],
     type_patterns=[],
     extract_name=_extract_name_v,
+    call_node_types=["call_expression"],
+    import_node_types=["import_declaration"],
+    extract_import=_make_import_dispatcher({
+        "import_declaration": _extract_import_v,
+    }),
 )
 
 
@@ -2906,6 +3153,35 @@ def _extract_name_gleam(node, source_bytes: bytes):
     return None
 
 
+def _extract_import_gleam(node, source_bytes: bytes) -> list[str]:
+    """Gleam: import → field 'module' → module node text."""
+    mod = node.child_by_field_name("module")
+    if mod:
+        return [source_bytes[mod.start_byte:mod.end_byte].decode("utf-8")]
+    return []
+
+
+def _extract_call_target_gleam(node, spec, source_bytes: bytes, calls: list) -> bool:
+    """Gleam: function_call → function field. If field_access, join record.field."""
+    if node.type == "function_call":
+        func = node.child_by_field_name("function")
+        if func:
+            if func.type == "field_access":
+                record = func.child_by_field_name("record")
+                field = func.child_by_field_name("field")
+                if record and field:
+                    rec_text = source_bytes[record.start_byte:record.end_byte].decode("utf-8")
+                    field_text = source_bytes[field.start_byte:field.end_byte].decode("utf-8")
+                    calls.append(f"{rec_text}.{field_text}")
+                    return True
+            # Simple identifier call
+            text = source_bytes[func.start_byte:func.end_byte].decode("utf-8")
+            if text:
+                calls.append(text)
+        return True
+    return False
+
+
 GLEAM_SPEC = LanguageSpec(
     ts_language="gleam",
     symbol_node_types={"function": "function"},
@@ -2918,6 +3194,12 @@ GLEAM_SPEC = LanguageSpec(
     constant_patterns=[],
     type_patterns=[],
     extract_name=_extract_name_gleam,
+    call_node_types=["function_call"],
+    import_node_types=["import"],
+    extract_import=_make_import_dispatcher({
+        "import": _extract_import_gleam,
+    }),
+    extract_call_target=_extract_call_target_gleam,
 )
 
 
@@ -2936,6 +3218,19 @@ def _extract_name_odin(node, source_bytes: bytes):
     return None
 
 
+def _extract_import_odin(node, source_bytes: bytes) -> list[str]:
+    """Odin: import_declaration → string child → string_content grandchild text."""
+    for child in node.named_children:
+        if child.type == "string":
+            for gc in child.named_children:
+                if gc.type == "string_content":
+                    return [source_bytes[gc.start_byte:gc.end_byte].decode("utf-8")]
+            # Fallback: strip quotes from string node itself
+            text = source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+            return [text.strip('"')]
+    return []
+
+
 ODIN_SPEC = LanguageSpec(
     ts_language="odin",
     symbol_node_types={"procedure_declaration": "function"},
@@ -2948,12 +3243,33 @@ ODIN_SPEC = LanguageSpec(
     constant_patterns=[],
     type_patterns=[],
     extract_name=_extract_name_odin,
+    call_node_types=["call_expression"],
+    import_node_types=["import_declaration"],
+    extract_import=_make_import_dispatcher({
+        "import_declaration": _extract_import_odin,
+    }),
 )
 
 
 # ---------------------------------------------------------------------------
 # GDScript specification (name_fields work directly)
 # ---------------------------------------------------------------------------
+
+def _extract_call_target_gdscript(node, spec, source_bytes: bytes, calls: list) -> bool:
+    """GDScript: call → first child is identifier (callee), no 'function' field."""
+    if node.type == "call":
+        for child in node.named_children:
+            if child.type == "identifier":
+                calls.append(source_bytes[child.start_byte:child.end_byte].decode("utf-8"))
+                return True
+        # Fallback: first child (even unnamed)
+        if node.child_count > 0:
+            first = node.children[0]
+            if first.type == "identifier":
+                calls.append(source_bytes[first.start_byte:first.end_byte].decode("utf-8"))
+        return True
+    return False
+
 
 GDSCRIPT_SPEC = LanguageSpec(
     ts_language="gdscript",
@@ -2972,6 +3288,8 @@ GDSCRIPT_SPEC = LanguageSpec(
     container_node_types=[],
     constant_patterns=[],
     type_patterns=[],
+    call_node_types=["call"],
+    extract_call_target=_extract_call_target_gdscript,
 )
 
 
@@ -3065,6 +3383,19 @@ def _extract_name_ada(node, source_bytes: bytes):
     return None
 
 
+def _extract_import_ada(node, source_bytes: bytes) -> list[str]:
+    """Ada: compilation_unit wrapper → find with_clause children → selected_component or identifier text."""
+    imports = []
+    for child in node.named_children:
+        if child.type == "with_clause":
+            for gc in child.named_children:
+                if gc.type == "selected_component":
+                    imports.append(source_bytes[gc.start_byte:gc.end_byte].decode("utf-8"))
+                elif gc.type == "identifier":
+                    imports.append(source_bytes[gc.start_byte:gc.end_byte].decode("utf-8"))
+    return imports
+
+
 ADA_SPEC = LanguageSpec(
     ts_language="ada",
     symbol_node_types={"subprogram_body": "function"},
@@ -3077,6 +3408,10 @@ ADA_SPEC = LanguageSpec(
     constant_patterns=[],
     type_patterns=[],
     extract_name=_extract_name_ada,
+    import_node_types=["compilation_unit"],
+    extract_import=_make_import_dispatcher({
+        "compilation_unit": _extract_import_ada,
+    }),
 )
 
 
@@ -3108,6 +3443,20 @@ def _extract_name_pascal(node, source_bytes: bytes):
     return None
 
 
+def _extract_import_pascal(node, source_bytes: bytes) -> list[str]:
+    """Pascal: program wrapper → find declUses children → moduleName → identifier text."""
+    imports = []
+    for child in node.named_children:
+        if child.type == "declUses":
+            for gc in child.named_children:
+                if gc.type == "moduleName":
+                    for ggc in gc.named_children:
+                        if ggc.type == "identifier":
+                            imports.append(source_bytes[ggc.start_byte:ggc.end_byte].decode("utf-8"))
+                            break
+    return imports
+
+
 PASCAL_SPEC = LanguageSpec(
     ts_language="pascal",
     symbol_node_types={
@@ -3123,6 +3472,10 @@ PASCAL_SPEC = LanguageSpec(
     constant_patterns=[],
     type_patterns=[],
     extract_name=_extract_name_pascal,
+    import_node_types=["program"],
+    extract_import=_make_import_dispatcher({
+        "program": _extract_import_pascal,
+    }),
 )
 
 
@@ -3361,6 +3714,7 @@ GLSL_SPEC = LanguageSpec(
     container_node_types=["struct_specifier"],
     constant_patterns=[],
     type_patterns=["struct_specifier"],
+    call_node_types=["call_expression"],
     extract_name=_extract_name_glsl,
 )
 
@@ -3384,6 +3738,7 @@ HLSL_SPEC = LanguageSpec(
     container_node_types=[],
     constant_patterns=[],
     type_patterns=[],
+    call_node_types=["call_expression"],
     extract_name=_extract_name_c_cpp,
 )
 

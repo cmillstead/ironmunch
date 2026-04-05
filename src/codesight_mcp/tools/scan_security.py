@@ -1,11 +1,20 @@
 """Scan indexed symbols for dangerous API usage patterns."""
 
+import errno
+import os
 from typing import Optional
 
 from mcp.types import ToolAnnotations
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
-from ..security_rules import RULES, scan_symbols, _SEVERITY_ORDER
+from ..security_rules import (
+    MODULE_LEVEL_RULES,
+    RULES,
+    _SEVERITY_ORDER,
+    _matches_module_category,
+    scan_module_level,
+    scan_symbols,
+)
 from ._common import RepoContext, timed, elapsed_ms
 from .registry import ToolSpec, register
 
@@ -50,6 +59,54 @@ def scan_security(
 
     symbols = index.symbols
 
+    # Build symbol_sources for argument-sensitive rules
+    symbol_sources: dict[str, bytes] | None = None
+    try:
+        symbol_sources = {}
+        for sym in symbols:
+            sym_id = sym.get("id")
+            if sym_id:
+                content = ctx.store.get_symbol_content(
+                    owner, name, sym_id, index=ctx.index,
+                )
+                if content is not None:
+                    sym_key = f"{sym.get('file', '')}:{sym.get('line', 0)}:{sym.get('name', '')}"
+                    symbol_sources[sym_key] = content.encode("utf-8")
+        if not symbol_sources:
+            symbol_sources = None
+    except Exception:  # noqa: BLE001
+        symbol_sources = None  # Graceful degradation
+
+    # Build file_sources for module-level scanning (Python files only)
+    from ..core.validation import ValidationError, validate_path
+
+    file_sources: dict[str, bytes] | None = None
+    try:
+        content_dir = ctx.store._content_dir(owner, name)
+        file_sources = {}
+        for source_file in index.source_files:
+            if not source_file.endswith(".py"):
+                continue
+            try:
+                validated = validate_path(source_file, str(content_dir))
+            except ValidationError:
+                continue
+            try:
+                fd = os.open(str(validated), os.O_RDONLY | os.O_NOFOLLOW)
+            except OSError as exc:
+                if exc.errno in (errno.ELOOP, errno.ENOENT):
+                    continue
+                continue
+            try:
+                with os.fdopen(fd, "rb") as f:
+                    file_sources[source_file] = f.read()
+            except OSError:
+                continue
+        if not file_sources:
+            file_sources = None
+    except Exception:  # noqa: BLE001
+        file_sources = None
+
     # Get ALL findings first (large limit) for accurate severity counts
     all_findings, total, _ = scan_symbols(
         symbols,
@@ -57,7 +114,21 @@ def scan_security(
         category=category,
         min_severity=severity,
         limit=10000,  # Get all for accurate counts
+        symbol_sources=symbol_sources,
     )
+
+    # Module-level scanning for assignment patterns
+    module_findings = scan_module_level(file_sources, MODULE_LEVEL_RULES, category, severity)
+    all_findings.extend(module_findings)
+
+    # Re-sort merged findings by severity, file, line, rule_id
+    all_findings.sort(key=lambda f: (
+        _SEVERITY_ORDER.get(f["severity"], 3),
+        f.get("file", ""),
+        f.get("line", 0),
+        f["rule_id"],
+    ))
+    total = len(all_findings)
     truncated = total > limit
     findings = all_findings[:limit]
 
@@ -70,6 +141,19 @@ def scan_security(
         min_order = _SEVERITY_ORDER.get(severity.lower(), 3)
         active_rules = [
             r for r in active_rules
+            if _SEVERITY_ORDER.get(r.severity, 3) <= min_order
+        ]
+
+    # Count active module-level rules
+    active_module_rules = MODULE_LEVEL_RULES
+    if category:
+        active_module_rules = [
+            r for r in active_module_rules if _matches_module_category(r, category)
+        ]
+    if severity:
+        min_order = _SEVERITY_ORDER.get(severity.lower(), 3)
+        active_module_rules = [
+            r for r in active_module_rules
             if _SEVERITY_ORDER.get(r.severity, 3) <= min_order
         ]
 
@@ -100,6 +184,11 @@ def scan_security(
             all_categories.add(f"owasp-{entry.split(':')[0].lower()}")
         for entry in rule.cwe:
             all_categories.add(entry.lower())
+    for rule in MODULE_LEVEL_RULES:
+        for entry in rule.owasp:
+            all_categories.add(f"owasp-{entry.split(':')[0].lower()}")
+        for entry in rule.cwe:
+            all_categories.add(entry.lower())
 
     ms = elapsed_ms(start)
 
@@ -108,7 +197,7 @@ def scan_security(
         "scan_type": "dangerous_api_usage",
         "scan_summary": {
             "symbols_scanned": len(symbols),
-            "rules_applied": len(active_rules),
+            "rules_applied": len(active_rules) + len(active_module_rules),
             "findings_total": total,
             "findings_returned": len(wrapped_findings),
             "truncated": truncated,
@@ -116,9 +205,9 @@ def scan_security(
         },
         "findings": wrapped_findings,
         "limitations": [
-            "Scans function/class/method symbols only, not module-level code",
+            "Module-level scanning detects dangerous assignments (DEBUG, SECRET_KEY) in Python files; module-level call detection uses symbol-level scanning only",
             "Matches bare call names from index, not full qualified paths",
-            "Cannot inspect function arguments (e.g., shell=True, SafeLoader)",
+            "Argument inspection available for Python (shell=True, SafeLoader, bind, debug); other languages call-name only",
             "Findings are potential hotspots, not confirmed vulnerabilities",
         ],
         "categories_available": sorted(all_categories),

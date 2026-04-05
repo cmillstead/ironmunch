@@ -1,5 +1,6 @@
 """Generate a Software Bill of Materials (SBOM) by parsing lockfiles."""
 
+import hashlib
 import json
 import logging
 import os
@@ -312,16 +313,22 @@ def _make_purl(dep: dict) -> str:
 def generate_sbom(
     repo_path: str,
     allowed_roots: Optional[list[str]] = None,
+    format: str = "codesight",
 ) -> dict:
     """Generate an SBOM by parsing lockfiles at the repo root.
 
     Args:
         repo_path: Filesystem path to the repository root.
         allowed_roots: Optional list of allowed root directories.
+        format: Output format — "codesight" (default), "cyclonedx", or "spdx".
 
     Returns:
         Dict with dependencies, lockfile info, and _meta envelope.
     """
+    valid_formats = {"codesight", "cyclonedx", "spdx"}
+    if format not in valid_formats:
+        return {"error": f"Invalid format: {format!r}. Must be one of: codesight, cyclonedx, spdx"}
+
     start = timed()
 
     # Validate repo_path against ALLOWED_ROOTS
@@ -340,7 +347,7 @@ def generate_sbom(
     lockfiles_found: list[str] = []
     lockfiles_parsed: list[str] = []
     lockfiles_skipped: list[dict] = []
-    all_deps: list[dict] = []
+    deps_raw: list[dict] = []
     all_warnings: list[dict] = []
 
     # Track parsed ecosystems to avoid double-counting (e.g., uv.lock + pyproject.toml)
@@ -418,19 +425,13 @@ def generate_sbom(
         for dep in deps:
             parsed_ecosystems.add(dep.get("ecosystem", ""))
 
-        # Attach source and purl to each dep, wrap untrusted strings
+        # Attach source and purl to each dep as plain strings (raw)
         for dep in deps:
             dep["purl"] = _make_purl(dep)
             dep["source"] = filename
-            # Wrap all string fields with untrusted content markers
-            dep["name"] = wrap_untrusted_content(dep["name"])
-            if dep["version"] is not None:
-                dep["version"] = wrap_untrusted_content(dep["version"])
-            dep["purl"] = wrap_untrusted_content(dep["purl"])
-            dep["source"] = wrap_untrusted_content(dep["source"])
-            all_deps.append(dep)
+            deps_raw.append(dep)
 
-        # Wrap warning strings
+        # Collect warnings (wrap strings for all formats)
         for warn in parse_warnings:
             wrapped_warn = {}
             for key, val in warn.items():
@@ -440,13 +441,30 @@ def generate_sbom(
                     wrapped_warn[key] = val
             all_warnings.append(wrapped_warn)
 
+    ms = elapsed_ms(start)
+
+    # Branch on output format
+    if format == "cyclonedx":
+        return _format_cyclonedx(deps_raw, lockfiles_parsed, ms)
+    if format == "spdx":
+        return _format_spdx(deps_raw, lockfiles_parsed, ms)
+
+    # Default: "codesight" format — wrap deps with untrusted markers
+    all_deps: list[dict] = []
+    for dep in deps_raw:
+        wrapped = dict(dep)
+        wrapped["name"] = wrap_untrusted_content(dep["name"])
+        if dep["version"] is not None:
+            wrapped["version"] = wrap_untrusted_content(dep["version"])
+        wrapped["purl"] = wrap_untrusted_content(dep["purl"])
+        wrapped["source"] = wrap_untrusted_content(dep["source"])
+        all_deps.append(wrapped)
+
     # Build summary
     by_ecosystem: dict[str, int] = {}
     for dep in all_deps:
         eco = dep["ecosystem"]
         by_ecosystem[eco] = by_ecosystem.get(eco, 0) + 1
-
-    ms = elapsed_ms(start)
 
     return {
         "repo_path": str(resolved_path),
@@ -467,6 +485,93 @@ def generate_sbom(
 
 
 # ---------------------------------------------------------------------------
+# Standards format helpers
+# ---------------------------------------------------------------------------
+
+
+def _format_cyclonedx(
+    deps_raw: list[dict],
+    lockfiles_parsed: list[str],
+    timing_ms: float,
+) -> dict:
+    """Format raw deps as CycloneDX 1.5 JSON."""
+    from datetime import datetime, timezone
+
+    components = []
+    for dep in deps_raw:
+        components.append({
+            "type": "library",
+            "name": dep["name"],
+            "version": dep.get("version") or "",
+            "purl": dep["purl"],
+        })
+    return {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "version": 1,
+        "metadata": {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "tools": [{"name": "codesight-mcp"}],
+        },
+        "components": components,
+        "_meta": {
+            "source": "lockfile_parse",
+            "trusted": False,
+            "timing_ms": timing_ms,
+        },
+    }
+
+
+def _sanitize_spdx_id(name: str) -> str:
+    """Sanitize name for use in SPDX IDs (alphanumeric + dash only)."""
+    return re.sub(r"[^a-zA-Z0-9-]", "-", name)
+
+
+def _format_spdx(
+    deps_raw: list[dict],
+    lockfiles_parsed: list[str],
+    timing_ms: float,
+) -> dict:
+    """Format raw deps as SPDX 2.3 JSON."""
+    from datetime import datetime, timezone
+
+    namespace_input = "|".join(sorted(lockfiles_parsed))
+    namespace_hash = hashlib.sha256(namespace_input.encode()).hexdigest()[:16]
+
+    packages = []
+    for idx, dep in enumerate(deps_raw):
+        sanitized = _sanitize_spdx_id(dep["name"])
+        packages.append({
+            "SPDXID": f"SPDXRef-Package-{sanitized}-{idx}",
+            "name": dep["name"],
+            "versionInfo": dep.get("version") or "",
+            "downloadLocation": "NOASSERTION",
+            "externalRefs": [{
+                "referenceCategory": "PACKAGE-MANAGER",
+                "referenceType": "purl",
+                "referenceLocator": dep["purl"],
+            }],
+        })
+    return {
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": "codesight-sbom",
+        "documentNamespace": f"https://codesight-mcp/sbom/{namespace_hash}",
+        "creationInfo": {
+            "created": datetime.now(timezone.utc).isoformat(),
+            "creators": ["Tool: codesight-mcp"],
+        },
+        "packages": packages,
+        "_meta": {
+            "source": "lockfile_parse",
+            "trusted": False,
+            "timing_ms": timing_ms,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Handler wrapper + allowed-roots wiring (same pattern as get_changes.py)
 # ---------------------------------------------------------------------------
 
@@ -480,6 +585,7 @@ def _handle_generate_sbom(args: dict, storage_path, *, _allowed_roots_fn=None):
     return generate_sbom(
         repo_path=args["repo_path"],
         allowed_roots=allowed,
+        format=args.get("format", "codesight"),
     )
 
 
@@ -505,6 +611,12 @@ _spec = register(ToolSpec(
             "repo_path": {
                 "type": "string",
                 "description": "Filesystem path to the repository root",
+            },
+            "format": {
+                "type": "string",
+                "enum": ["codesight", "cyclonedx", "spdx"],
+                "default": "codesight",
+                "description": "Output format: codesight (default), cyclonedx, or spdx",
             },
         },
         "required": ["repo_path"],

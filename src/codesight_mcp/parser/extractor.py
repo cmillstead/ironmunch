@@ -134,13 +134,34 @@ def parse_file(content: str, filename: str, language: str) -> list[Symbol]:
     symbols = []
     _walk_tree(tree.root_node, spec, source_bytes, filename, language, symbols, None)
 
-    # Extract file-level imports and attach to all top-level symbols
+    # Extract file-level imports and attach to all top-level symbols.
+    # If a file has imports but no top-level symbols (e.g., __init__.py with
+    # only re-exports), create a synthetic file-level symbol to carry the
+    # imports so they contribute to dependency analysis and cycle detection.
     if spec.import_node_types:
         file_imports = _extract_imports(tree.root_node, spec, source_bytes)
         if file_imports:
-            for sym in symbols:
-                if sym.parent is None:
+            top_level = [sym for sym in symbols if sym.parent is None]
+            if top_level:
+                for sym in top_level:
                     sym.imports = file_imports
+            else:
+                # No top-level symbols — create synthetic carrier
+                symbols.append(Symbol(
+                    id=f"{filename}::(module)",
+                    name="(module)",
+                    qualified_name="(module)",
+                    kind="symbol",
+                    file=filename,
+                    line=1,
+                    end_line=1,
+                    language=language,
+                    signature=filename,
+                    docstring="",
+                    decorators=[],
+                    parent=None,
+                    imports=file_imports,
+                ))
 
     # Disambiguate overloaded symbols (same ID)
     symbols = _disambiguate_overloads(symbols)
