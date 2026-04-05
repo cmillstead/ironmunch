@@ -6,6 +6,36 @@ from collections import defaultdict, deque
 from typing import Optional
 
 
+def _build_import_resolution_map(source_files: list[str]) -> dict[str, str | None]:
+    """Build a multi-key lookup mapping import strings to source file paths.
+
+    For each source file, generates three match keys:
+    - Full path stem: strip extension (pkg/utils.py -> pkg/utils)
+    - Dotted form: replace / with . in stem (pkg/utils -> pkg.utils)
+    - Basename: filename without extension (utils)
+
+    Keys that map to multiple files are marked as ambiguous (None).
+    Returns dict mapping key -> file_path (unambiguous) or key -> None (ambiguous).
+    """
+    key_to_files: dict[str, list[str]] = defaultdict(list)
+
+    for f in source_files:
+        stem = f.rsplit(".", 1)[0] if "." in f else f
+        basename = stem.rsplit("/", 1)[-1] if "/" in stem else stem
+        dotted = stem.replace("/", ".")
+
+        for key in (stem, dotted, basename):
+            key_to_files[key].append(f)
+
+    # Resolve: single file = unambiguous, multiple = ambiguous (None)
+    result: dict[str, str | None] = {}
+    for key, files in key_to_files.items():
+        unique = list(set(files))
+        result[key] = unique[0] if len(unique) == 1 else None
+
+    return result
+
+
 # Hard ceiling for all traversals.
 _MAX_DEPTH_LIMIT: int = 50
 
@@ -416,3 +446,100 @@ class CodeGraph:
                 break
 
         return rank
+
+    # ------------------------------------------------------------------
+    # Circular dependency detection
+    # ------------------------------------------------------------------
+
+    def find_import_cycles(
+        self,
+        source_files: list[str],
+        max_cycles: int = 20,
+    ) -> tuple[list[list[str]], int, bool]:
+        """Find circular dependencies using Tarjan SCC on normalized import edges.
+
+        Builds a file-to-file adjacency graph from import edges, then runs
+        iterative Tarjan's algorithm to find strongly connected components.
+        SCCs with more than one node represent circular dependencies.
+
+        Args:
+            source_files: List of source file paths in the repo.
+            max_cycles: Maximum number of cycles to return.
+
+        Returns:
+            Tuple of (cycles, total_count, truncated) where cycles is a list
+            of sorted file lists, total_count is the total SCCs found, and
+            truncated is True if total_count exceeded max_cycles.
+        """
+        resolution_map = _build_import_resolution_map(source_files)
+        source_set = set(source_files)
+
+        # Build file-to-file internal import adjacency
+        adj: dict[str, set[str]] = defaultdict(set)
+        for src_file in sorted(source_set):
+            for imp in self._imports_fwd.get(src_file, set()):
+                target = resolution_map.get(imp)
+                if target is not None and target in source_set and target != src_file:
+                    adj[src_file].add(target)
+
+        # Ensure all source files with imports are nodes
+        all_nodes = sorted(
+            set(adj.keys()) | {t for targets in adj.values() for t in targets}
+        )
+
+        # Iterative Tarjan SCC
+        index_counter = [0]
+        stack: list[str] = []
+        on_stack: set[str] = set()
+        indices: dict[str, int] = {}
+        lowlinks: dict[str, int] = {}
+        sccs: list[list[str]] = []
+
+        for node in all_nodes:
+            if node in indices:
+                continue
+            # Iterative DFS
+            work_stack: list[tuple[str, int]] = [(node, 0)]
+            indices[node] = lowlinks[node] = index_counter[0]
+            index_counter[0] += 1
+            stack.append(node)
+            on_stack.add(node)
+
+            while work_stack:
+                v, ni = work_stack[-1]
+                neighbors = sorted(adj.get(v, set()))
+
+                if ni < len(neighbors):
+                    work_stack[-1] = (v, ni + 1)
+                    w = neighbors[ni]
+                    if w not in indices:
+                        indices[w] = lowlinks[w] = index_counter[0]
+                        index_counter[0] += 1
+                        stack.append(w)
+                        on_stack.add(w)
+                        work_stack.append((w, 0))
+                    elif w in on_stack:
+                        lowlinks[v] = min(lowlinks[v], indices[w])
+                else:
+                    # Done with v
+                    work_stack.pop()
+                    if work_stack:
+                        parent = work_stack[-1][0]
+                        lowlinks[parent] = min(lowlinks[parent], lowlinks[v])
+
+                    if lowlinks[v] == indices[v]:
+                        scc: list[str] = []
+                        while True:
+                            w = stack.pop()
+                            on_stack.discard(w)
+                            scc.append(w)
+                            if w == v:
+                                break
+                        if len(scc) > 1:
+                            sccs.append(sorted(scc))
+
+        # Sort SCCs by first element for deterministic output
+        sccs.sort(key=lambda s: s[0])
+        total = len(sccs)
+        truncated = total > max_cycles
+        return sccs[:max_cycles], total, truncated

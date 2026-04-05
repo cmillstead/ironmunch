@@ -2,8 +2,7 @@
 
 import hashlib
 
-
-from codesight_mcp.tools.get_dependencies import get_dependencies
+from codesight_mcp.tools.get_dependencies import get_dependencies, _spec
 from codesight_mcp.storage import IndexStore
 from codesight_mcp.parser import Symbol
 
@@ -193,10 +192,11 @@ class TestGetDependenciesMeta:
         assert meta["external_count"] == len(result["external"])
         assert meta["internal_count"] == len(result["internal"])
 
-    def test_meta_content_trust_is_trusted(self, tmp_path):
+    def test_meta_content_trust_is_untrusted(self, tmp_path):
         _make_indexed_repo(tmp_path)
         result = get_dependencies("local/testapp", storage_path=str(tmp_path))
-        assert result["_meta"]["contentTrust"] == "trusted"
+        assert result["_meta"]["contentTrust"] == "untrusted"
+        assert "warning" in result["_meta"]
 
     def test_result_has_repo_field(self, tmp_path):
         _make_indexed_repo(tmp_path)
@@ -296,3 +296,153 @@ class TestGetDependenciesEdgeCases:
         # dup.py imports os, but it's only one file
         assert os_entry["import_count"] == 1
         assert len(os_entry["imported_by"]) == 1
+
+
+class TestGetDependenciesCircularDeps:
+    """Tests for circular_dependencies in output."""
+
+    def test_circular_dependencies_key_exists(self, tmp_path):
+        _make_indexed_repo(tmp_path)
+        result = get_dependencies("local/testapp", storage_path=str(tmp_path))
+        assert "circular_dependencies" in result
+
+    def test_non_cyclic_repo_has_empty_cycles(self, tmp_path):
+        _make_indexed_repo(tmp_path)
+        result = get_dependencies("local/testapp", storage_path=str(tmp_path))
+        assert result["circular_dependencies"] == []
+
+    def test_meta_has_circular_count(self, tmp_path):
+        _make_indexed_repo(tmp_path)
+        result = get_dependencies("local/testapp", storage_path=str(tmp_path))
+        assert "circular_count" in result["_meta"]
+        assert result["_meta"]["circular_count"] == 0
+
+    def test_meta_has_circular_truncated(self, tmp_path):
+        _make_indexed_repo(tmp_path)
+        result = get_dependencies("local/testapp", storage_path=str(tmp_path))
+        assert "circular_truncated" in result["_meta"]
+        assert result["_meta"]["circular_truncated"] is False
+
+    def test_dotted_form_internal_classification(self, tmp_path):
+        """Dotted import form (pkg.utils) should resolve to internal."""
+        src = "import pkg.utils\n"
+        symbols = [
+            Symbol(
+                id="pkg/app.py::f#function",
+                file="pkg/app.py",
+                name="f",
+                qualified_name="f",
+                kind="function",
+                language="python",
+                signature="def f():",
+                line=1, end_line=1,
+                byte_offset=0, byte_length=len(src),
+                content_hash=hashlib.sha256(src.encode()).hexdigest(),
+                imports=["pkg.utils"],
+            ),
+            Symbol(
+                id="pkg/utils.py::g#function",
+                file="pkg/utils.py",
+                name="g",
+                qualified_name="g",
+                kind="function",
+                language="python",
+                signature="def g():",
+                line=1, end_line=1,
+                byte_offset=0, byte_length=len(src),
+                content_hash=hashlib.sha256(src.encode()).hexdigest(),
+                imports=[],
+            ),
+        ]
+        store = IndexStore(base_path=str(tmp_path))
+        content_dir = tmp_path / "local__dotrepo"
+        content_dir.mkdir(parents=True, exist_ok=True)
+        (content_dir / "pkg").mkdir(exist_ok=True)
+        (content_dir / "pkg" / "app.py").write_text(src)
+        (content_dir / "pkg" / "utils.py").write_text(src)
+        store.save_index(
+            owner="local",
+            name="dotrepo",
+            source_files=["pkg/app.py", "pkg/utils.py"],
+            symbols=symbols,
+            raw_files={"pkg/app.py": src, "pkg/utils.py": src},
+            languages={"python": 2},
+        )
+        result = get_dependencies("local/dotrepo", storage_path=str(tmp_path))
+        internal_names = [e["module"].split("\n")[1] for e in result["internal"]]
+        assert "pkg.utils" in internal_names
+
+    def test_ambiguous_key_not_internal(self, tmp_path):
+        """Ambiguous basename should not be classified as internal."""
+        src = "import utils\n"
+        symbols = [
+            Symbol(
+                id="a/utils.py::f#function",
+                file="a/utils.py",
+                name="f",
+                qualified_name="f",
+                kind="function",
+                language="python",
+                signature="def f():",
+                line=1, end_line=1,
+                byte_offset=0, byte_length=len(src),
+                content_hash=hashlib.sha256(src.encode()).hexdigest(),
+                imports=[],
+            ),
+            Symbol(
+                id="b/utils.py::g#function",
+                file="b/utils.py",
+                name="g",
+                qualified_name="g",
+                kind="function",
+                language="python",
+                signature="def g():",
+                line=1, end_line=1,
+                byte_offset=0, byte_length=len(src),
+                content_hash=hashlib.sha256(src.encode()).hexdigest(),
+                imports=[],
+            ),
+            Symbol(
+                id="c.py::h#function",
+                file="c.py",
+                name="h",
+                qualified_name="h",
+                kind="function",
+                language="python",
+                signature="def h():",
+                line=1, end_line=1,
+                byte_offset=0, byte_length=len(src),
+                content_hash=hashlib.sha256(src.encode()).hexdigest(),
+                imports=["utils"],
+            ),
+        ]
+        store = IndexStore(base_path=str(tmp_path))
+        content_dir = tmp_path / "local__ambigrepo"
+        content_dir.mkdir(parents=True, exist_ok=True)
+        for d in ("a", "b"):
+            (content_dir / d).mkdir(exist_ok=True)
+            (content_dir / d / "utils.py").write_text(src)
+        (content_dir / "c.py").write_text(src)
+        store.save_index(
+            owner="local",
+            name="ambigrepo",
+            source_files=["a/utils.py", "b/utils.py", "c.py"],
+            symbols=symbols,
+            raw_files={"a/utils.py": src, "b/utils.py": src, "c.py": src},
+            languages={"python": 3},
+        )
+        result = get_dependencies("local/ambigrepo", storage_path=str(tmp_path))
+        # "utils" is ambiguous -> classified as external, not internal
+        external_names = [e["module"].split("\n")[1] for e in result["external"]]
+        internal_names = [e["module"].split("\n")[1] for e in result["internal"]]
+        assert "utils" in external_names
+        assert "utils" not in internal_names
+        # And not in circular_dependencies
+        assert result["circular_dependencies"] == []
+
+
+class TestGetDependenciesToolSpec:
+    """Tests for ToolSpec registration."""
+
+    def test_toolspec_untrusted_is_true(self):
+        assert _spec.untrusted is True

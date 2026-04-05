@@ -4,6 +4,7 @@ from collections import defaultdict
 from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
+from ..parser.graph import CodeGraph, _build_import_resolution_map
 from ..security import sanitize_signature_for_api
 from ._common import RepoContext, timed, elapsed_ms
 from mcp.types import ToolAnnotations
@@ -34,13 +35,8 @@ def get_dependencies(
         return ctx
     owner, name, index = ctx.owner, ctx.name, ctx.index
 
-    # Build a set of source file stems for internal detection
-    source_stems: set[str] = set()
-    for f in index.source_files:
-        stem = f.rsplit(".", 1)[0] if "." in f else f
-        source_stems.add(stem)
-        if "/" in stem:
-            source_stems.add(stem.rsplit("/", 1)[-1])
+    # Build resolution map for internal detection
+    resolution_map = _build_import_resolution_map(index.source_files)
 
     # Collect imports: module -> set of importing files
     module_to_files: dict[str, set[str]] = defaultdict(set)
@@ -67,10 +63,20 @@ def get_dependencies(
                 wrap_untrusted_content(f) for f in sorted(importing_files)
             ],
         }
-        if module in source_stems:
+        if resolution_map.get(module) is not None:
             internal.append(entry)
         else:
             external.append(entry)
+
+    # Circular dependency detection
+    graph = CodeGraph.get_or_build(index.symbols)
+    cycles, cycle_total, cycle_truncated = graph.find_import_cycles(
+        index.source_files,
+    )
+    wrapped_cycles = [
+        [wrap_untrusted_content(f) for f in scc]
+        for scc in cycles
+    ]
 
     ms = elapsed_ms(start)
 
@@ -78,11 +84,14 @@ def get_dependencies(
         "repo": f"{owner}/{name}",
         "external": external,
         "internal": internal,
+        "circular_dependencies": wrapped_cycles,
         "_meta": {
-            **make_meta(source="code_index", trusted=True),
+            **make_meta(source="code_index", trusted=False),
             "timing_ms": ms,
             "external_count": len(external),
             "internal_count": len(internal),
+            "circular_count": cycle_total,
+            "circular_truncated": cycle_truncated,
         },
     }
 
@@ -92,8 +101,10 @@ _spec = register(ToolSpec(
     description=(
         "Aggregate import data to show external vs internal dependencies. "
         "Groups imports by module name and partitions into external (third-party/stdlib) "
-        "and internal (modules matching repo source files), sorted by usage count."
+        "and internal (modules matching repo source files), sorted by usage count. "
+        "Also detects circular dependencies via Tarjan SCC on internal import edges."
     ),
+    untrusted=True,
     input_schema={
         "type": "object",
         "properties": {

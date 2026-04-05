@@ -89,7 +89,7 @@ async def test_source_code_tools_have_untrusted_warning():
     """Tools returning source code must warn about untrusted content."""
     tools = await list_tools()
     source_tools = {"get_symbol", "get_symbols", "search_text",
-                    "get_file_outline", "search_symbols"}
+                    "get_file_outline", "search_symbols", "get_dependencies"}
 
     for tool in tools:
         if tool.name in source_tools:
