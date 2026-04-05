@@ -5,6 +5,7 @@ doesn't duplicate the logic.
 """
 
 import re
+import threading
 import time
 from dataclasses import dataclass
 from typing import Optional, Union
@@ -14,6 +15,26 @@ from ..storage import CodeIndex, IndexStore
 from ..core.errors import sanitize_error, RepoNotFoundError
 from ..core.validation import ValidationError
 from ..parser.graph import CodeGraph
+
+# Shared IndexStore instances keyed by storage_path.
+# Reusing instances preserves the in-memory LRU cache across tool calls,
+# eliminating repeated gzip decompress + JSON parse (~133 ms per call).
+_store_instances: dict[str | None, IndexStore] = {}
+_store_lock = threading.Lock()
+
+
+def _get_shared_store(storage_path: str | None = None) -> IndexStore:
+    """Return a shared IndexStore for *storage_path*, creating one if needed."""
+    with _store_lock:
+        if storage_path not in _store_instances:
+            _store_instances[storage_path] = IndexStore(base_path=storage_path)
+        return _store_instances[storage_path]
+
+
+def _clear_shared_stores() -> None:
+    """Clear the shared store cache (for testing only)."""
+    with _store_lock:
+        _store_instances.clear()
 
 
 def parse_repo(
@@ -35,7 +56,7 @@ def parse_repo(
     else:
         import re
 
-        store = IndexStore(base_path=storage_path)
+        store = _get_shared_store(storage_path)
         try:
             repos = store.list_repos()
         except (OSError, ValueError) as exc:
@@ -90,7 +111,7 @@ class RepoContext:
             owner, name = parse_repo(repo, storage_path)
         except RepoNotFoundError as exc:
             return {"error": str(exc)}
-        store = IndexStore(base_path=storage_path)
+        store = _get_shared_store(storage_path)
         index = store.load_index(owner, name)
         if not index:
             return {"error": f"Repository not indexed: {owner}/{name}"}

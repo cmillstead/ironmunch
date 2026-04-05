@@ -1,6 +1,6 @@
 """P0-10: MCP protocol registration and dispatch tests.
 
-Verify that all 24 tools are registered with correct schemas and that
+Verify that all 34 tools are registered with correct schemas and that
 the server dispatch works correctly.
 """
 
@@ -11,7 +11,7 @@ from codesight_mcp.server import call_tool, list_tools
 from codesight_mcp.tools.registry import get_all_specs
 
 
-# The 30 expected tool names.
+# The 34 expected tool names.
 EXPECTED_TOOLS = sorted([
     "index_repo",
     "index_folder",
@@ -43,17 +43,21 @@ EXPECTED_TOOLS = sorted([
     "get_usage_stats",
     "verify",
     "lint_index",
+    "generate_sbom",
+    "check_licenses",
+    "scan_security",
+    "trace_taint",
 ])
 
 
 class TestToolRegistration:
-    """Verify all 30 tools are present in the registry."""
+    """Verify all 34 tools are present in the registry."""
 
     def test_all_22_tools_registered(self):
-        """The registry must contain exactly 30 tools."""
+        """The registry must contain exactly 34 tools."""
         specs = get_all_specs()
-        assert len(specs) == 30, (
-            f"Expected 30 tools, got {len(specs)}: {sorted(specs.keys())}"
+        assert len(specs) == 34, (
+            f"Expected 34 tools, got {len(specs)}: {sorted(specs.keys())}"
         )
 
     def test_all_expected_tool_names_present(self):
@@ -97,10 +101,10 @@ class TestListToolsHandler:
     """Verify the @server.list_tools() handler returns correct Tool objects."""
 
     async def test_list_tools_returns_all_22(self):
-        """The list_tools handler returns exactly 30 Tool objects."""
+        """The list_tools handler returns exactly 34 Tool objects."""
         tools = await list_tools()
-        assert len(tools) == 30, (
-            f"Expected 30 tools from list_tools(), got {len(tools)}: "
+        assert len(tools) == 34, (
+            f"Expected 34 tools from list_tools(), got {len(tools)}: "
             f"{[t.name for t in tools]}"
         )
 
@@ -210,7 +214,8 @@ class TestMCPProtocol:
             "get_diagram", "get_dependencies", "get_changes", "get_usage_stats",
             "search_symbols", "search_text", "search_references",
             "analyze_complexity", "compare_symbols", "list_repos", "verify",
-            "lint_index",
+            "lint_index", "generate_sbom", "check_licenses", "scan_security",
+            "trace_taint",
         }
         write_tools = {"index_repo", "index_folder"}
         destructive_tools = {"invalidate_cache"}

@@ -27,6 +27,11 @@ _LANGUAGE_BINDINGS_LOCK = threading.Lock()
 SUPPORTED_LANGUAGES = frozenset({
     "python", "javascript", "typescript", "go", "rust", "java", "php",
     "c", "cpp", "c_sharp", "ruby", "swift", "kotlin", "dart", "perl",
+    "lua", "bash", "scala", "r", "elixir", "julia", "clojure",
+    "nim", "haskell", "erlang",
+    "zig", "d", "objc", "ocaml", "fsharp", "elm",
+    "sql", "powershell", "solidity",
+    "hcl", "proto", "graphql",
 })
 _ALLOWED_LANGUAGES = SUPPORTED_LANGUAGES  # backward compat
 
@@ -39,7 +44,13 @@ _LANGUAGE_FUNC_MAP = {
 }
 
 # Languages only available via tree-sitter-language-pack (no standalone PyPI package)
-_LANGUAGE_PACK_LANGUAGES = {"dart", "perl"}
+_LANGUAGE_PACK_LANGUAGES = {
+    "dart", "perl", "lua", "bash", "scala", "r", "elixir", "julia", "clojure",
+    "nim", "haskell", "erlang",
+    "zig", "d", "objc", "ocaml", "fsharp", "elm",
+    "sql", "powershell", "solidity",
+    "hcl", "proto", "graphql",
+}
 
 def _get_parser(lang_name: str) -> Parser | None:
     """Get a tree-sitter parser for a language, loading binding on first use."""
@@ -172,6 +183,12 @@ def _extract_symbol(
     """Extract a Symbol from an AST node."""
     kind = spec.symbol_node_types[node.type]
 
+    # Allow per-language kind override (e.g., Elixir call → class for defmodule)
+    if spec.resolve_kind is not None:
+        kind = spec.resolve_kind(node, source_bytes, kind)
+        if kind is None:
+            return None  # resolve_kind can reject nodes by returning None
+
     # Skip nodes with errors
     if node.has_error:
         return None
@@ -262,14 +279,21 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
         # Arrow functions get name from parent variable_declarator
         return None
 
-    # Handle type_declaration in Go - name is in type_spec child
+    # Handle type_declaration in Go — name is in type_spec child.
+    # Only activate when a Go-specific type_spec child exists; other languages
+    # (e.g. Nim) reuse the type_declaration node type with different AST shapes.
     if node.type == "type_declaration":
+        type_spec = None
         for child in node.children:
             if child.type == "type_spec":
-                name_node = child.child_by_field_name("name")
-                if name_node:
-                    return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")[:200]
-        return None
+                type_spec = child
+                break
+        if type_spec is not None:
+            name_node = type_spec.child_by_field_name("name")
+            if name_node:
+                return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")[:200]
+            return None
+        # Not Go — fall through to language-specific logic
 
     # Delegate to language-specific name extractor if available
     if spec.extract_name is not None and node.type not in spec.name_fields:

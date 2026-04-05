@@ -228,7 +228,7 @@ class TestIndexRepoParsedWarningsNoPath:
             patch("codesight_mcp.tools.index_repo.fetch_gitignore", new=fake_fetch_gitignore),
             patch("codesight_mcp.tools._indexing_common.parse_file") as mock_parse,
             patch("codesight_mcp.tools._indexing_common.summarize_symbols", side_effect=lambda syms, use_ai: syms),
-            patch("codesight_mcp.tools._indexing_common.IndexStore") as mock_store_cls,
+            patch("codesight_mcp.tools._indexing_common._get_shared_store") as mock_store_cls,
         ):
             # Make parse raise for bad.py, succeed for good.py
             from codesight_mcp.parser.symbols import Symbol

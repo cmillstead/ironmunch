@@ -12,7 +12,7 @@ from typing import Iterable
 from ..core.limits import MAX_FILE_COUNT
 from ..parser import parse_file, LANGUAGE_EXTENSIONS
 from ..parser.graph import CodeGraph
-from ..storage import IndexStore
+from ._common import _get_shared_store
 from ..summarizer import summarize_symbols
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ def finalize_index(
     indexed_at = datetime.now(timezone.utc).isoformat()
 
     # Save index
-    store = IndexStore(base_path=storage_path)
+    store = _get_shared_store(storage_path)
 
     # Load previous index to identify stale embedding IDs before overwriting
     prev_index = store.load_index(owner, name)

@@ -728,9 +728,9 @@ class IndexStore:
                     logger.debug("Cache hit for %s/%s", owner, name)
                     self._index_cache.move_to_end((owner, name))
                     return copy.deepcopy(cached_index)
+            # Cache miss — increment inside the lock to avoid races
+            self._cache_misses += 1
 
-        # Cache miss — run full pipeline
-        self._cache_misses += 1
         logger.debug("Cache miss for %s/%s", owner, name)
 
         data = self._read_raw_index(load_path, compressed)

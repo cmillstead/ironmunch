@@ -3,8 +3,7 @@
 from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
-from ..storage import IndexStore
-from ._common import timed, elapsed_ms
+from ._common import timed, elapsed_ms, _get_shared_store
 from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
@@ -16,7 +15,7 @@ def list_repos(storage_path: Optional[str] = None) -> dict:
         Dict with count, list of repos, and _meta envelope.
     """
     start = timed()
-    store = IndexStore(base_path=storage_path)
+    store = _get_shared_store(storage_path)
     repos = store.list_repos()
     ms = elapsed_ms(start)
 

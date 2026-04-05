@@ -60,6 +60,11 @@ class LanguageSpec:
     # Override default name extraction for specific node types.
     extract_name: Optional[Callable] = None
 
+    # Per-language kind override: (node, source_bytes, default_kind) -> str
+    # Override the static kind from symbol_node_types when a single node type
+    # maps to multiple symbol kinds (e.g., Elixir 'call' → class for defmodule, function for def).
+    resolve_kind: Optional[Callable] = None
+
     # Per-language call target extraction: (node, spec, source_bytes, calls) -> bool
     # Override default call collection for specific call node types.
     # Returns True if the call was handled, False to fall through to default logic.
@@ -423,6 +428,377 @@ def _extract_name_perl(node, source_bytes: bytes):
     return None  # Not handled — fall through to default
 
 
+def _extract_name_r(node, source_bytes: bytes):
+    """R: binary_operator with <- / <<- / = assigns a name to the LHS identifier.
+    Only extracts assignment operators with function_definition RHS."""
+    if node.type == "binary_operator":
+        # Only index function assignments, not plain value assignments like x <- 1
+        rhs = node.child_by_field_name("rhs")
+        if not rhs or rhs.type != "function_definition":
+            return None
+        # Verify operator is an assignment (<-, <<-, =), not +, ~, etc.
+        operator = node.child_by_field_name("operator")
+        if operator:
+            op_text = source_bytes[operator.start_byte:operator.end_byte].decode("utf-8").strip()
+            if op_text not in ("<-", "<<-", "="):
+                return None
+        lhs = node.child_by_field_name("lhs")
+        if lhs and lhs.type == "identifier":
+            return source_bytes[lhs.start_byte:lhs.end_byte].decode("utf-8")
+        return None
+
+    return None  # Not handled — fall through to default
+
+
+def _resolve_kind_elixir(node, source_bytes: bytes, default_kind: str) -> str | None:
+    """Elixir: defmodule → class, def/defp/defmacro → function, other calls → skip."""
+    if node.type != "call":
+        return default_kind
+    children = node.named_children
+    if not children or children[0].type != "identifier":
+        return None  # Not a definition form — skip
+    form = source_bytes[children[0].start_byte:children[0].end_byte].decode("utf-8")
+    if form == "defmodule":
+        return "class"
+    if form in ("def", "defp", "defmacro"):
+        return "function"
+    return None  # Not a definition form — skip
+
+
+def _resolve_kind_clojure(node, source_bytes: bytes, default_kind: str) -> str | None:
+    """Clojure: defn/defmethod/defmulti → function, def/defonce → constant, defprotocol → class."""
+    if node.type != "list_lit":
+        return default_kind
+    sym_children = [c for c in node.named_children if c.type == "sym_lit"]
+    if not sym_children:
+        return None
+    first_text = source_bytes[sym_children[0].start_byte:sym_children[0].end_byte].decode("utf-8")
+    _KIND_MAP = {
+        "defn": "function", "defmethod": "function", "defmulti": "function",
+        "defmacro": "function", "def": "constant", "defonce": "constant",
+        "defprotocol": "class",
+    }
+    return _KIND_MAP.get(first_text)  # None for non-def forms → skip
+
+
+def _extract_name_elixir(node, source_bytes: bytes):
+    """Elixir: call nodes represent defmodule/def/defp/defmacro.
+    First child identifier determines the form; name is in arguments."""
+    if node.type != "call":
+        return None
+
+    children = node.named_children
+    if not children or children[0].type != "identifier":
+        return None
+
+    form = source_bytes[children[0].start_byte:children[0].end_byte].decode("utf-8")
+
+    if form == "defmodule":
+        # Name is in arguments -> alias child
+        args = next((c for c in children if c.type == "arguments"), None)
+        if args:
+            alias = next((c for c in args.named_children if c.type == "alias"), None)
+            if alias:
+                return source_bytes[alias.start_byte:alias.end_byte].decode("utf-8")
+        return None
+
+    if form in ("def", "defp", "defmacro"):
+        # Name is in arguments -> first call child's identifier, or bare identifier
+        args = next((c for c in children if c.type == "arguments"), None)
+        if args:
+            for arg_child in args.named_children:
+                if arg_child.type == "call":
+                    # def hi(x) — the call node has identifier "hi"
+                    ident = next(
+                        (c for c in arg_child.named_children if c.type == "identifier"),
+                        None,
+                    )
+                    if ident:
+                        return source_bytes[ident.start_byte:ident.end_byte].decode("utf-8")
+                if arg_child.type == "identifier":
+                    return source_bytes[arg_child.start_byte:arg_child.end_byte].decode("utf-8")
+        return None
+
+    return None  # Not a definition form
+
+
+def _extract_name_julia(node, source_bytes: bytes):
+    """Julia: function_definition -> signature -> call_expression -> identifier.
+    struct_definition -> type_head -> identifier.
+    module_definition has a 'name' field."""
+    if node.type == "function_definition":
+        # signature -> call_expression -> first identifier
+        sig = next((c for c in node.named_children if c.type == "signature"), None)
+        if sig:
+            call_expr = next(
+                (c for c in sig.named_children if c.type == "call_expression"),
+                None,
+            )
+            if call_expr:
+                ident = next(
+                    (c for c in call_expr.named_children if c.type == "identifier"),
+                    None,
+                )
+                if ident:
+                    return source_bytes[ident.start_byte:ident.end_byte].decode("utf-8")
+        return None
+
+    if node.type == "struct_definition":
+        # type_head -> identifier
+        head = next((c for c in node.named_children if c.type == "type_head"), None)
+        if head:
+            ident = next(
+                (c for c in head.named_children if c.type == "identifier"),
+                None,
+            )
+            if ident:
+                return source_bytes[ident.start_byte:ident.end_byte].decode("utf-8")
+        return None
+
+    if node.type == "module_definition":
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+        return None
+
+    return None  # Not handled — fall through to default
+
+
+def _extract_name_clojure(node, source_bytes: bytes):
+    """Clojure: list_lit where first sym_lit is a def-form.
+    Returns the second sym_lit text as the name."""
+    if node.type != "list_lit":
+        return None
+
+    sym_children = [c for c in node.named_children if c.type == "sym_lit"]
+    if len(sym_children) < 2:
+        return None
+
+    first_text = source_bytes[sym_children[0].start_byte:sym_children[0].end_byte].decode("utf-8")
+    # Only extract actual definition forms — skip ns (namespace) and non-def forms
+    _DEF_FORMS = {"def", "defn", "defmacro", "defmethod", "defmulti", "defprotocol", "defonce"}
+    if first_text not in _DEF_FORMS:
+        return None
+
+    return source_bytes[sym_children[1].start_byte:sym_children[1].end_byte].decode("utf-8")
+
+
+def _extract_name_nim(node, source_bytes: bytes):
+    """Nim: type_declaration has type_symbol_declaration child with 'name' field."""
+    if node.type == "type_declaration":
+        for child in node.children:
+            if child.type == "type_symbol_declaration":
+                name_node = child.child_by_field_name("name")
+                if name_node:
+                    return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+        return None
+
+    return None  # Not handled — fall through to default
+
+
+def _resolve_kind_haskell(node, source_bytes: bytes, default_kind: str) -> str | None:
+    """Haskell: skip 'function' nodes inside 'signature' (type annotations like foo :: Int -> Int)."""
+    if node.type == "function" and node.parent and node.parent.type == "signature":
+        return None  # Type expression, not a function definition — skip
+    return default_kind
+
+
+def _extract_name_erlang(node, source_bytes: bytes):
+    """Erlang: fun_decl has no name field — name is in first function_clause child's 'name' field."""
+    if node.type == "fun_decl":
+        for child in node.children:
+            if child.type == "function_clause":
+                name_node = child.child_by_field_name("name")
+                if name_node:
+                    return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+        return None
+
+    return None  # Not handled — fall through to default
+
+
+def _extract_name_zig(node, source_bytes: bytes):
+    """Zig: Decl wraps FnProto/VarDecl — name is the first IDENTIFIER grandchild."""
+    if node.type != "Decl":
+        return None
+
+    for child in node.named_children:
+        if child.type in ("FnProto", "VarDecl"):
+            for gc in child.named_children:
+                if gc.type == "IDENTIFIER":
+                    return source_bytes[gc.start_byte:gc.end_byte].decode("utf-8")
+            return None
+    return None
+
+
+def _has_container_decl(node) -> bool:
+    """Check if a Zig node contains a ContainerDecl (struct/enum/union) in its RHS."""
+    for child in node.named_children:
+        if child.type == "ContainerDecl":
+            return True
+        if _has_container_decl(child):
+            return True
+    return False
+
+
+def _resolve_kind_zig(node, source_bytes: bytes, default_kind: str) -> str | None:
+    """Zig: FnProto → function, VarDecl with ContainerDecl RHS → class, else constant."""
+    if node.type != "Decl":
+        return default_kind
+
+    for child in node.named_children:
+        if child.type == "FnProto":
+            return "function"
+        if child.type == "VarDecl":
+            # Check AST for ContainerDecl (struct/enum/union) — not substring
+            if _has_container_decl(child):
+                return "class"
+            return "constant"
+    return default_kind
+
+
+def _extract_name_d(node, source_bytes: bytes):
+    """D: function/class/struct/interface/enum declarations — name is in identifier child."""
+    if node.type in (
+        "function_declaration", "class_declaration", "struct_declaration",
+        "interface_declaration", "enum_declaration",
+    ):
+        for child in node.named_children:
+            if child.type == "identifier":
+                return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+        return None
+
+    return None  # Not handled — fall through to default
+
+
+def _extract_name_objc(node, source_bytes: bytes):
+    """Objective-C: class_interface/class_implementation — first identifier child.
+    method_declaration/method_definition — build selector from identifier + method_parameter parts."""
+    if node.type in ("class_interface", "class_implementation"):
+        for child in node.named_children:
+            if child.type == "identifier":
+                return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+        return None
+
+    if node.type in ("method_declaration", "method_definition"):
+        # Build full Objective-C selector name
+        # Pattern: identifier (method_parameter identifier method_parameter ...)*
+        # Selector: setValue:other:
+        parts = []
+        for child in node.children:
+            if child.type == "identifier" and child.is_named:
+                parts.append(source_bytes[child.start_byte:child.end_byte].decode("utf-8"))
+            elif child.type == "method_parameter":
+                # Each method_parameter means the preceding identifier is a selector part with colon
+                if parts:
+                    parts[-1] += ":"
+        if parts:
+            return "".join(parts)
+        return None
+
+    return None  # Not handled — fall through to default
+
+
+def _extract_name_ocaml(node, source_bytes: bytes):
+    """OCaml: value_definition → let_binding → value_name (pattern field).
+    module_definition → module_binding → module_name child.
+    type_definition → type_binding → type_constructor (name field)."""
+    if node.type == "value_definition":
+        for child in node.named_children:
+            if child.type == "let_binding":
+                # value_name is accessed via the pattern field
+                pattern = child.child_by_field_name("pattern")
+                if pattern and pattern.type == "value_name":
+                    return source_bytes[pattern.start_byte:pattern.end_byte].decode("utf-8")
+                # Fallback: first value_name child
+                for gc in child.named_children:
+                    if gc.type == "value_name":
+                        return source_bytes[gc.start_byte:gc.end_byte].decode("utf-8")
+        return None
+
+    if node.type == "module_definition":
+        for child in node.named_children:
+            if child.type == "module_binding":
+                for gc in child.named_children:
+                    if gc.type == "module_name":
+                        return source_bytes[gc.start_byte:gc.end_byte].decode("utf-8")
+        return None
+
+    if node.type == "type_definition":
+        for child in node.named_children:
+            if child.type == "type_binding":
+                name_node = child.child_by_field_name("name")
+                if name_node and name_node.type == "type_constructor":
+                    return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+                # Fallback: first type_constructor child
+                for gc in child.named_children:
+                    if gc.type == "type_constructor":
+                        return source_bytes[gc.start_byte:gc.end_byte].decode("utf-8")
+        return None
+
+    return None  # Not handled — fall through to default
+
+
+def _extract_name_fsharp(node, source_bytes: bytes):
+    """F#: declaration_expression → function_or_value_defn → function_declaration_left/value_declaration_left → identifier.
+    module_defn → identifier child.
+    type_definition → record_type_defn/other → type_name → identifier."""
+    if node.type == "declaration_expression":
+        for child in node.named_children:
+            if child.type == "function_or_value_defn":
+                for gc in child.named_children:
+                    if gc.type == "function_declaration_left":
+                        for ggc in gc.named_children:
+                            if ggc.type == "identifier":
+                                return source_bytes[ggc.start_byte:ggc.end_byte].decode("utf-8")
+                        return None
+                    if gc.type == "value_declaration_left":
+                        for ggc in gc.named_children:
+                            if ggc.type in ("identifier", "identifier_pattern"):
+                                return source_bytes[ggc.start_byte:ggc.end_byte].decode("utf-8")
+                        return None
+        return None
+
+    if node.type == "module_defn":
+        for child in node.named_children:
+            if child.type == "identifier":
+                return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+        return None
+
+    if node.type == "type_definition":
+        for child in node.named_children:
+            # Various type defn forms: record_type_defn, union_type_defn, etc.
+            for gc in child.named_children if hasattr(child, "named_children") else []:
+                if gc.type == "type_name":
+                    for ggc in gc.named_children:
+                        if ggc.type == "identifier":
+                            return source_bytes[ggc.start_byte:ggc.end_byte].decode("utf-8")
+        return None
+
+    return None  # Not handled — fall through to default
+
+
+def _resolve_kind_fsharp(node, source_bytes: bytes, default_kind: str) -> str | None:
+    """F#: module_defn → class, type_definition → type."""
+    if node.type == "module_defn":
+        return "class"
+    return default_kind
+
+
+def _extract_name_elm(node, source_bytes: bytes):
+    """Elm: value_declaration → function_declaration_left → lower_case_identifier child.
+    type_declaration and type_alias_declaration use name field (handled by default logic)."""
+    if node.type == "value_declaration":
+        for child in node.named_children:
+            if child.type == "function_declaration_left":
+                for gc in child.named_children:
+                    if gc.type == "lower_case_identifier":
+                        return source_bytes[gc.start_byte:gc.end_byte].decode("utf-8")
+                return None
+        return None
+
+    return None  # Not handled — fall through to default
+
+
 # ---------------------------------------------------------------------------
 # Per-language call target extraction functions
 # Each takes (node, spec, source_bytes, calls) and returns True if handled.
@@ -551,6 +927,41 @@ LANGUAGE_EXTENSIONS = {
     ".dart": "dart",
     ".pl": "perl",
     ".pm": "perl",
+    ".lua": "lua",
+    ".sh": "bash",
+    ".bash": "bash",
+    ".scala": "scala",
+    ".r": "r",
+    ".R": "r",
+    ".ex": "elixir",
+    ".exs": "elixir",
+    ".jl": "julia",
+    ".clj": "clojure",
+    ".cljc": "clojure",
+    ".cljs": "clojure",
+    ".nim": "nim",
+    ".nims": "nim",
+    ".hs": "haskell",
+    ".erl": "erlang",
+    ".hrl": "erlang",
+    ".zig": "zig",
+    ".d": "d",
+    ".mm": "objc",
+    ".ml": "ocaml",
+    ".mli": "ocaml",
+    ".fs": "fsharp",
+    ".fsi": "fsharp",
+    ".fsx": "fsharp",
+    ".elm": "elm",
+    ".sql": "sql",
+    ".ps1": "powershell",
+    ".psm1": "powershell",
+    ".sol": "solidity",
+    ".tf": "hcl",
+    ".tfvars": "hcl",
+    ".proto": "proto",
+    ".graphql": "graphql",
+    ".gql": "graphql",
 }
 
 
@@ -1143,6 +1554,687 @@ PERL_SPEC = LanguageSpec(
 )
 
 
+# Lua specification
+LUA_SPEC = LanguageSpec(
+    ts_language="lua",
+    symbol_node_types={
+        "function_declaration": "function",
+    },
+    name_fields={
+        "function_declaration": "name",
+    },
+    param_fields={
+        "function_declaration": "parameters",
+    },
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=["variable_declaration"],
+    type_patterns=[],
+    call_node_types=["function_call"],
+    import_node_types=[],  # Lua uses require() calls — not a distinct node type
+)
+
+
+# Bash specification
+BASH_SPEC = LanguageSpec(
+    ts_language="bash",
+    symbol_node_types={
+        "function_definition": "function",
+    },
+    name_fields={
+        "function_definition": "name",
+    },
+    param_fields={},  # Bash functions have no parameter syntax in the AST
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=["variable_assignment", "declaration_command"],
+    type_patterns=[],
+    call_node_types=["command"],
+    import_node_types=[],  # Bash uses source/. commands — not a distinct node type
+)
+
+
+# Scala specification
+SCALA_SPEC = LanguageSpec(
+    ts_language="scala",
+    symbol_node_types={
+        "function_definition": "function",
+        "class_definition": "class",
+        "object_definition": "class",
+        "trait_definition": "type",
+        "type_definition": "type",
+    },
+    name_fields={
+        "function_definition": "name",
+        "class_definition": "name",
+        "object_definition": "name",
+        "trait_definition": "name",
+        "type_definition": "name",
+    },
+    param_fields={
+        "function_definition": "parameters",
+    },
+    return_type_fields={
+        "function_definition": "return_type",
+    },
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=["class_definition", "object_definition", "trait_definition", "template_body"],
+    constant_patterns=["val_definition"],
+    type_patterns=["type_definition", "trait_definition"],
+    call_node_types=["call_expression"],
+    import_node_types=["import_declaration"],
+    inheritance_fields=["extends_clause"],
+)
+
+
+# R specification
+R_SPEC = LanguageSpec(
+    ts_language="r",
+    symbol_node_types={
+        "binary_operator": "function",  # Determined dynamically by extract_name; RHS checked below
+    },
+    name_fields={
+        # binary_operator uses custom extractor — no standard name field
+    },
+    param_fields={},  # R params are inside function_definition child, not directly accessible
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],  # Non-function assignments also use binary_operator — filtered by kind
+    type_patterns=[],
+    call_node_types=["call"],
+    import_node_types=[],  # R uses library()/require() calls — not a distinct node type
+    extract_name=_extract_name_r,
+)
+
+
+# Elixir specification
+ELIXIR_SPEC = LanguageSpec(
+    ts_language="elixir",
+    symbol_node_types={
+        "call": "function",  # defmodule/def/defp/defmacro are all call nodes
+    },
+    name_fields={
+        # call nodes use custom extractor — no standard name field
+    },
+    param_fields={},  # Elixir params are inside nested call arguments
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=["call"],  # defmodule contains nested def calls
+    constant_patterns=[],
+    type_patterns=[],
+    call_node_types=[],  # Elixir function calls are also call nodes — skip to avoid noise
+    import_node_types=[],  # Elixir uses use/import/alias calls — not distinct node types
+    extract_name=_extract_name_elixir,
+    resolve_kind=_resolve_kind_elixir,
+)
+
+
+# Julia specification
+JULIA_SPEC = LanguageSpec(
+    ts_language="julia",
+    symbol_node_types={
+        "function_definition": "function",
+        "struct_definition": "class",
+        "module_definition": "class",
+    },
+    name_fields={
+        # All use custom extractor or 'name' field (module_definition)
+        "module_definition": "name",
+    },
+    param_fields={},  # Julia params are inside signature -> call_expression -> argument_list
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=["module_definition", "struct_definition"],
+    constant_patterns=[],
+    type_patterns=["struct_definition"],
+    call_node_types=["call_expression"],
+    import_node_types=[],  # Julia uses using/import statements — TODO: add if needed
+    extract_name=_extract_name_julia,
+)
+
+
+# Clojure specification
+CLOJURE_SPEC = LanguageSpec(
+    ts_language="clojure",
+    symbol_node_types={
+        "list_lit": "function",  # def-forms are all list_lit nodes; kind determined by first sym
+    },
+    name_fields={
+        # list_lit uses custom extractor — no standard name field
+    },
+    param_fields={},  # Clojure params are vec_lit children — not field-based
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+    call_node_types=[],  # Clojure function calls are also list_lit — skip to avoid noise
+    import_node_types=[],  # Clojure uses (require ...) / (import ...) — not distinct node types
+    extract_name=_extract_name_clojure,
+    resolve_kind=_resolve_kind_clojure,
+)
+
+
+# Nim specification
+NIM_SPEC = LanguageSpec(
+    ts_language="nim",
+    symbol_node_types={
+        "proc_declaration": "function",
+        "func_declaration": "function",
+        "type_declaration": "type",
+    },
+    name_fields={
+        "proc_declaration": "name",
+        "func_declaration": "name",
+        # type_declaration uses custom extractor — no direct name field
+    },
+    param_fields={
+        "proc_declaration": "parameters",
+        "func_declaration": "parameters",
+    },
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=["type_declaration"],
+    call_node_types=["call"],
+    import_node_types=[],  # Nim uses import/include statements — TODO: add if needed
+    extract_name=_extract_name_nim,
+)
+
+
+# Haskell specification
+HASKELL_SPEC = LanguageSpec(
+    ts_language="haskell",
+    symbol_node_types={
+        "function": "function",
+        "data_type": "class",
+        "class": "class",
+    },
+    name_fields={
+        "function": "name",
+        "data_type": "name",
+        "class": "name",
+    },
+    param_fields={},  # Haskell params are patterns — not field-based
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=["class"],
+    constant_patterns=[],
+    type_patterns=["data_type"],
+    call_node_types=[],  # Haskell function application has no distinct call node type
+    import_node_types=[],  # Haskell uses import statements — TODO: add if needed
+    resolve_kind=_resolve_kind_haskell,
+)
+
+
+# Erlang specification
+ERLANG_SPEC = LanguageSpec(
+    ts_language="erlang",
+    symbol_node_types={
+        "fun_decl": "function",
+        "module_attribute": "class",
+        "record_decl": "type",
+    },
+    name_fields={
+        "module_attribute": "name",
+        "record_decl": "name",
+        # fun_decl uses custom extractor — name is in function_clause child
+    },
+    param_fields={},  # Erlang params are inside function_clause expr_args
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=["record_decl"],
+    call_node_types=["call"],
+    import_node_types=[],  # Erlang uses -import() attributes — not a distinct node type
+    extract_name=_extract_name_erlang,
+)
+
+
+# Zig specification
+ZIG_SPEC = LanguageSpec(
+    ts_language="zig",
+    symbol_node_types={
+        "Decl": "function",  # Kind determined dynamically by resolve_kind
+    },
+    name_fields={
+        # Decl uses custom extractor — no standard name field
+    },
+    param_fields={},  # Zig params are inside FnProto -> ParamDeclList
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+    call_node_types=[],  # Zig function calls are complex — skip for now
+    import_node_types=[],  # Zig uses @import() builtins — not a distinct node type
+    extract_name=_extract_name_zig,
+    resolve_kind=_resolve_kind_zig,
+)
+
+
+# D specification
+D_SPEC = LanguageSpec(
+    ts_language="d",
+    symbol_node_types={
+        "function_declaration": "function",
+        "class_declaration": "class",
+        "struct_declaration": "type",
+        "interface_declaration": "type",
+        "enum_declaration": "type",
+    },
+    name_fields={
+        # All use custom extractor — identifier child, no name field
+    },
+    param_fields={
+        "function_declaration": "parameters",
+    },
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=["class_declaration", "struct_declaration", "interface_declaration"],
+    constant_patterns=[],
+    type_patterns=["struct_declaration", "interface_declaration", "enum_declaration"],
+    call_node_types=[],  # D function calls — skip for now
+    import_node_types=[],  # D uses import statements — TODO: add if needed
+    extract_name=_extract_name_d,
+)
+
+
+# Objective-C specification
+# NOTE: Only .mm is mapped (not .m, which collides with MATLAB).
+# Index class_interface only for class symbols; class_implementation is excluded
+# to avoid duplicate class entries. Both method_declaration (in @interface) and
+# method_definition (in @implementation) are indexed.
+OBJC_SPEC = LanguageSpec(
+    ts_language="objc",
+    symbol_node_types={
+        "class_interface": "class",
+        "class_implementation": "class",  # Needed so methods get parent context
+        "method_declaration": "method",
+        "method_definition": "method",
+    },
+    name_fields={
+        # All use custom extractor — no standard name fields
+    },
+    param_fields={},  # ObjC params are method_parameter children
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=["class_interface", "class_implementation", "implementation_definition"],
+    constant_patterns=[],
+    type_patterns=[],
+    call_node_types=[],  # ObjC message sends — complex, skip for now
+    import_node_types=[],  # ObjC uses #import — similar to C includes
+    extract_name=_extract_name_objc,
+)
+
+
+# OCaml specification
+OCAML_SPEC = LanguageSpec(
+    ts_language="ocaml",
+    symbol_node_types={
+        "value_definition": "function",
+        "module_definition": "class",
+        "type_definition": "type",
+    },
+    name_fields={
+        # All use custom extractor — names are in nested binding nodes
+    },
+    param_fields={},  # OCaml params are pattern children of let_binding
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=["module_definition"],
+    constant_patterns=[],
+    type_patterns=["type_definition"],
+    call_node_types=[],  # OCaml function application has no distinct call node
+    import_node_types=[],  # OCaml uses open statements — TODO: add if needed
+    extract_name=_extract_name_ocaml,
+)
+
+
+# F# specification
+FSHARP_SPEC = LanguageSpec(
+    ts_language="fsharp",
+    symbol_node_types={
+        "declaration_expression": "function",
+        "module_defn": "class",  # Kind set by resolve_kind
+        "type_definition": "type",
+    },
+    name_fields={
+        # All use custom extractor — names are in nested declaration nodes
+    },
+    param_fields={},  # F# params are in argument_patterns child
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=["module_defn"],
+    constant_patterns=[],
+    type_patterns=["type_definition"],
+    call_node_types=[],  # F# function application — skip for now
+    import_node_types=[],  # F# uses open statements — TODO: add if needed
+    extract_name=_extract_name_fsharp,
+    resolve_kind=_resolve_kind_fsharp,
+)
+
+
+# Elm specification
+ELM_SPEC = LanguageSpec(
+    ts_language="elm",
+    symbol_node_types={
+        "value_declaration": "function",
+        "type_declaration": "type",
+        "type_alias_declaration": "type",
+    },
+    name_fields={
+        "type_declaration": "name",
+        "type_alias_declaration": "name",
+        # value_declaration uses custom extractor
+    },
+    param_fields={},  # Elm params are in function_declaration_left
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=["type_declaration", "type_alias_declaration"],
+    call_node_types=[],  # Elm function application — no distinct call node
+    import_node_types=[],  # Elm uses import statements — TODO: add if needed
+    extract_name=_extract_name_elm,
+)
+
+
+def _extract_name_sql(node, source_bytes: bytes):
+    """SQL: extract name from CREATE TABLE/FUNCTION/VIEW/INDEX statements.
+    For table/function/view: find object_reference child, join identifier children with '.'.
+    For index: find first direct identifier child."""
+    if node.type in ("create_table", "create_function", "create_view"):
+        for child in node.named_children:
+            if child.type == "object_reference":
+                identifiers = [
+                    source_bytes[c.start_byte:c.end_byte].decode("utf-8")
+                    for c in child.named_children
+                    if c.type == "identifier"
+                ]
+                if identifiers:
+                    return ".".join(identifiers)
+        return None
+
+    if node.type == "create_index":
+        for child in node.named_children:
+            if child.type == "identifier":
+                return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+        return None
+
+    return None  # Not handled — fall through to default
+
+
+def _extract_name_powershell(node, source_bytes: bytes):
+    """PowerShell: extract name from function_statement, class_statement,
+    and class_method_definition nodes."""
+    if node.type == "function_statement":
+        for child in node.named_children:
+            if child.type == "function_name":
+                return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+        return None
+
+    if node.type in ("class_statement", "class_method_definition"):
+        for child in node.named_children:
+            if child.type == "simple_name":
+                return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+        return None
+
+    return None  # Not handled — fall through to default
+
+
+def _extract_name_solidity(node, source_bytes: bytes):
+    """Solidity: extract name from contract/interface/function/event/modifier declarations.
+    All use first identifier child. Unnamed functions (constructor, fallback, receive)
+    return None."""
+    for child in node.named_children:
+        if child.type == "identifier":
+            return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+    return None  # Unnamed (e.g., constructor) — skip
+
+
+# SQL specification
+SQL_SPEC = LanguageSpec(
+    ts_language="sql",
+    symbol_node_types={
+        "create_table": "class",
+        "create_function": "function",
+        "create_view": "class",
+        "create_index": "constant",
+    },
+    name_fields={},  # All use custom extraction
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+    extract_name=_extract_name_sql,
+)
+
+
+# PowerShell specification
+POWERSHELL_SPEC = LanguageSpec(
+    ts_language="powershell",
+    symbol_node_types={
+        "function_statement": "function",
+        "class_statement": "class",
+        "class_method_definition": "function",
+    },
+    name_fields={},  # All use custom extraction
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=["class_statement"],
+    constant_patterns=[],
+    type_patterns=[],
+    extract_name=_extract_name_powershell,
+)
+
+
+# Solidity specification
+SOLIDITY_SPEC = LanguageSpec(
+    ts_language="solidity",
+    symbol_node_types={
+        "contract_declaration": "class",
+        "interface_declaration": "class",
+        "function_definition": "function",
+        "event_definition": "function",
+        "modifier_definition": "function",
+    },
+    name_fields={},  # All use custom extraction
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=["contract_declaration", "interface_declaration"],
+    constant_patterns=[],
+    type_patterns=[],
+    extract_name=_extract_name_solidity,
+)
+
+
+# ---------------------------------------------------------------------------
+# HCL custom extractors
+# ---------------------------------------------------------------------------
+
+def _extract_name_hcl(node, source_bytes: bytes):
+    """HCL: block nodes use first identifier child as block type,
+    then string_lit children (with template_literal inside) as labels.
+    resource/data → 'type.name', variable/module/output → just name, others → skip."""
+    if node.type != "block":
+        return None
+
+    # Find block type from first identifier child
+    block_type = None
+    for child in node.named_children:
+        if child.type == "identifier":
+            block_type = source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+            break
+
+    if block_type is None:
+        return None
+
+    # Collect labels from string_lit children (extract template_literal text)
+    labels = []
+    for child in node.named_children:
+        if child.type == "string_lit":
+            for sub in child.named_children:
+                if sub.type == "template_literal":
+                    labels.append(
+                        source_bytes[sub.start_byte:sub.end_byte].decode("utf-8")
+                    )
+                    break
+
+    if not labels:
+        return None  # locals, terraform blocks — skip
+
+    if len(labels) >= 2:
+        # resource "aws_instance" "web" → aws_instance.web
+        return f"{labels[0]}.{labels[1]}"
+
+    return labels[0]  # variable "region" → region
+
+
+def _resolve_kind_hcl(node, source_bytes: bytes, default_kind: str) -> str | None:
+    """HCL: map block type identifier to symbol kind."""
+    if node.type != "block":
+        return default_kind
+
+    for child in node.named_children:
+        if child.type == "identifier":
+            block_type = source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+            kind_map = {
+                "resource": "class",
+                "data": "class",
+                "variable": "constant",
+                "output": "constant",
+                "module": "function",
+            }
+            return kind_map.get(block_type)  # None for locals, terraform → skip
+    return None
+
+
+# HCL specification
+HCL_SPEC = LanguageSpec(
+    ts_language="hcl",
+    symbol_node_types={"block": "class"},  # Default, overridden by resolve_kind
+    name_fields={},
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+    extract_name=_extract_name_hcl,
+    resolve_kind=_resolve_kind_hcl,
+)
+
+
+# ---------------------------------------------------------------------------
+# Protobuf custom extractors
+# ---------------------------------------------------------------------------
+
+def _extract_name_proto(node, source_bytes: bytes):
+    """Proto: message/service/enum/rpc have a name-wrapper child
+    (message_name, service_name, etc.) containing an identifier."""
+    wrapper_map = {
+        "message": "message_name",
+        "service": "service_name",
+        "enum": "enum_name",
+        "rpc": "rpc_name",
+    }
+    wrapper_type = wrapper_map.get(node.type)
+    if wrapper_type is None:
+        return None
+
+    for child in node.named_children:
+        if child.type == wrapper_type:
+            for sub in child.named_children:
+                if sub.type == "identifier":
+                    return source_bytes[sub.start_byte:sub.end_byte].decode("utf-8")
+            break
+    return None
+
+
+# Protobuf specification
+PROTO_SPEC = LanguageSpec(
+    ts_language="proto",
+    symbol_node_types={
+        "message": "class",
+        "service": "class",
+        "enum": "class",
+        "rpc": "function",
+    },
+    name_fields={},
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=["message", "service"],
+    constant_patterns=[],
+    type_patterns=[],
+    extract_name=_extract_name_proto,
+)
+
+
+# ---------------------------------------------------------------------------
+# GraphQL custom extractors
+# ---------------------------------------------------------------------------
+
+def _extract_name_graphql(node, source_bytes: bytes):
+    """GraphQL: type definitions have a 'name' child node (GraphQL name node)."""
+    for child in node.named_children:
+        if child.type == "name":
+            return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+    return None
+
+
+# GraphQL specification
+GRAPHQL_SPEC = LanguageSpec(
+    ts_language="graphql",
+    symbol_node_types={
+        "object_type_definition": "class",
+        "interface_type_definition": "class",
+        "enum_type_definition": "class",
+        "input_object_type_definition": "class",
+    },
+    name_fields={},
+    param_fields={},
+    return_type_fields={},
+    docstring_strategy="preceding_comment",
+    decorator_node_type=None,
+    container_node_types=[],
+    constant_patterns=[],
+    type_patterns=[],
+    extract_name=_extract_name_graphql,
+)
+
+
 # Language registry
 LANGUAGE_REGISTRY = {
     "python": PYTHON_SPEC,
@@ -1160,4 +2252,26 @@ LANGUAGE_REGISTRY = {
     "kotlin": KOTLIN_SPEC,
     "dart": DART_SPEC,
     "perl": PERL_SPEC,
+    "lua": LUA_SPEC,
+    "bash": BASH_SPEC,
+    "scala": SCALA_SPEC,
+    "r": R_SPEC,
+    "elixir": ELIXIR_SPEC,
+    "julia": JULIA_SPEC,
+    "clojure": CLOJURE_SPEC,
+    "nim": NIM_SPEC,
+    "haskell": HASKELL_SPEC,
+    "erlang": ERLANG_SPEC,
+    "zig": ZIG_SPEC,
+    "d": D_SPEC,
+    "objc": OBJC_SPEC,
+    "ocaml": OCAML_SPEC,
+    "fsharp": FSHARP_SPEC,
+    "elm": ELM_SPEC,
+    "sql": SQL_SPEC,
+    "powershell": POWERSHELL_SPEC,
+    "solidity": SOLIDITY_SPEC,
+    "hcl": HCL_SPEC,
+    "proto": PROTO_SPEC,
+    "graphql": GRAPHQL_SPEC,
 }

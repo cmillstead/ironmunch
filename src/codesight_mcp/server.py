@@ -45,6 +45,10 @@ from .tools import (  # noqa: F401
     get_usage_stats,
     verify,
     lint_index,
+    generate_sbom,
+    check_licenses,
+    scan_security,
+    trace_taint,
 )
 
 # ADV-LOW-7: Read CODE_INDEX_PATH once at startup so subsequent env mutations
@@ -77,6 +81,15 @@ set_allowed_roots_fn(lambda: ALLOWED_ROOTS if ALLOWED_ROOTS else None)
 
 from .tools.get_changes import set_allowed_roots_fn as set_changes_allowed_roots_fn  # noqa: E402
 set_changes_allowed_roots_fn(lambda: ALLOWED_ROOTS if ALLOWED_ROOTS else None)
+
+from .tools.generate_sbom import set_allowed_roots_fn as set_sbom_allowed_roots_fn  # noqa: E402
+set_sbom_allowed_roots_fn(lambda: ALLOWED_ROOTS if ALLOWED_ROOTS else None)
+
+from .tools.check_licenses import set_allowed_roots_fn as set_licenses_allowed_roots_fn  # noqa: E402
+set_licenses_allowed_roots_fn(lambda: ALLOWED_ROOTS if ALLOWED_ROOTS else None)
+
+from .tools.trace_taint import set_allowed_roots_fn as set_taint_allowed_roots_fn  # noqa: E402
+set_taint_allowed_roots_fn(lambda: ALLOWED_ROOTS if ALLOWED_ROOTS else None)
 
 # Integer parameter bounds used by _sanitize_arguments.
 # Maps parameter name -> (min_value, max_value).

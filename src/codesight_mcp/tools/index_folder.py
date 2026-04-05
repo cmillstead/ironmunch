@@ -23,7 +23,7 @@ from ..parser import LANGUAGE_EXTENSIONS  # noqa: E402
 from ..security import sanitize_repo_identifier  # noqa: E402
 from ..core.errors import sanitize_error  # noqa: E402
 from ..core.validation import is_within, ValidationError  # noqa: E402
-from ..storage import IndexStore  # noqa: E402
+
 from .registry import ToolSpec, register  # noqa: E402
 from mcp.types import ToolAnnotations  # noqa: E402
 from ._indexing_common import parse_source_files, finalize_index  # noqa: E402
@@ -197,7 +197,8 @@ def index_folder(
                 git_head = current_head
                 # Check for a previous index with a stored commit hash
                 try:
-                    store = IndexStore(base_path=storage_path)
+                    from ._common import _get_shared_store
+                    store = _get_shared_store(storage_path)
                     prev_index = store.load_index(owner, repo_name)
                     if prev_index and prev_index.git_head and prev_index.git_head != current_head:
                         changed = _git_changed_files(folder_path, prev_index.git_head)

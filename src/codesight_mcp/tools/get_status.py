@@ -5,8 +5,8 @@ from typing import Optional
 
 from ..core.boundaries import make_meta
 from ..security import _NO_REDACT
-from ..storage import IndexStore, INDEX_VERSION
-from ._common import timed, elapsed_ms
+from ..storage import INDEX_VERSION
+from ._common import timed, elapsed_ms, _get_shared_store
 from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
 
@@ -19,7 +19,7 @@ def get_status(storage_path: Optional[str] = None) -> dict:
         version, and _meta envelope.
     """
     start = timed()
-    store = IndexStore(base_path=storage_path)
+    store = _get_shared_store(storage_path)
     repos = store.list_repos()
 
     total_symbols = sum(r.get("symbol_count", 0) for r in repos)

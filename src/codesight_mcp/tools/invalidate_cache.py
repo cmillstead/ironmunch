@@ -4,8 +4,7 @@ from typing import Optional
 
 from ..core.errors import sanitize_error, RepoNotFoundError
 from ..parser.graph import CodeGraph
-from ..storage import IndexStore
-from ._common import parse_repo
+from ._common import parse_repo, _get_shared_store
 from .registry import ToolSpec, register
 from mcp.types import ToolAnnotations
 
@@ -42,7 +41,7 @@ def invalidate_cache(
         return {"error": str(exc)}
 
     try:
-        store = IndexStore(base_path=storage_path)
+        store = _get_shared_store(storage_path)
         # TODO(security): TOCTOU race — concurrent index_repo could write between our
         # existence check and delete. Full fix requires file-level locking.
         deleted = store.delete_index(owner, name)

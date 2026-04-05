@@ -231,7 +231,7 @@ class TestMainEntryPoint:
         assert result.returncode == 0
         tools_list = json.loads(result.stdout)
         assert isinstance(tools_list, list)
-        assert len(tools_list) == 30
+        assert len(tools_list) == 34
         names = {tool["name"] for tool in tools_list}
         assert "get_status" in names
         assert "search_symbols" in names

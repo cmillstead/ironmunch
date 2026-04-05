@@ -90,7 +90,7 @@ async def test_index_repo_warnings_not_overwritten(tmp_path, monkeypatch):
          patch("codesight_mcp.tools.index_repo.fetch_file_content", new_callable=AsyncMock) as mock_fetch, \
          patch("codesight_mcp.tools._indexing_common.parse_file") as mock_parse, \
          patch("codesight_mcp.tools._indexing_common.summarize_symbols") as mock_sum, \
-         patch("codesight_mcp.tools._indexing_common.IndexStore") as mock_store_cls:
+         patch("codesight_mcp.tools._indexing_common._get_shared_store") as mock_get_store:
 
         mock_tree.return_value = tree_entries
         mock_gi.return_value = ""
@@ -127,7 +127,7 @@ async def test_index_repo_warnings_not_overwritten(tmp_path, monkeypatch):
         mock_parse.side_effect = fake_parse
         mock_sum.side_effect = lambda syms, use_ai: syms
 
-        mock_store = mock_store_cls.return_value
+        mock_store = mock_get_store.return_value
         mock_index = type("FakeIndex", (), {"indexed_at": "2026-01-01T00:00:00"})()
         mock_store.load_index.return_value = mock_index
 

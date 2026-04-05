@@ -198,7 +198,7 @@ class TestParseRepoMalformedField:
                 return True  # Always match so this entry is selected
         fake_store.list_repos.return_value = [{"repo": NoSlashStr("nodash")}]
 
-        with patch("codesight_mcp.tools._common.IndexStore", return_value=fake_store):
+        with patch("codesight_mcp.tools._common._get_shared_store", return_value=fake_store):  # mock-ok: pre-existing mock, only updating patch target for shared store refactor
             with pytest.raises(RepoNotFoundError, match="Malformed repository identifier"):
                 parse_repo("nodash", storage_path="/tmp/fake")
 
@@ -210,7 +210,7 @@ class TestParseRepoMalformedField:
         fake_store = MagicMock()
         fake_store.list_repos.return_value = [{"repo": "owner/myrepo"}]
 
-        with patch("codesight_mcp.tools._common.IndexStore", return_value=fake_store):
+        with patch("codesight_mcp.tools._common._get_shared_store", return_value=fake_store):  # mock-ok: pre-existing mock, only updating patch target for shared store refactor
             owner, name = parse_repo("myrepo", storage_path="/tmp/fake")
             assert owner == "owner"
             assert name == "myrepo"
