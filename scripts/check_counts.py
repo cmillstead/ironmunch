@@ -1,5 +1,6 @@
 """Verify doc counts match running-code values; fail CI on drift."""
 
+import argparse
 import re
 import subprocess
 import sys
@@ -19,6 +20,8 @@ _DOCS = [
 ]
 _STALE = ("2,495", "2495", "1,906", "1906")  # known-old test counts
 _MARKER = "<!-- codesight:counts ops={ops} langs={langs} tests={tests} -->"
+_MARKER_RE = re.compile(r"<!-- codesight:counts[^\n]*-->")
+_H1_RE = re.compile(r"(?m)^# .*$")
 
 # Context-anchored patterns for visible counts. The denylist above only
 # catches numbers that have gone stale since this script was written; these
@@ -78,25 +81,97 @@ def _check_visible_counts(rel: str, text: str, patterns: tuple[str, ...], live_v
     return problems
 
 
-def main() -> int:
-    ops, langs, tests = len(load_all_specs()), len(LANGUAGE_REGISTRY), _test_count()
-    marker = _MARKER.format(ops=ops, langs=langs, tests=tests)
+def _check_file_text(rel: str, text: str, ops: int, langs: int, tests: int) -> list[str]:
     problems: list[str] = []
-    for rel in _DOCS:
-        text = (_ROOT / rel).read_text()
-        for stale in _STALE:
-            if stale in text:
-                problems.append(f"{rel}: stale count literal {stale!r}")
-        if marker not in text:
-            problems.append(f"{rel}: missing/incorrect generated marker (expected: {marker})")
-        problems.extend(_check_visible_counts(rel, text, _TEST_COUNT_PATTERNS, tests, "test"))
-        problems.extend(_check_visible_counts(rel, text, _OPS_COUNT_PATTERNS, ops, "operations"))
-        problems.extend(_check_visible_counts(rel, text, _LANG_COUNT_PATTERNS, langs, "language"))
+    for stale in _STALE:
+        if stale in text:
+            problems.append(f"{rel}: stale count literal {stale!r}")
+    marker = _MARKER.format(ops=ops, langs=langs, tests=tests)
+    if marker not in text:
+        problems.append(f"{rel}: missing/incorrect generated marker (expected: {marker})")
+    problems.extend(_check_visible_counts(rel, text, _TEST_COUNT_PATTERNS, tests, "test"))
+    problems.extend(_check_visible_counts(rel, text, _OPS_COUNT_PATTERNS, ops, "operations"))
+    problems.extend(_check_visible_counts(rel, text, _LANG_COUNT_PATTERNS, langs, "language"))
+    return problems
+
+
+def _verify_docs(root: Path, docs: list[str], ops: int, langs: int, tests: int) -> list[str]:
+    problems: list[str] = []
+    for rel in docs:
+        text = (root / rel).read_text()
+        problems.extend(_check_file_text(rel, text, ops, langs, tests))
+    return problems
+
+
+def _stamp_marker(text: str, marker: str) -> str:
+    if _MARKER_RE.search(text):
+        return _MARKER_RE.sub(marker, text)
+    match = _H1_RE.search(text)
+    if match:
+        return text[: match.end()] + "\n" + marker + text[match.end() :]
+    return marker + "\n" + text
+
+
+def _format_count(value: int, had_comma: bool) -> str:
+    return f"{value:,}" if had_comma else str(value)
+
+
+def _stamp_pattern(text: str, pattern: str, value: int) -> str:
+    regex = re.compile(pattern)
+
+    def _replace(match: re.Match[str]) -> str:
+        original = match.group(1)
+        replacement = _format_count(value, "," in original)
+        full = match.group(0)
+        offset = match.start(1) - match.start(0)
+        return full[:offset] + replacement + full[offset + len(original) :]
+
+    return regex.sub(_replace, text)
+
+
+def _stamp_text(text: str, ops: int, langs: int, tests: int) -> str:
+    """Stamp `text` with the fresh marker and rewrite every visible count. Pure; no I/O."""
+    text = _stamp_marker(text, _MARKER.format(ops=ops, langs=langs, tests=tests))
+    for pattern in _TEST_COUNT_PATTERNS:
+        text = _stamp_pattern(text, pattern, tests)
+    for pattern in _OPS_COUNT_PATTERNS:
+        text = _stamp_pattern(text, pattern, ops)
+    for pattern in _LANG_COUNT_PATTERNS:
+        text = _stamp_pattern(text, pattern, langs)
+    return text
+
+
+def _write_docs(root: Path, docs: list[str], ops: int, langs: int, tests: int) -> None:
+    for rel in docs:
+        path = root / rel
+        path.write_text(_stamp_text(path.read_text(), ops, langs, tests))
+
+
+def _run(write: bool, root: Path, docs: list[str], ops: int, langs: int, tests: int) -> tuple[int, str]:
+    if write:
+        _write_docs(root, docs, ops, langs, tests)
+    problems = _verify_docs(root, docs, ops, langs, tests)
     if problems:
-        print("count drift:\n  " + "\n  ".join(problems))
-        return 1
-    print(f"counts OK: ops={ops} langs={langs} tests={tests}")
-    return 0
+        return 1, "count drift:\n  " + "\n  ".join(problems)
+    return 0, f"counts OK: ops={ops} langs={langs} tests={tests}"
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="Stamp docs with live counts instead of only verifying.",
+    )
+    return parser.parse_args(argv)
+
+
+def main() -> int:
+    args = _parse_args()
+    ops, langs, tests = len(load_all_specs()), len(LANGUAGE_REGISTRY), _test_count()
+    code, output = _run(args.write, _ROOT, _DOCS, ops, langs, tests)
+    print(output)
+    return code
 
 
 if __name__ == "__main__":
