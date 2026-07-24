@@ -12,7 +12,7 @@ Remaining:
 - [ ] M0.3 Run `make stamp`; commit regenerated counts — this turns the failing CI doc-count gate green (audit P2 #2)
 - [x] M0.4 Copy spec set + RISK_REGISTER into `docs/spec/`; this file into `docs/MILESTONE.md`
 - [ ] M0.5 Replace repo `CLAUDE.md` with the handoff version (SPEC_1 §8, [DECISION] D16)
-- [ ] M0.6 Guard tests `tests/spec/test_spec_guards.py` — 9 tests pinning spec constants (SPEC_1 §7.5)
+- [x] M0.6 Guard tests `tests/spec/test_spec_guards.py` — 8 tests pinning spec constants (SPEC_1 §7.5); mock-import guard deferred to M12 — see Amendments
 - [ ] M0.7 Unregistered stubs: `src/codesight_mcp/parser/resolution.py`, `src/codesight_mcp/tools/_federated.py`, `scripts/generate_wrapper.py` (SPEC_1 §7.6)
 - [ ] M0.8 CI `wrapper-drift` job with documented pre-M4 skip (SPEC_1 §7.7)
 
