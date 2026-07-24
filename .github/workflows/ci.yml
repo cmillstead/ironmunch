@@ -118,3 +118,15 @@ jobs:
 
       - name: Run pip-audit
         run: uv run --with pip-audit pip-audit
+
+  wrapper-drift:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      # SKIP CONDITION: this job is a no-op until wrapper/mcp-server.ts exists (M4).
+      # The skip is removed forever in M4 — see docs/spec/SPEC_2_ONBOARDING_AND_DISTRIBUTION.md §5.
+      - name: Check wrapper drift
+        run: |
+          if [ ! -f wrapper/mcp-server.ts ]; then echo "wrapper not yet generated (pre-M4); skipping"; exit 0; fi
+          pipx run uv run python scripts/generate_wrapper.py --check

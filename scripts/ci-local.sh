@@ -15,6 +15,16 @@ echo ""
 echo "--- Running ruff lint ---"
 uv run ruff check .
 
+# Run type checking
+echo ""
+echo "--- Running mypy typecheck ---"
+uv run --group typecheck mypy
+
+# Run counts gate
+echo ""
+echo "--- Running counts check ---"
+uv run python scripts/check_counts.py
+
 # Run tests with same flags as CI
 echo ""
 echo "--- Running tests ---"

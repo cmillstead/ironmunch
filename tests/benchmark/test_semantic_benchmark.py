@@ -5,6 +5,7 @@ Skipped by default to avoid slowing normal test runs.
 """
 
 import glob
+import importlib.util
 import os
 import tempfile
 import time
@@ -15,12 +16,15 @@ from codesight_mcp.parser.symbols import Symbol
 from codesight_mcp.storage.index_store import IndexStore
 from codesight_mcp.tools.search_symbols import search_symbols
 
-pytestmark = pytest.mark.benchmark
+_HAS_FASTEMBED = importlib.util.find_spec("fastembed") is not None
+
+pytestmark = [
+    pytest.mark.benchmark,
+    pytest.mark.skipif(not _HAS_FASTEMBED, reason="fastembed not installed (semantic extra)"),
+]
 
 if os.environ.get("RUN_BENCHMARKS") != "1":
     pytest.skip("Benchmarks skipped unless RUN_BENCHMARKS=1", allow_module_level=True)
-
-fastembed = pytest.importorskip("fastembed")
 
 
 def _make_symbols(count: int) -> list[Symbol]:
