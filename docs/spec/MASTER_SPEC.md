@@ -22,7 +22,7 @@ codesight-mcp (`/Users/cevin/src/codesight-mcp`) is a Python 3.10+ MCP server (v
 | `spec/SPEC_4_SECURITY_AND_TYPING.md` | git-ref argument-injection fix, pip-audit gating, mypy expansion schedule, `scan_security` I/O, PyPI squat closure | §1–§6 |
 | `spec/SPEC_5_FRESHNESS_AND_RESOLUTION.md` | `reindex-stale` CLI + hook hardening, resolved call graph design, INDEX_VERSION 3 migration | §1–§5 |
 | `spec/SPEC_6_CORPUS_SEMANTICS_SAST.md` | Federated search/impact, embeddings provider completion + hybrid ranking eval, SAST-grade scan-security, benchmark publication | §1–§5 |
-| `spec/SPEC_7_MILESTONE_PLAN.md` | All milestones M0–M11 with tasks, exit criteria, stage gates + fallbacks | §1–§6 |
+| `spec/SPEC_7_MILESTONE_PLAN.md` | All milestones M0–M12 with tasks, exit criteria, stage gates + fallbacks | §1–§6 |
 
 Companion documents (same directory as this index): `RISK_REGISTER.md`, `CLAUDE.handoff.md` (becomes the repo's `CLAUDE.md`), `MILESTONE.md` (becomes `docs/MILESTONE.md`), `CROSS_MODEL_REVIEW.md`, `EXECUTION_PROMPT.md`.
 
@@ -43,6 +43,7 @@ Companion documents (same directory as this index): `RISK_REGISTER.md`, `CLAUDE.
 | M9 — Federated ops | `SPEC_6` §1–§2 |
 | M10 — Semantic maturation | `SPEC_6` §3 |
 | M11 — SAST mode + benchmark publication | `SPEC_6` §4–§5 |
+| M12 — De-mock tests + zero-mock guard | `SPEC_1` §7 item 5 + repo `CLAUDE.md` rule 7 |
 
 ## Global conventions (binding for every part)
 
@@ -76,7 +77,7 @@ Generate the TS dispatch wrapper in-repo from `contract/operations.json` with a 
 **Gate G3:** (a) stale-repo ratio (repos > 7 days old per `list-repos`) below 20% for 2 consecutive weeks on the live corpus (audit baseline: 232/322 = 72%); (b) resolved-graph precision ≥ 90% and recall ≥ 80% on the labeled benchmark fixture (SPEC_5 §4); (c) `uv run mypy` covers all modules, zero errors.
 **Fallback if G3 fails:** resolution below target → ship resolved mode as opt-in `resolution="strict"` parameter, keep name-based as default, and cap Stage 4 SAST claims accordingly; staleness target missed → add cron installation instructions to README rather than building a daemon.
 
-### Stage 4 — Corpus, Semantics, SAST (M9–M11)
-Federated cross-repo search/impact (M9); hybrid semantic ranking with measured quality (M10); `scan-security` resolved mode with source→sink evidence + published token-efficiency benchmark (M11).
+### Stage 4 — Corpus, Semantics, SAST (M9–M12)
+Federated cross-repo search/impact (M9); hybrid semantic ranking with measured quality (M10); `scan-security` resolved mode with source→sink evidence + published token-efficiency benchmark (M11); de-mocked test suite with the zero-mock guard enforced (M12 — deferred out of M0, see SPEC_1 §7 item 5).
 **Gate G4:** (a) `get-usage-stats` shows federated or semantic operations invoked in ≥ 2 distinct weeks within 30 days of shipping (Cevin actually reaches for them); (b) resolved scan-security produces ≥ 1 true-positive chain with evidence on the seeded vulnerable fixture and 0 false "confirmed" labels on the clean fixture; (c) benchmark results reproducible by a third party from README instructions.
 **Fallback if G4 fails:** federated/semantic unused → freeze features, document as experimental, no further investment (the single-repo core remains the product); SAST precision unattainable → permanently keep the "heuristic hotspots" honesty labeling and delete the "confirmed" tier.

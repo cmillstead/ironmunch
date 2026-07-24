@@ -1,4 +1,4 @@
-# SPEC_7 — Milestone Plan (M0–M11)
+# SPEC_7 — Milestone Plan (M0–M12)
 
 Always loaded (with MASTER_SPEC.md). Each milestone lists tasks, the spec sections that define them, and machine-checkable exit criteria. `HUMAN` marks items only Cevin can do; the agent prepares them and stops.
 
@@ -111,6 +111,15 @@ Always loaded (with MASTER_SPEC.md). Each milestone lists tasks, the spec sectio
 - [ ] M11.4 `workflow_dispatch` benchmark CI job.
 
 **Exit:** the four SAST tests green (= Gate G4(b)); benchmark doc reproducible. **GATE G4** per MASTER_SPEC (usage evidence; SAST fixture results; third-party reproducible benchmark). **Fallback:** unused features frozen as experimental; SAST stays heuristic-labeled permanently.
+
+### M12 — De-mock tests + enforce zero-mock guard (SPEC_1 §7 item 5)
+
+Added 2026-07-24 (Cevin-approved amendment). M0 deferred `test_no_mock_imports_in_tests` because `tests/` carried ~108 `unittest.mock`/`MagicMock`/`AsyncMock` hits across 18 files; this milestone removes them and turns the guard on.
+
+- [ ] M12.1 Remove `unittest.mock` / `MagicMock` / `AsyncMock` from `tests/` — replace with real dependencies (temp dirs, real git repos, real subprocesses). Any surviving use carries `# mock-ok: <rationale>` on the import line and is justified by the CLAUDE.md exception list (external paid API, unavailable hardware, uninstalled local LLM).
+- [ ] M12.2 Add `test_no_mock_imports_in_tests` to `tests/spec/test_spec_guards.py` — assert zero `unittest.mock|MagicMock|AsyncMock` hits in `tests/` outside this test file and outside `# mock-ok`-annotated lines. Guard count becomes 9.
+
+**Exit:** the zero-mock guard is green; `make check` exits 0; `docs/MILESTONE.md` Amendments records the closure.
 
 ## §5 Session discipline
 

@@ -139,7 +139,7 @@ The executing agent creates all of these in M0. None may change runtime behavior
    - `test_freshness_threshold_is_7_days` — `codesight_mcp.core.freshness.INDEX_AGE_THRESHOLD_DAYS == 7`.
    - `test_ops_count_matches_contract` — `len(load_all_specs()) == len(json.load(open("contract/operations.json"))["operations"])`. This is the tripwire for [DECISION] D17.
    - `test_language_count_is_66` — `len(LANGUAGE_REGISTRY) == 66` (M-milestones that add languages amend spec first).
-   - `test_no_mock_imports_in_tests` — grep `tests/` source for `unittest.mock|MagicMock`; assert zero hits outside this test file.
+   - ~~`test_no_mock_imports_in_tests`~~ — **DEFERRED to M12** (amended 2026-07-24, Cevin-approved). It would grep `tests/` for `unittest.mock|MagicMock` and assert zero hits outside itself, but `tests/` currently carries ~108 mock hits across 18 files, so the guard cannot pass on the M0 tree. It lands in **M12 — De-mock tests + enforce zero-mock guard** (SPEC_7 §4), after the mock usages are removed. **M0 therefore ships 8 guard tests, not 9.**
 6. **Interface stubs for later stages** — modules exist, are importable, raise on use, and are **not registered** anywhere:
    - `src/codesight_mcp/parser/resolution.py`:
      ```python

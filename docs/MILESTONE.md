@@ -18,7 +18,10 @@ Remaining:
 
 Exit criteria (machine-checkable): `make check` exits 0 on a clean checkout (proves counts gate green); `uv run pytest tests/spec tests/scripts -q` green; `docs/spec/` contains MASTER_SPEC + SPEC_1..7 + RISK_REGISTER; all M0 commits match `^M0\.\d: `.
 
-Amendments: (none yet)
+Amendments:
+- **2026-07-24 — M12 added** (Cevin-approved). `SPEC_7_MILESTONE_PLAN.md` §4 gains **M12 — De-mock tests + enforce zero-mock guard** after M11; `MASTER_SPEC.md` Stage 4 range becomes M9–M12 and its reading list gains an M12 row.
+- **2026-07-24 — mock-import guard deferred, M0.6 ships 8 guards not 9.** `SPEC_1 §7` item 5 listed `test_no_mock_imports_in_tests` as the 9th guard, but `tests/` currently carries ~108 `unittest.mock`/`MagicMock`/`AsyncMock` hits across 18 files, so the guard cannot pass on the M0 tree. It moves to M12.2; `SPEC_1 §7` item 5 records the deferral, and repo `CLAUDE.md` rule 7 is worded "No mocks (M12 target)".
+- **2026-07-24 — commit-format enforcement resolved.** The `M<n>.<i>: ` commit prefix required by M0 exit criteria is not in the harness git-safety hook's built-in prefix list. Allowed via the hook's repo env-allow escape hatch: `GIT_SAFETY_EXTRA_COMMIT_PREFIX_RE="^M\d+\.\d+: "` set in `.claude/settings.local.json`. No hook bypass; no spec change to the commit convention.
 
 Incidents: (none yet)
 
