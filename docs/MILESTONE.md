@@ -13,7 +13,7 @@ Remaining:
 - [x] M0.4 Copy spec set + RISK_REGISTER into `docs/spec/`; this file into `docs/MILESTONE.md`
 - [ ] M0.5 Replace repo `CLAUDE.md` with the handoff version (SPEC_1 §8, [DECISION] D16)
 - [x] M0.6 Guard tests `tests/spec/test_spec_guards.py` — 8 tests pinning spec constants (SPEC_1 §7.5); mock-import guard deferred to M12 — see Amendments
-- [ ] M0.7 Unregistered stubs: `src/codesight_mcp/parser/resolution.py`, `src/codesight_mcp/tools/_federated.py`, `scripts/generate_wrapper.py` (SPEC_1 §7.6)
+- [x] M0.7 Unregistered stubs: `src/codesight_mcp/parser/resolution.py`, `src/codesight_mcp/tools/_federated.py`, `scripts/generate_wrapper.py` (SPEC_1 §7.6)
 - [ ] M0.8 CI `wrapper-drift` job with documented pre-M4 skip (SPEC_1 §7.7)
 
 Exit criteria (machine-checkable): `make check` exits 0 on a clean checkout (proves counts gate green); `uv run pytest tests/spec tests/scripts -q` green; `docs/spec/` contains MASTER_SPEC + SPEC_1..7 + RISK_REGISTER; all M0 commits match `^M0\.\d: `.
