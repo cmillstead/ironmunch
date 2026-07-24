@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 
 import pytest
@@ -72,9 +73,13 @@ class TestGetEmbeddingProviderEnvVars:
 # Tests that require fastembed
 # ------------------------------------------------------------------
 
-fastembed = pytest.importorskip("fastembed")
+_HAS_FASTEMBED = importlib.util.find_spec("fastembed") is not None
+requires_fastembed = pytest.mark.skipif(
+    not _HAS_FASTEMBED, reason="fastembed not installed (semantic extra)"
+)
 
 
+@requires_fastembed
 class TestLocalEmbeddingProvider:
     @pytest.fixture(scope="class")
     def provider(self) -> LocalEmbeddingProvider:
