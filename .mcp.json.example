@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "codesight": {
+      "type": "stdio",
+      "command": ".venv/bin/codesight-mcp",
+      "env": { "CODESIGHT_ALLOWED_ROOTS": "${HOME}/src" }
+    }
+  }
+}

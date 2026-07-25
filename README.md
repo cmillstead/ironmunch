@@ -1,6 +1,6 @@
 # codesight-mcp
 
-<!-- codesight:counts ops=34 langs=66 tests=2591 -->
+<!-- codesight:counts ops=34 langs=66 tests=2594 -->
 
 <p align="center">
   <br>
@@ -11,10 +11,10 @@
   </a>
   <img src="https://img.shields.io/badge/MCP-Compatible-green?style=flat-square" alt="MCP Compatible">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square&logo=python" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-2591-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-2594-brightgreen?style=flat-square" alt="Tests">
 </p>
 
-An **MCP server** that indexes local and GitHub codebases via tree-sitter AST parsing, then exposes 34 operations through a single `query` dispatch tool for symbol retrieval, code graph traversal, and impact analysis — all with byte-offset precision to cut token costs by ~99% compared to sending full files. Supports 66 languages.
+An **MCP server** that indexes local and GitHub codebases via tree-sitter AST parsing, then exposes 34 operations for symbol retrieval, code graph traversal, and impact analysis — available either as individual MCP tools (the default) or through a single `query` dispatch wrapper (advanced). All retrieval uses byte-offset precision to cut token costs by ~99% compared to sending full files. Supports 66 languages.
 
 Based on [jcodemunch-mcp](https://github.com/jgravelle/jcodemunch-mcp) by J. Gravelle, with code graph techniques from [CodeGraphContext](https://github.com/CodeGraphContext/CodeGraphContext) and security patterns from [basalt-mcp](https://github.com/cmillstead/basalt-mcp).
 
@@ -55,8 +55,8 @@ Based on [jcodemunch-mcp](https://github.com/jgravelle/jcodemunch-mcp) by J. Gra
 - **6-step path validation chain** — null bytes, traversal, limits, resolution, containment, symlinks
 - **Content boundary markers** — indirect prompt injection defense (Microsoft spotlighting research)
 - **Error sanitization** — raw exceptions never reach the AI; system paths are always stripped
-- **Single dispatch tool** — one `query(operation, params)` MCP tool exposes all 34 operations; output from untrusted operations is framed with `<UNTRUSTED_OUTPUT>` markers to resist indirect prompt injection
-- **2,591 tests** — adversarial, security, integration, benchmark, fuzz, and stress coverage with real temp directories
+- **Per-tool trust annotations** — each of the 34 operations registers as its own MCP tool carrying `readOnlyHint`/`destructiveHint` annotations; source code in tool output is wrapped in `<<<UNTRUSTED_CODE_{random token}>>>` boundary markers (Microsoft spotlighting) that content cannot forge an end marker for, so it can never escape the boundary
+- **2,594 tests** — adversarial, security, integration, benchmark, fuzz, and stress coverage with real temp directories
 
 ---
 
@@ -72,26 +72,43 @@ Each language parser extracts functions, classes, methods, parameters, call rela
 
 Platform support: POSIX only (Linux/macOS); Windows is not supported.
 
+**Prerequisites:** `git`, Python ≥ 3.10, [`uv`](https://docs.astral.sh/uv/getting-started/installation/), and an MCP client (the examples below use the `claude` CLI). Everything after that comes from this repository.
+
 ### Step 1: Install
 
 ```bash
-# From source (recommended — not published to PyPI)
 git clone https://github.com/cmillstead/codesight-mcp.git
 cd codesight-mcp
-uv sync            # recommended — uses lockfile with pinned versions
-# or: pip install -e .  (uses version ranges, not the lockfile)
+uv sync            # creates .venv/ from the lockfile with pinned versions
 ```
+
+`uv sync` creates the `.venv/` that every command below refers to. If you prefer pip, create the virtualenv yourself so those paths still resolve — and note this uses version ranges rather than the lockfile:
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e .
+```
+
+Not published to PyPI — install from source only.
 
 ### Step 2: Register the MCP server
 
-Use `claude mcp add` to register the dispatch wrapper. This registers a single tool named `query` that accepts `{ operation, params }` and dispatches to the codesight engine built in Step 1. Your client discovers it automatically — no per-operation permission configuration needed.
+Register the `codesight-mcp` stdio entrypoint that Step 1 installed into `.venv/bin/`. Run this from the repo root:
 
 ```bash
-claude mcp add codesight \
-  -e CODESIGHT_ALLOWED_ROOTS=/Users/you/src \
+claude mcp add codesight --scope user \
+  -e CODESIGHT_ALLOWED_ROOTS="$HOME/src" \
   -e GITHUB_TOKEN=ghp_... \
-  -- bun run ~/src/codesight-plugin/mcp-server.ts
+  -- "$PWD/.venv/bin/codesight-mcp"
 ```
+
+Two details that matter:
+
+- **`--scope user`** registers the server for every project. Without it `claude mcp add` defaults to *local* scope, which binds the server to whichever project you ran it in — here, the codesight-mcp clone itself — so it would not load in the repos you actually want to explore.
+- **The command path must be absolute.** `$PWD` expands at registration time; your client does not run from this directory. Likewise `CODESIGHT_ALLOWED_ROOTS` must cover the repos you intend to index — `$HOME/src` works on both Linux and macOS, and indexing is denied outside it.
+
+This registers 34 MCP tools — one per operation — each carrying its own `readOnlyHint` / `destructiveHint` annotation, so your client can distinguish safe reads from index-mutating calls.
+
+If your client reads a project-level config file instead, `.mcp.json.example` shows the equivalent registration. Its `command` is relative, which only resolves when the client is launched from this repo root; anywhere else, substitute an absolute path.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -99,48 +116,78 @@ claude mcp add codesight \
 | `GITHUB_TOKEN` | Yes (GitHub) | Required for private repos; recommended to avoid rate limits on public repos. |
 | `ANTHROPIC_API_KEY` | No | Enables AI-generated symbol summaries. Falls back to docstrings if unset. |
 
-The dispatch wrapper exposes **one MCP tool** (`query`) rather than 34 separate tools. Because all 34 operations flow through a single entry point, per-operation `readOnlyHint`/`destructiveHint` annotations do not apply in the usual per-tool way. Instead, the wrapper enforces a trust boundary at the parameter level: path-bearing fields are validated against a trusted prefix before dispatch, and output from operations that return repo-controlled text is wrapped in `<UNTRUSTED_OUTPUT>` framing tags so the consuming agent treats the content as data rather than instructions.
+### Step 3: Verify the install
 
-### Step 3: Index a repository
+```bash
+.venv/bin/codesight-mcp tools        # lists every registered tool as JSON
+.venv/bin/codesight-mcp get-status   # server status, storage config, index stats
+```
+
+Both exit 0 on success. Running `.venv/bin/codesight-mcp` with no arguments starts the stdio server and waits for an MCP client — it will look like it has hung, which is correct; press Ctrl-C.
+
+Then confirm the client side. Start a new client session (or reconnect) first — an already-running session will not pick up a server registered in Step 2. Ask your AI: *"What's the codesight server status?"* It should call `get_status` and report the indexed repo count.
+
+### Step 4: Index a repository
 
 Before any other operations work, you must index at least one repository. Ask your AI:
 
 - **Local folder:** *"Index the repo at ~/src/myproject"*
 - **GitHub repo:** *"Index the GitHub repo owner/myproject"*
 
-The AI calls `query` with `operation: "index-folder"` or `operation: "index-repo"`, which fetches files, parses ASTs, and extracts symbols into `~/.code-index/`. Subsequent calls skip unchanged files automatically.
+The AI calls the `index_folder` or `index_repo` tool, which fetches files, parses ASTs, and extracts symbols into `~/.code-index/`. Subsequent calls skip unchanged files automatically.
 
-### Step 4: Explore
+### Step 5: Explore
 
-Once indexed, the AI uses the `query` tool with operations `get-repo-outline`, `search-symbols`, and `get-symbol` to navigate your codebase — retrieving only the symbols it needs instead of entire files.
+Once indexed, the AI uses `get_repo_outline`, `search_symbols`, and `get_symbol` to navigate your codebase — retrieving only the symbols it needs instead of entire files.
 
-### Step 5 (optional): Add a CLAUDE.md to indexed repos
+### Step 6 (optional): Add a CLAUDE.md to indexed repos
 
 Add a `CLAUDE.md` to each indexed repo so Claude Code prefers codesight-mcp over reading full files:
 
 ```markdown
 ## Code Navigation
 
-This repo is indexed in codesight-mcp. Use the `mcp__codesight__query` dispatch
-tool for all code exploration instead of reading full files. Pass `operation`
-(kebab-case) and `params` (object):
+This repo is indexed in codesight-mcp. Use the codesight tools for all code
+exploration instead of reading full files:
 
-- `search-symbols` — find functions/classes/types by name or description
-- `get-file-outline` — all symbols in a file with signatures
-- `get-symbol` — full source of a specific symbol
-- `get-repo-outline` — directory structure and language breakdown
-- `get-callers` / `get-callees` — call graph navigation
-- `get-call-chain` — trace execution paths between two symbols
-- `get-impact` — see what's affected by changing a symbol
+- `mcp__codesight__search_symbols` — find functions/classes/types by name or description
+- `mcp__codesight__get_file_outline` — all symbols in a file with signatures
+- `mcp__codesight__get_symbol` — full source of a specific symbol
+- `mcp__codesight__get_repo_outline` — directory structure and language breakdown
+- `mcp__codesight__get_callers` / `mcp__codesight__get_callees` — call graph navigation
+- `mcp__codesight__get_call_chain` — trace execution paths between two symbols
+- `mcp__codesight__get_impact` — see what's affected by changing a symbol
 
 Use `Read` only for content that isn't a named symbol (config files, etc).
 ```
+
+If you registered the dispatch wrapper instead (see below), replace those names with a single call: `mcp__codesight__query({operation: "search-symbols", params: {...}})`.
+
+### Advanced: single `query` dispatch tool
+
+An alternative TypeScript wrapper collapses all 34 operations behind **one** MCP tool named `query`, which accepts `{ operation, params }`. Use it if you would rather present your client with a single tool than one tool per operation, at the cost of losing per-tool annotations.
+
+> **This is a separate repository, not part of this one.** It lives at [cmillstead/codesight-plugin](https://github.com/cmillstead/codesight-plugin) and must be cloned independently. It also requires [`bun`](https://bun.sh) (`curl -fsSL https://bun.sh/install | bash`), which nothing else here needs. A future release replaces it with a generated `wrapper/mcp-server.ts` inside this repo; until then the two codebases can drift.
+
+```bash
+git clone https://github.com/cmillstead/codesight-plugin.git ~/src/codesight-plugin
+
+claude mcp add codesight --scope user \
+  -e CODESIGHT_ALLOWED_ROOTS="$HOME/src" \
+  -e CODESIGHT_BIN="$PWD/.venv/bin/codesight-mcp" \
+  -e GITHUB_TOKEN=ghp_... \
+  -- bun run ~/src/codesight-plugin/mcp-server.ts
+```
+
+`CODESIGHT_BIN` is required here: the wrapper spawns the Python engine from this repo, and `uv sync` does not put `.venv/bin` on your PATH. Run the command from this repo root so `$PWD` resolves correctly.
+
+Because all operations flow through a single entry point, per-operation `readOnlyHint`/`destructiveHint` annotations do not apply in the usual per-tool way. Instead, the wrapper enforces a trust boundary at the parameter level: path-bearing fields are validated against a trusted prefix before dispatch, and output from operations that return repo-controlled text is wrapped in `<UNTRUSTED_OUTPUT>` framing tags so the consuming agent treats the content as data rather than instructions.
 
 ---
 
 ## Operations
 
-codesight-mcp exposes **34 operations** through a single `query` dispatch tool, organized into eight categories. Invoke each as `mcp__codesight__query({operation: "<name>", params: {...}})`.
+codesight-mcp exposes **34 operations**, organized into seven categories. On the default path each is its own MCP tool, invoked by its underscored name (`mcp__codesight__get_symbol`). Through the [dispatch wrapper](#advanced-single-query-dispatch-tool) they are invoked as `mcp__codesight__query({operation: "<name>", params: {...}})` using the kebab-case names below.
 
 ### Indexing
 
@@ -360,10 +407,10 @@ Without this extra, passing semantic params returns a helpful error explaining w
 
 ```python
 # Find by intent, not exact name
-mcp__codesight__query(operation="search-symbols", params={"repo": "myproject", "query": "the function that validates credentials", "semantic": True})
+mcp__codesight__search_symbols(repo="myproject", query="the function that validates credentials", semantic=True)
 
 # Pure semantic search
-mcp__codesight__query(operation="search-symbols", params={"repo": "myproject", "query": "password hashing utility", "semanticOnly": True})
+mcp__codesight__search_symbols(repo="myproject", query="password hashing utility", semantic_only=True)
 ```
 
 ### Environment Variables
