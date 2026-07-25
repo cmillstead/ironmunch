@@ -9,15 +9,19 @@ Remaining:
 - [x] M1.2 Ship `.mcp.json.example` codesight self-registration — `af80395` (see Amendments: the spec's premise was wrong)
 - [x] M1.3 `tests/docs/test_readme_onboarding.py` — 3 tests (SPEC_2 §2) — `87b94d3`
 - [x] M1.4 `make stamp` — tests 2591 → 2594 — `232a175` (README's stamp rode with M1.1)
+- [x] M1.5 QA-review fixes: real untrusted-content mechanism, seven categories not eight, client-restart cue — `8235d63`
+- [x] M1.6 Harden onboarding guard tests against vacuous slices — `cb893b6`
+- [x] M1.7 Cross-model review fixes: prerequisites, pip/`.venv` mismatch, Linux-safe allowed roots, `--scope user`, `CODESIGHT_BIN` — `549740f`
 - [ ] **HUMAN** smoke test — see Log below
 
 Exit criteria: onboarding tests green; `make check` exits 0; manual smoke — `claude mcp add codesight -- .venv/bin/codesight-mcp` registers and `get-status` answers (record the output in this file's Log).
 
 Log:
 - 2026-07-24 — `make check` exit 0: ruff clean, mypy clean (3 source files), `counts OK: ops=34 langs=66 tests=2594`, 2593 passed / 2 skipped. `uv run pytest tests/docs -q` → 3 passed.
-- 2026-07-24 — **HUMAN smoke test still owed.** Run these two and paste the output here:
+- 2026-07-24 — Two review passes ran on the feature diff. `ct-qa-reviewer` returned PASS_WITH_CONCERNS (4 documentation-accuracy findings → M1.5). A post-execution cross-model Codex review then found 8 more that the QA pass missed, including three High-severity onboarding breakages → M1.6/M1.7. Worth noting for later milestones: the QA reviewer judged the guard tests to "have real teeth"; the cross-model pass proved both could pass vacuously. Two independent reviewers disagreeing on the same artifact is the value of running both.
+- 2026-07-24 — **HUMAN smoke test still owed.** Run this and paste the output here:
   ```bash
-  claude mcp add codesight -e CODESIGHT_ALLOWED_ROOTS="$HOME/src" -- /Users/cevin/src/codesight-mcp/.venv/bin/codesight-mcp
+  claude mcp add codesight --scope user -e CODESIGHT_ALLOWED_ROOTS="$HOME/src" -- /Users/cevin/src/codesight-mcp/.venv/bin/codesight-mcp
   ```
   then ask a client session *"What's the codesight server status?"* and confirm it calls `get_status`. Agent-side pre-checks already pass: `.venv/bin/codesight-mcp tools` lists 34 tools, `.venv/bin/codesight-mcp get-status` returns JSON (333 repos, 115 029 symbols). What is unverified is the `claude mcp add` registration handshake itself.
 
