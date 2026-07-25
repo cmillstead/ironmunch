@@ -72,30 +72,43 @@ Each language parser extracts functions, classes, methods, parameters, call rela
 
 Platform support: POSIX only (Linux/macOS); Windows is not supported.
 
+**Prerequisites:** `git`, Python ≥ 3.10, [`uv`](https://docs.astral.sh/uv/getting-started/installation/), and an MCP client (the examples below use the `claude` CLI). Everything after that comes from this repository.
+
 ### Step 1: Install
 
 ```bash
-# From source (recommended — not published to PyPI)
 git clone https://github.com/cmillstead/codesight-mcp.git
 cd codesight-mcp
-uv sync            # recommended — uses lockfile with pinned versions
-# or: pip install -e .  (uses version ranges, not the lockfile)
+uv sync            # creates .venv/ from the lockfile with pinned versions
 ```
+
+`uv sync` creates the `.venv/` that every command below refers to. If you prefer pip, create the virtualenv yourself so those paths still resolve — and note this uses version ranges rather than the lockfile:
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e .
+```
+
+Not published to PyPI — install from source only.
 
 ### Step 2: Register the MCP server
 
-Register the `codesight-mcp` stdio entrypoint that `uv sync` installed into `.venv/bin/`. Use an absolute path — your client does not run from this directory.
+Register the `codesight-mcp` stdio entrypoint that Step 1 installed into `.venv/bin/`. Run this from the repo root:
 
 ```bash
-claude mcp add codesight \
-  -e CODESIGHT_ALLOWED_ROOTS=/Users/you/src \
+claude mcp add codesight --scope user \
+  -e CODESIGHT_ALLOWED_ROOTS="$HOME/src" \
   -e GITHUB_TOKEN=ghp_... \
-  -- /absolute/path/to/codesight-mcp/.venv/bin/codesight-mcp
+  -- "$PWD/.venv/bin/codesight-mcp"
 ```
 
-This registers 34 MCP tools — one per operation — each carrying its own `readOnlyHint` / `destructiveHint` annotation, so your client can distinguish safe reads from index-mutating calls. Nothing beyond this repository is required.
+Two details that matter:
 
-If your client reads a project-level config file instead, `.mcp.json.example` in this repo shows the equivalent registration. Its `command` is relative because a project-scoped config resolves against the project root — that form only works in place, so use the absolute path above when registering from a shell.
+- **`--scope user`** registers the server for every project. Without it `claude mcp add` defaults to *local* scope, which binds the server to whichever project you ran it in — here, the codesight-mcp clone itself — so it would not load in the repos you actually want to explore.
+- **The command path must be absolute.** `$PWD` expands at registration time; your client does not run from this directory. Likewise `CODESIGHT_ALLOWED_ROOTS` must cover the repos you intend to index — `$HOME/src` works on both Linux and macOS, and indexing is denied outside it.
+
+This registers 34 MCP tools — one per operation — each carrying its own `readOnlyHint` / `destructiveHint` annotation, so your client can distinguish safe reads from index-mutating calls.
+
+If your client reads a project-level config file instead, `.mcp.json.example` shows the equivalent registration. Its `command` is relative, which only resolves when the client is launched from this repo root; anywhere else, substitute an absolute path.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -141,7 +154,7 @@ exploration instead of reading full files:
 - `mcp__codesight__get_file_outline` — all symbols in a file with signatures
 - `mcp__codesight__get_symbol` — full source of a specific symbol
 - `mcp__codesight__get_repo_outline` — directory structure and language breakdown
-- `mcp__codesight__get_callers` / `get_callees` — call graph navigation
+- `mcp__codesight__get_callers` / `mcp__codesight__get_callees` — call graph navigation
 - `mcp__codesight__get_call_chain` — trace execution paths between two symbols
 - `mcp__codesight__get_impact` — see what's affected by changing a symbol
 
@@ -159,11 +172,14 @@ An alternative TypeScript wrapper collapses all 34 operations behind **one** MCP
 ```bash
 git clone https://github.com/cmillstead/codesight-plugin.git ~/src/codesight-plugin
 
-claude mcp add codesight \
-  -e CODESIGHT_ALLOWED_ROOTS=/Users/you/src \
+claude mcp add codesight --scope user \
+  -e CODESIGHT_ALLOWED_ROOTS="$HOME/src" \
+  -e CODESIGHT_BIN="$PWD/.venv/bin/codesight-mcp" \
   -e GITHUB_TOKEN=ghp_... \
   -- bun run ~/src/codesight-plugin/mcp-server.ts
 ```
+
+`CODESIGHT_BIN` is required here: the wrapper spawns the Python engine from this repo, and `uv sync` does not put `.venv/bin` on your PATH. Run the command from this repo root so `$PWD` resolves correctly.
 
 Because all operations flow through a single entry point, per-operation `readOnlyHint`/`destructiveHint` annotations do not apply in the usual per-tool way. Instead, the wrapper enforces a trust boundary at the parameter level: path-bearing fields are validated against a trusted prefix before dispatch, and output from operations that return repo-controlled text is wrapped in `<UNTRUSTED_OUTPUT>` framing tags so the consuming agent treats the content as data rather than instructions.
 
