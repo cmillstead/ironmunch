@@ -55,7 +55,7 @@ Based on [jcodemunch-mcp](https://github.com/jgravelle/jcodemunch-mcp) by J. Gra
 - **6-step path validation chain** — null bytes, traversal, limits, resolution, containment, symlinks
 - **Content boundary markers** — indirect prompt injection defense (Microsoft spotlighting research)
 - **Error sanitization** — raw exceptions never reach the AI; system paths are always stripped
-- **Per-tool trust annotations** — each of the 34 operations registers as its own MCP tool carrying `readOnlyHint`/`destructiveHint` annotations; output from untrusted operations is framed with `<UNTRUSTED_OUTPUT>` markers to resist indirect prompt injection
+- **Per-tool trust annotations** — each of the 34 operations registers as its own MCP tool carrying `readOnlyHint`/`destructiveHint` annotations; source code in tool output is wrapped in `<<<UNTRUSTED_CODE_{random token}>>>` boundary markers (Microsoft spotlighting) that content cannot forge an end marker for, so it can never escape the boundary
 - **2,594 tests** — adversarial, security, integration, benchmark, fuzz, and stress coverage with real temp directories
 
 ---
@@ -95,7 +95,7 @@ claude mcp add codesight \
 
 This registers 34 MCP tools — one per operation — each carrying its own `readOnlyHint` / `destructiveHint` annotation, so your client can distinguish safe reads from index-mutating calls. Nothing beyond this repository is required.
 
-If your client reads a project-level config file instead, `.mcp.json.example` in this repo shows the equivalent registration.
+If your client reads a project-level config file instead, `.mcp.json.example` in this repo shows the equivalent registration. Its `command` is relative because a project-scoped config resolves against the project root — that form only works in place, so use the absolute path above when registering from a shell.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -112,7 +112,7 @@ If your client reads a project-level config file instead, `.mcp.json.example` in
 
 Both exit 0 on success. Running `.venv/bin/codesight-mcp` with no arguments starts the stdio server and waits for an MCP client — it will look like it has hung, which is correct; press Ctrl-C.
 
-Then confirm the client side by asking your AI: *"What's the codesight server status?"* It should call `get_status` and report the indexed repo count.
+Then confirm the client side. Start a new client session (or reconnect) first — an already-running session will not pick up a server registered in Step 2. Ask your AI: *"What's the codesight server status?"* It should call `get_status` and report the indexed repo count.
 
 ### Step 4: Index a repository
 
@@ -171,7 +171,7 @@ Because all operations flow through a single entry point, per-operation `readOnl
 
 ## Operations
 
-codesight-mcp exposes **34 operations**, organized into eight categories. On the default path each is its own MCP tool, invoked by its underscored name (`mcp__codesight__get_symbol`). Through the [dispatch wrapper](#advanced-single-query-dispatch-tool) they are invoked as `mcp__codesight__query({operation: "<name>", params: {...}})` using the kebab-case names below.
+codesight-mcp exposes **34 operations**, organized into seven categories. On the default path each is its own MCP tool, invoked by its underscored name (`mcp__codesight__get_symbol`). Through the [dispatch wrapper](#advanced-single-query-dispatch-tool) they are invoked as `mcp__codesight__query({operation: "<name>", params: {...}})` using the kebab-case names below.
 
 ### Indexing
 
