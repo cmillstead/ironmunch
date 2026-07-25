@@ -15,38 +15,22 @@ QUICK_START_HEADING = "## Quick Start"
 ADVANCED_HEADING = "### Advanced: single `query` dispatch tool"
 ENTRYPOINT_INVOCATION = ".venv/bin/codesight-mcp"
 EXTERNAL_REPO_MARKER = "codesight-plugin"
+# Non-vacuity guard: these must survive inside the primary path slice, or the
+# slice has been emptied/reordered and the checks below it would pass on
+# nothing. See docs/spec/SPEC_2_ONBOARDING_AND_DISTRIBUTION.md Section 2.
+PRIMARY_PATH_STEP_HEADINGS = ("### Step 1:", "### Step 2:", "### Step 3:")
 
 
-def _quick_start_section(readme_text: str) -> str:
-    """Return the Quick Start section text, ending at the next real `## ` heading.
+def _primary_path(readme_text: str) -> str:
+    """Return the primary onboarding path: from Quick Start up to (not including) Advanced.
 
-    Fence-aware: a line starting with `## ` inside a fenced code block (used in
-    the README as an example CLAUDE.md snippet) does not end the section.
+    Both onboarding guard tests must derive their scope from this single helper
+    so the definition of "primary path" cannot drift between them. Asserts both
+    heading anchors exist, that Advanced comes strictly after Quick Start, and
+    that the resulting slice is not vacuous (still contains the numbered Quick
+    Start steps) so a moved or emptied section fails loudly instead of passing
+    the checks below it by omission.
     """
-    lines = readme_text.splitlines()
-    start = None
-    for index, line in enumerate(lines):
-        if line == QUICK_START_HEADING:
-            start = index
-            break
-    assert start is not None, f"heading {QUICK_START_HEADING!r} not found in README.md"
-
-    in_fence = False
-    end = len(lines)
-    for index in range(start + 1, len(lines)):
-        line = lines[index]
-        if line.startswith("```"):
-            in_fence = not in_fence
-            continue
-        if not in_fence and line.startswith("## "):
-            end = index
-            break
-    return "\n".join(lines[start:end])
-
-
-def test_quickstart_has_no_external_repo_in_primary_path():
-    readme_text = README_PATH.read_text()
-
     quick_start_index = readme_text.find(QUICK_START_HEADING)
     assert quick_start_index != -1, f"heading {QUICK_START_HEADING!r} not found in README.md"
 
@@ -58,6 +42,20 @@ def test_quickstart_has_no_external_repo_in_primary_path():
     )
 
     primary_path = readme_text[quick_start_index:advanced_index]
+
+    for step_heading in PRIMARY_PATH_STEP_HEADINGS:
+        assert step_heading in primary_path, (
+            f"{step_heading!r} is missing from the Quick Start primary path (between "
+            f"{QUICK_START_HEADING!r} and {ADVANCED_HEADING!r}) — the primary path appears "
+            "to be empty or truncated, so downstream onboarding checks would pass vacuously"
+        )
+
+    return primary_path
+
+
+def test_quickstart_has_no_external_repo_in_primary_path():
+    readme_text = README_PATH.read_text()
+    primary_path = _primary_path(readme_text)
     assert EXTERNAL_REPO_MARKER not in primary_path, (
         f"{EXTERNAL_REPO_MARKER!r} must not appear in the primary Quick Start path "
         f"(between {QUICK_START_HEADING!r} and {ADVANCED_HEADING!r})"
@@ -66,9 +64,9 @@ def test_quickstart_has_no_external_repo_in_primary_path():
 
 def test_entrypoint_documented():
     readme_text = README_PATH.read_text()
-    quick_start_section = _quick_start_section(readme_text)
-    assert ENTRYPOINT_INVOCATION in quick_start_section, (
-        f"{ENTRYPOINT_INVOCATION!r} must be documented inside the Quick Start section"
+    primary_path = _primary_path(readme_text)
+    assert ENTRYPOINT_INVOCATION in primary_path, (
+        f"{ENTRYPOINT_INVOCATION!r} must be documented inside the Quick Start primary path"
     )
 
 
