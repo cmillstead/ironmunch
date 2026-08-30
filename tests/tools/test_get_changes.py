@@ -576,6 +576,43 @@ class TestGetChangesIntegration:
         assert "error" not in result
         assert result["impact"] == {"downstream_count": 0, "downstream": []}
 
+    def test_ondemand_then_git_failure_keeps_provenance(self, tmp_path):
+        """Finding 4: a git-diff failure that happens AFTER a successful
+        on-demand index must still surface _meta.freshly_indexed (no silent
+        data loss). A 1-commit repo + HEAD~1..HEAD makes git diff fail."""
+        import subprocess
+
+        from codesight_mcp.tools._common import _clear_shared_stores
+        from codesight_mcp.tools.index_folder import set_allowed_roots_fn
+
+        _clear_shared_stores()
+        set_allowed_roots_fn(lambda: [str(tmp_path)])
+        try:
+            repo_dir = tmp_path / "provrepo"
+            repo_dir.mkdir()
+            (repo_dir / "app.py").write_text("def somefn():\n    return 1\n")
+            subprocess.run(["git", "init"], cwd=str(repo_dir), capture_output=True, check=True)
+            subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=str(repo_dir), capture_output=True, check=True)
+            subprocess.run(["git", "config", "user.name", "T"], cwd=str(repo_dir), capture_output=True, check=True)
+            subprocess.run(["git", "add", "."], cwd=str(repo_dir), capture_output=True, check=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=str(repo_dir), capture_output=True, check=True)
+
+            storage = tmp_path / "storage"  # empty -> forces on-demand index
+            result = get_changes(
+                repo="provrepo",
+                git_ref="HEAD~1..HEAD",  # no parent on a 1-commit repo -> git diff fails
+                repo_path=str(repo_dir),
+                storage_path=str(storage),
+                allowed_roots=[str(tmp_path)],
+            )
+
+            # The index WAS built on demand, then git diff failed.
+            assert "error" in result, f"expected git-diff failure, got: {result}"
+            assert result.get("_meta", {}).get("freshly_indexed") is True
+        finally:
+            set_allowed_roots_fn(None)
+            _clear_shared_stores()
+
     def test_max_affected_truncation(self, tmp_path):
         """Affected symbols should be capped at _MAX_AFFECTED with truncated flag."""
         from codesight_mcp.tools.get_changes import _MAX_AFFECTED

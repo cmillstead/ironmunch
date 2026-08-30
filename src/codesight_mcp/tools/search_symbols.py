@@ -53,9 +53,13 @@ def _search_single_repo(
             if provider is None:
                 provider = get_embedding_provider()
             if provider is None:
+                # Post-resolution error: carry on-demand/staleness provenance
+                # via the same _ctx_meta channel the success path uses so the
+                # single-repo aggregation can surface it (CLAUDE.md rule 8).
                 return {
                     "error": "Semantic search requires codesight-mcp[semantic]. "
-                    "Install with: pip install codesight-mcp[semantic]"
+                    "Install with: pip install codesight-mcp[semantic]",
+                    "_ctx_meta": ctx.meta_fields(),
                 }
 
             store = EmbeddingStore(owner, name, storage_path)
@@ -114,7 +118,8 @@ def _search_single_repo(
                 if vec:
                     semantic_scores[sym["id"]] = cosine_similarity(query_vec, vec)
         except Exception as exc:
-            return {"error": sanitize_error(exc)}
+            # Post-resolution error: carry provenance via _ctx_meta (see above).
+            return {"error": sanitize_error(exc), "_ctx_meta": ctx.meta_fields()}
 
     # --- Merge and rank ---
     scored_results = []
@@ -336,6 +341,10 @@ def search_symbols(
         )
         if "error" in result:
             errors.append({"repo": r, "error": result["error"]})
+            # A post-resolution error still carries on-demand/staleness
+            # provenance -- keep it for the single-repo error return below.
+            if single_repo_mode:
+                single_ctx_meta = result.get("_ctx_meta", {})
             continue
         repos_searched.append(result["repo"])
         all_scored.extend(result["results"])
@@ -376,9 +385,17 @@ def search_symbols(
         if errors:
             response["errors"] = errors
     else:
-        # Single-repo mode: if the repo failed, return the error directly
+        # Single-repo mode: if the repo failed, return the error directly. When
+        # the failure came AFTER a successful (possibly on-demand) resolve, keep
+        # the provenance so a fresh build is not silently dropped (rule 8).
         if errors and not repos_searched:
-            return {"error": errors[0]["error"]}
+            err: dict = {"error": errors[0]["error"]}
+            if single_ctx_meta:
+                err["_meta"] = {
+                    **make_meta(source="code_index", trusted=False),
+                    **single_ctx_meta,
+                }
+            return err
         response["repo"] = repos_searched[0] if repos_searched else repo_list[0]
 
     return response
