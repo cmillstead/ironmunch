@@ -1,6 +1,6 @@
 # codesight-mcp — Project Overview
 
-<!-- codesight:counts ops=34 langs=66 tests=2594 -->
+<!-- codesight:counts ops=34 langs=66 tests=2627 -->
 
 **Generated:** 2026-03-10 | **Scan Level:** Exhaustive | **Phase:** 1 of 4
 
@@ -99,7 +99,7 @@ server.py (286 lines)
 |--------|-------|
 | Source files | ~47 Python files |
 | Test files | ~40 Python files |
-| Test count | 2,594 |
+| Test count | 2,627 |
 | Tools | 34 MCP tools |
 | Languages supported | 66 |
 | Security scan rounds | 12 |

@@ -4,17 +4,21 @@ Centralizes repo identifier parsing and validation so each tool
 doesn't duplicate the logic.
 """
 
+import logging
 import re
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Union
 
 from ..security import sanitize_repo_identifier
 from ..storage import CodeIndex, IndexStore
 from ..core.errors import sanitize_error, RepoNotFoundError
+from ..core.freshness import age_threshold_exceeded
 from ..core.validation import ValidationError
 from ..parser.graph import CodeGraph
+
+logger = logging.getLogger(__name__)
 
 # Shared IndexStore instances keyed by storage_path.
 # Reusing instances preserves the in-memory LRU cache across tool calls,
@@ -93,6 +97,29 @@ def parse_repo(
     return owner, name
 
 
+def _run_ondemand_index(path: str, storage_path: Optional[str] = None) -> dict:
+    """Fast synchronous reindex of *path* via the existing index_folder handler.
+
+    Routes through ``_handle_index_folder`` (lazy-imported to avoid the
+    ``_common`` <-> ``index_folder`` import cycle) so the allowlist
+    default-deny gate, ``O_NOFOLLOW``, every cap, the sanitizers, and the
+    exclusive file lock are reused unchanged -- security stays monotonic.
+    ``use_ai_summaries=False`` keeps it fast and off the network by default.
+
+    Never raises; always returns the handler's result dict (or a sanitized
+    failure dict) so a read op can never crash on an indexing error.
+    """
+    try:
+        from .index_folder import _handle_index_folder
+        return _handle_index_folder(
+            {"path": path, "use_ai_summaries": False},
+            storage_path,
+        )
+    except Exception as exc:  # RC-011: outer boundary -- indexing must never crash a read
+        logger.debug("on-demand index failed for %s: %s", path, exc)
+        return {"success": False, "error": sanitize_error(exc)}
+
+
 @dataclass
 class RepoContext:
     """Resolved repository context -- shared by all tool handlers."""
@@ -101,21 +128,94 @@ class RepoContext:
     name: str
     store: IndexStore
     index: CodeIndex
+    freshly_indexed: bool = False
+    stale: bool = False
+    index_warnings: list = field(default_factory=list)
 
     @classmethod
     def resolve(
-        cls, repo: str, storage_path: Optional[str] = None
+        cls, repo: str, storage_path: Optional[str] = None, *, path: Optional[str] = None
     ) -> Union["RepoContext", dict]:
-        """Parse repo, load index, return context or error dict."""
+        """Parse repo, load index, return context or error dict.
+
+        When *path* is supplied and the resolved index is missing or stale
+        (age strictly exceeds ``INDEX_AGE_THRESHOLD_DAYS``), the folder is
+        indexed on demand through the existing validated pipeline
+        (:func:`_run_ondemand_index`) and the freshly-built index is served
+        with ``freshly_indexed=True``.
+
+        Fails safe to today's behavior on any doubt (CLAUDE.md rules 4 & 8):
+
+        - no path + missing index -> the existing "not indexed"/"not found" error
+        - no path + stale index   -> serve the stale index with ``stale=True``
+        - path + index failure    -> serve stale if present, else the sanitized
+          index error, else the original error
+        - path + success but reload empty -> the original error
+
+        An unparseable/future ``indexed_at`` is treated as stale (fail-closed).
+        """
+        store = _get_shared_store(storage_path)
+
+        owner = name = None
+        index = None
         try:
             owner, name = parse_repo(repo, storage_path)
+            index = store.load_index(owner, name)
         except RepoNotFoundError as exc:
-            return {"error": str(exc)}
-        store = _get_shared_store(storage_path)
-        index = store.load_index(owner, name)
-        if not index:
-            return {"error": f"Repository not indexed: {owner}/{name}"}
-        return cls(owner=owner, name=name, store=store, index=index)
+            first_error = str(exc)
+        else:
+            first_error = f"Repository not indexed: {owner}/{name}"
+
+        # Stale iff we HAVE an index whose age strictly exceeds the policy.
+        # age_threshold_exceeded -> None (unparseable/future) is treated as
+        # stale (fail-closed, CLAUDE.md rule 4).
+        stale = index is not None and age_threshold_exceeded(
+            getattr(index, "indexed_at", None)
+        ) is not False
+
+        # Fresh, present index -> serve directly (unchanged happy path).
+        if index is not None and not stale:
+            return cls(owner=owner, name=name, store=store, index=index)
+
+        # No path -> cannot index on demand. Preserve today's behavior:
+        #   missing -> the existing "not indexed"/"not found" error
+        #   stale   -> serve the stale index (availability-monotonic) + flag
+        if not path:
+            if index is not None:
+                return cls(owner=owner, name=name, store=store, index=index, stale=True)
+            return {"error": first_error}
+
+        # Path supplied. When we already resolved an index (necessarily stale
+        # here), the supplied path MUST hash-match it; otherwise the caller is
+        # pointing at a different directory and serving its content under this
+        # known name would be directory-swap index poisoning (security req 7).
+        # Refuse the reindex and serve the stale index instead.
+        from .index_folder import folder_repo_identity
+        if index is not None and folder_repo_identity(path) != (owner, name):
+            return cls(owner=owner, name=name, store=store, index=index, stale=True)
+
+        # Index on demand through the existing validated pipeline. Never raises.
+        idx = _run_ondemand_index(path, storage_path)
+        if not idx.get("success"):
+            # Fail-safe: serve a stale index if we had one, else the sanitized
+            # index error, else the original error.
+            if index is not None:
+                return cls(owner=owner, name=name, store=store, index=index, stale=True)
+            return {"error": idx.get("error") or first_error}
+
+        # Reload using the PATH-derived identity (authoritative), then serve.
+        n_owner, n_name = folder_repo_identity(path)
+        fresh = store.load_index(n_owner, n_name)
+        if not fresh:
+            return {"error": first_error}
+        return cls(
+            owner=n_owner,
+            name=n_name,
+            store=store,
+            index=fresh,
+            freshly_indexed=True,
+            index_warnings=list(idx.get("warnings") or []),
+        )
 
 
 def timed() -> float:
