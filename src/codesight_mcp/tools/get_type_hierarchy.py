@@ -14,6 +14,7 @@ def get_type_hierarchy(
     repo: str,
     symbol_id: str,
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Get the inheritance hierarchy for a class or type.
 
@@ -21,16 +22,18 @@ def get_type_hierarchy(
         repo: Repository identifier (owner/repo or just repo name).
         symbol_id: Symbol ID of the class/type to inspect.
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder; enables
+            on-demand indexing when the index is missing/stale.
 
     Returns:
         Dict with parents (ancestors) and children (descendants) and _meta envelope.
     """
     start = timed()
 
-    result = prepare_graph_query(repo, symbol_id, storage_path)
+    result = prepare_graph_query(repo, symbol_id, storage_path, path=repo_path)
     if isinstance(result, dict):
         return result
-    owner, name, index, graph, target = result
+    owner, name, index, graph, target, ctx = result
 
     target_name = target.get("name", "")
 
@@ -138,7 +141,7 @@ def get_type_hierarchy(
 
     ms = elapsed_ms(start)
 
-    return {
+    out = {
         "repo": f"{owner}/{name}",
         "symbol_id": wrap_untrusted_content(symbol_id),
         "symbol_name": wrap_untrusted_content(target_name),
@@ -152,6 +155,8 @@ def get_type_hierarchy(
             "timing_ms": ms,
         },
     }
+    out["_meta"].update(ctx.meta_fields())
+    return out
 
 
 _spec = register(ToolSpec(
@@ -171,6 +176,13 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "Symbol ID of the class or type to inspect",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder. When the "
+                    "index is missing or stale it is built on demand."
+                ),
+            },
         },
         "required": ["repo", "symbol_id"],
     },
@@ -178,6 +190,7 @@ _spec = register(ToolSpec(
         repo=args["repo"],
         symbol_id=args["symbol_id"],
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo", "symbol_id"],

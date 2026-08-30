@@ -29,15 +29,19 @@ def analyze_complexity(
     limit: int = 20,
     sort_by: str = "risk",
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Find the most complex/risky symbols in a repo.
 
     Args:
         repo: Repository identifier (owner/repo or just repo name).
-        path: Optional file/directory prefix filter.
+        path: Optional repo-relative file/directory prefix filter.
         limit: Maximum results (default 20, max 100).
         sort_by: Sort mode — 'risk' (default), 'complexity', or 'cognitive'.
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder (distinct
+            from the repo-relative ``path`` filter above); enables on-demand
+            indexing when the index is missing/stale.
 
     Returns:
         Dict with ranked hotspot list and _meta envelope.
@@ -54,7 +58,7 @@ def analyze_complexity(
         if any(part == ".." for part in path.split("/")):
             return {"error": "path traversal not allowed"}
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, index = ctx.owner, ctx.name, ctx.index
@@ -97,12 +101,14 @@ def analyze_complexity(
 
     if not candidates:
         ms = elapsed_ms(start)
-        return {
+        empty = {
             "repo": f"{owner}/{name}",
             "hotspots": [],
             "scope": path,
             "_meta": {**make_meta(source="code_index", trusted=False), "timing_ms": ms},
         }
+        empty["_meta"].update(ctx.meta_fields())
+        return empty
 
     # Sort
     if sort_by == "complexity":
@@ -149,7 +155,7 @@ def analyze_complexity(
 
     ms = elapsed_ms(start)
 
-    return {
+    result = {
         "repo": f"{owner}/{name}",
         "hotspot_count": len(hotspots),
         "hotspots": hotspots,
@@ -159,6 +165,8 @@ def analyze_complexity(
             "timing_ms": ms,
         },
     }
+    result["_meta"].update(ctx.meta_fields())
+    return result
 
 
 _spec = register(ToolSpec(
@@ -179,6 +187,14 @@ _spec = register(ToolSpec(
             "path": {
                 "type": "string",
                 "description": "Filter to file or directory prefix (e.g. 'src/parser/')",
+            },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder (distinct "
+                    "from the repo-relative 'path' filter). When the index is "
+                    "missing or stale it is built on demand."
+                ),
             },
             "limit": {
                 "type": "integer",
@@ -202,6 +218,7 @@ _spec = register(ToolSpec(
         limit=args.get("limit", 20),
         sort_by=args.get("sort_by", "risk"),
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo"],

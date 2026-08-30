@@ -29,9 +29,10 @@ def _search_single_repo(
     semantic_weight: float = 0.7,
     semantic_only: bool = False,
     provider=None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Search symbols in a single repo. Returns result dict."""
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, index = ctx.owner, ctx.name, ctx.index
@@ -52,9 +53,13 @@ def _search_single_repo(
             if provider is None:
                 provider = get_embedding_provider()
             if provider is None:
+                # Post-resolution error: carry on-demand/staleness provenance
+                # via the same _ctx_meta channel the success path uses so the
+                # single-repo aggregation can surface it (CLAUDE.md rule 8).
                 return {
                     "error": "Semantic search requires codesight-mcp[semantic]. "
-                    "Install with: pip install codesight-mcp[semantic]"
+                    "Install with: pip install codesight-mcp[semantic]",
+                    "_ctx_meta": ctx.meta_fields(),
                 }
 
             store = EmbeddingStore(owner, name, storage_path)
@@ -113,7 +118,8 @@ def _search_single_repo(
                 if vec:
                     semantic_scores[sym["id"]] = cosine_similarity(query_vec, vec)
         except Exception as exc:
-            return {"error": sanitize_error(exc)}
+            # Post-resolution error: carry provenance via _ctx_meta (see above).
+            return {"error": sanitize_error(exc), "_ctx_meta": ctx.meta_fields()}
 
     # --- Merge and rank ---
     scored_results = []
@@ -203,6 +209,9 @@ def _search_single_repo(
         response["search_mode"] = "semantic_only"
     elif effective_semantic:
         response["search_mode"] = "hybrid"
+    # Carry on-demand/staleness/warning provenance for the caller to surface
+    # (merged into the top-level _meta only in single-repo mode).
+    response["_ctx_meta"] = ctx.meta_fields()
     return response
 
 
@@ -218,6 +227,7 @@ def search_symbols(
     semantic: bool = False,
     semantic_weight: float = 0.7,
     semantic_only: bool = False,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Search for symbols matching a query.
 
@@ -231,6 +241,10 @@ def search_symbols(
         repos: Optional list of repo identifiers to search across (max 5).
                Mutually exclusive with repo.
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder. Enables
+            on-demand indexing when the index is missing/stale. Applies only in
+            single-repo mode (ignored when ``repos`` is used, since one path
+            cannot identify multiple repos).
         semantic: Enable semantic (embedding-based) search.
         semantic_weight: Weight for semantic vs keyword scoring (0.0-1.0).
         semantic_only: Use only semantic scoring, skip keyword matching.
@@ -315,20 +329,30 @@ def search_symbols(
     truncated = False
     errors = []
     repos_searched = []
+    # On-demand only applies when a single repo+path pair is unambiguous.
+    single_repo_mode = len(repo_list) == 1
+    single_ctx_meta: dict = {}
 
     for r in repo_list:
         result = _search_single_repo(
             r, query, kind, file_pattern, language, max_results, storage_path,
             semantic=semantic, semantic_weight=semantic_weight, semantic_only=semantic_only, provider=provider,
+            repo_path=repo_path if single_repo_mode else None,
         )
         if "error" in result:
             errors.append({"repo": r, "error": result["error"]})
+            # A post-resolution error still carries on-demand/staleness
+            # provenance -- keep it for the single-repo error return below.
+            if single_repo_mode:
+                single_ctx_meta = result.get("_ctx_meta", {})
             continue
         repos_searched.append(result["repo"])
         all_scored.extend(result["results"])
         total_symbols += result["total_symbols"]
         if result["all_results_count"] > max_results:
             truncated = True
+        if single_repo_mode:
+            single_ctx_meta = result.get("_ctx_meta", {})
 
     # Sort merged results by score descending, take top max_results
     all_scored.sort(key=lambda x: x["score"], reverse=True)
@@ -351,6 +375,7 @@ def search_symbols(
             "truncated": truncated,
         },
     }
+    response["_meta"].update(single_ctx_meta)
 
     if semantic or semantic_only:
         response["search_mode"] = "semantic_only" if semantic_only else "hybrid"
@@ -360,9 +385,17 @@ def search_symbols(
         if errors:
             response["errors"] = errors
     else:
-        # Single-repo mode: if the repo failed, return the error directly
+        # Single-repo mode: if the repo failed, return the error directly. When
+        # the failure came AFTER a successful (possibly on-demand) resolve, keep
+        # the provenance so a fresh build is not silently dropped (rule 8).
         if errors and not repos_searched:
-            return {"error": errors[0]["error"]}
+            err: dict = {"error": errors[0]["error"]}
+            if single_ctx_meta:
+                err["_meta"] = {
+                    **make_meta(source="code_index", trusted=False),
+                    **single_ctx_meta,
+                }
+            return err
         response["repo"] = repos_searched[0] if repos_searched else repo_list[0]
 
     return response
@@ -400,6 +433,14 @@ _spec = register(ToolSpec(
             "file_pattern": {
                 "type": "string",
                 "description": "Optional glob pattern to filter files (e.g., 'src/**/*.py')",
+            },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder. When the "
+                    "index is missing or stale it is built on demand "
+                    "(single-repo mode only)."
+                ),
             },
             "language": {
                 "type": "string",
@@ -446,6 +487,7 @@ _spec = register(ToolSpec(
         semantic=args.get("semantic", False),
         semantic_weight=args.get("semantic_weight", 0.7),
         semantic_only=args.get("semantic_only", False),
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["query"],

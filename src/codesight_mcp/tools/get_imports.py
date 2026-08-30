@@ -3,7 +3,6 @@
 from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
-from ..core.validation import ValidationError
 from ._common import prepare_graph_query, timed, elapsed_ms
 from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
@@ -17,14 +16,18 @@ def get_imports(
     file: str,
     direction: str = "imports",
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Get import relationships for a file.
 
     Args:
         repo: Repository identifier (owner/repo or just repo name).
-        file: Path to file within the repository.
+        file: Repo-relative path to file within the repository.
         direction: "imports" (what this file imports) or "importers" (what imports this file).
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder (distinct
+            from the repo-relative ``file`` above); enables on-demand indexing
+            when the index is missing/stale.
 
     Returns:
         Dict with import list and _meta envelope.
@@ -39,14 +42,19 @@ def get_imports(
         }
 
     # Use shared helper (no symbol_id needed for file-based queries)
-    result = prepare_graph_query(repo, symbol_id=None, storage_path=storage_path)
+    result = prepare_graph_query(repo, symbol_id=None, storage_path=storage_path, path=repo_path)
     if isinstance(result, dict):
         return result
-    owner, name, index, graph, _ = result
+    owner, name, index, graph, _, ctx = result
 
     # --- security gate: validate file is tracked by the index ---
     if file not in index.source_files:
-        raise ValidationError("File not found in index")
+        # Post-resolution error: return (do not raise) so on-demand/staleness
+        # provenance survives -- a successful on-demand build whose requested
+        # file is absent must still surface _meta.freshly_indexed / stale /
+        # index_warnings, matching the round-1 pattern in get_symbol /
+        # get_symbol_context / prepare_graph_query (no silent data loss).
+        return {"error": "File not found in index", "_meta": ctx.error_meta()}
 
     if direction == "imports":
         # What does this file import?
@@ -95,7 +103,7 @@ def get_imports(
 
     ms = elapsed_ms(start)
 
-    return {
+    out = {
         "repo": f"{owner}/{name}",
         "file": wrap_untrusted_content(file),
         "direction": direction,
@@ -106,6 +114,8 @@ def get_imports(
             "timing_ms": ms,
         },
     }
+    out["_meta"].update(ctx.meta_fields())
+    return out
 
 
 _spec = register(ToolSpec(
@@ -125,6 +135,14 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "Path to file within the repository",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder (distinct "
+                    "from the repo-relative 'file'). When the index is missing "
+                    "or stale it is built on demand."
+                ),
+            },
             "direction": {
                 "type": "string",
                 "description": "Direction of import lookup",
@@ -139,6 +157,7 @@ _spec = register(ToolSpec(
         file=args["file"],
         direction=args.get("direction", "imports"),
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo", "file"],

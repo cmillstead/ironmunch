@@ -50,17 +50,21 @@ def get_symbol(
     verify: bool = False,
     context_lines: int = 0,
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Get full source of a specific symbol.
 
     Args:
         repo: Repository identifier (owner/repo or just repo name).
         symbol_id: Symbol ID from get_file_outline or search_symbols.
-        file_path: Path to file within the repository (alternative to symbol_id).
+        file_path: Repo-relative path to file within the repository (alternative to symbol_id).
         line: Line number within the file (used with file_path).
         verify: If True, re-read source and verify content hash matches.
         context_lines: Number of lines before/after the symbol to include.
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder (distinct
+            from the repo-relative ``file_path`` above); enables on-demand
+            indexing when the index is missing/stale.
 
     Returns:
         Dict with symbol details, source code (wrapped), and _meta envelope.
@@ -71,29 +75,31 @@ def get_symbol(
     """
     start = timed()
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, store, index = ctx.owner, ctx.name, ctx.store, ctx.index
 
-    # Resolve symbol_id from file:line when symbol_id is absent
+    # Resolve symbol_id from file:line when symbol_id is absent.
+    # Post-resolution errors keep on-demand/staleness provenance (CLAUDE.md
+    # rule 8): a fresh on-demand build must not be silently dropped.
     if not symbol_id and file_path is not None and line is not None:
         symbol = _find_symbol_at_line(index, file_path, line)
         if not symbol:
-            return {"error": f"No symbol found at {file_path}:{line}"}
+            return {"error": f"No symbol found at {file_path}:{line}", "_meta": ctx.error_meta()}
         symbol_id = symbol["id"]
     elif symbol_id:
         symbol = index.get_symbol(symbol_id)
         if not symbol:
-            return {"error": f"Symbol not found: {symbol_id}"}
+            return {"error": f"Symbol not found: {symbol_id}", "_meta": ctx.error_meta()}
     else:
-        return {"error": "Either symbol_id or both file_path and line are required"}
+        return {"error": "Either symbol_id or both file_path and line are required", "_meta": ctx.error_meta()}
 
     # Get source via byte-offset read
     try:
         source = store.get_symbol_content(owner, name, symbol_id, index=index)
     except (OSError, KeyError, ValueError) as exc:
-        return {"error": sanitize_error(exc)}
+        return {"error": sanitize_error(exc), "_meta": ctx.error_meta()}
 
     # --- security gate: clamp context_lines ---
     context_lines = min(max(context_lines, 0), MAX_CONTEXT_LINES)
@@ -152,6 +158,7 @@ def get_symbol(
     if context_after:
         result["context_after"] = wrap_untrusted_content(sanitize_signature_for_api(context_after))
 
+    result["_meta"].update(ctx.meta_fields())
     return result
 
 
@@ -159,6 +166,7 @@ def get_symbols(
     repo: str,
     symbol_ids: list[str],
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Get full source of multiple symbols.
 
@@ -166,13 +174,15 @@ def get_symbols(
         repo: Repository identifier (owner/repo or just repo name).
         symbol_ids: List of symbol IDs.
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder; enables
+            on-demand indexing when the index is missing/stale.
 
     Returns:
         Dict with symbols list, errors, and _meta envelope.
     """
     start = timed()
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, store, index = ctx.owner, ctx.name, ctx.store, ctx.index
@@ -210,7 +220,7 @@ def get_symbols(
 
     ms = elapsed_ms(start)
 
-    return {
+    result = {
         "symbols": symbols,
         "errors": errors,
         "_meta": {
@@ -219,6 +229,8 @@ def get_symbols(
             "symbol_count": len(symbols),
         },
     }
+    result["_meta"].update(ctx.meta_fields())
+    return result
 
 
 _spec_get_symbol = register(ToolSpec(
@@ -243,6 +255,14 @@ _spec_get_symbol = register(ToolSpec(
             "file_path": {
                 "type": "string",
                 "description": "Path to file within the repository (alternative to symbol_id)",
+            },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder (distinct "
+                    "from the repo-relative 'file_path'). When the index is "
+                    "missing or stale it is built on demand."
+                ),
             },
             "line": {
                 "type": "integer",
@@ -269,6 +289,7 @@ _spec_get_symbol = register(ToolSpec(
         verify=args.get("verify", False),
         context_lines=args.get("context_lines", 0),
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo"],
@@ -293,6 +314,13 @@ _spec_get_symbols = register(ToolSpec(
                 "items": {"type": "string"},
                 "description": "List of symbol IDs to retrieve",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder. When the "
+                    "index is missing or stale it is built on demand."
+                ),
+            },
         },
         "required": ["repo", "symbol_ids"],
     },
@@ -300,6 +328,7 @@ _spec_get_symbols = register(ToolSpec(
         repo=args["repo"],
         symbol_ids=args["symbol_ids"],
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo", "symbol_ids"],

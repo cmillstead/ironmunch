@@ -308,6 +308,7 @@ def get_diagram(
     max_depth: int = 2,
     direction: str = "TD",
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Generate a Mermaid diagram from code graph data.
 
@@ -315,10 +316,13 @@ def get_diagram(
         repo: Repository identifier (owner/repo or just repo name).
         diagram_type: One of 'call_graph', 'type_hierarchy', 'imports', 'impact'.
         symbol_id: Symbol to center diagram on (required for call_graph, type_hierarchy, impact).
-        path: File/directory for imports diagram.
+        path: Repo-relative file/directory for imports diagram.
         max_depth: BFS depth limit (default 2, max 5).
         direction: Mermaid direction — 'TD' (top-down) or 'LR' (left-right).
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder (distinct
+            from the repo-relative ``path`` above); enables on-demand indexing
+            when the index is missing/stale.
 
     Returns:
         Dict with Mermaid syntax, node/edge counts, and _meta envelope.
@@ -341,7 +345,7 @@ def get_diagram(
     if direction not in ("TD", "LR"):
         direction = "TD"
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, index = ctx.owner, ctx.name, ctx.index
@@ -359,11 +363,13 @@ def get_diagram(
         result = _render_impact(graph, symbol_id, index, max_depth, direction)
 
     if "error" in result:
-        return result
+        # Post-resolution renderer error (e.g. symbol-not-found): keep the
+        # on-demand/staleness provenance (CLAUDE.md rule 8).
+        return {**result, "_meta": ctx.error_meta()}
 
     ms = elapsed_ms(start)
 
-    return {
+    out = {
         "repo": f"{owner}/{name}",
         "diagram_type": diagram_type,
         "mermaid": result["mermaid"],
@@ -374,6 +380,8 @@ def get_diagram(
             "timing_ms": ms,
         },
     }
+    out["_meta"].update(ctx.meta_fields())
+    return out
 
 
 _spec = register(ToolSpec(
@@ -404,6 +412,14 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "File or directory for imports diagram",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder (distinct "
+                    "from the repo-relative 'path'). When the index is missing "
+                    "or stale it is built on demand."
+                ),
+            },
             "max_depth": {
                 "type": "integer",
                 "description": "BFS depth limit (default 2, max 5)",
@@ -426,6 +442,7 @@ _spec = register(ToolSpec(
         max_depth=args.get("max_depth", 2),
         direction=args.get("direction", "TD"),
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo", "type"],

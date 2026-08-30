@@ -12,6 +12,7 @@ from .registry import ToolSpec, register
 def get_repo_outline(
     repo: str,
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Get a high-level overview of an indexed repository.
 
@@ -21,13 +22,15 @@ def get_repo_outline(
     Args:
         repo: Repository identifier (owner/repo or just repo name).
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder; enables
+            on-demand indexing when the index is missing/stale.
 
     Returns:
         Dict with repo outline and _meta envelope.
     """
     start = timed()
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, index = ctx.owner, ctx.name, ctx.index
@@ -48,7 +51,7 @@ def get_repo_outline(
 
     ms = elapsed_ms(start)
 
-    return {
+    result = {
         # repo is the sanitized request identifier (sanitize_repo_identifier: alnum/-/_/. only),
         # not disk-derived like list_repos/verify -- safe to return unwrapped.
         "repo": f"{owner}/{name}",
@@ -63,6 +66,8 @@ def get_repo_outline(
             "timing_ms": ms,
         },
     }
+    result["_meta"].update(ctx.meta_fields())
+    return result
 
 
 _spec = register(ToolSpec(
@@ -79,12 +84,20 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "Repository identifier (owner/repo or just repo name)",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder. When the "
+                    "index is missing or stale it is built on demand."
+                ),
+            },
         },
         "required": ["repo"],
     },
     handler=lambda args, storage_path: get_repo_outline(
         repo=args["repo"],
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     required_args=["repo"],
     untrusted=True,

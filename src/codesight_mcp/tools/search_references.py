@@ -66,6 +66,7 @@ def search_references(
     file_pattern: Optional[str] = None,
     max_results: int = 20,
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Search for text across indexed files and return matches with enclosing symbol context.
 
@@ -81,6 +82,8 @@ def search_references(
         max_results: Maximum number of matching lines to return (capped at
             ``MAX_SEARCH_RESULTS``).
         storage_path: Custom storage path (for testing).
+        repo_path: Host filesystem path of the repo working folder; enables
+            on-demand indexing when the index is missing/stale.
 
     Returns:
         Dict with ``results`` list.  Each result has:
@@ -113,7 +116,7 @@ def search_references(
     ):
         return {"error": "Query matches redaction sentinel pattern; not allowed"}
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
 
@@ -185,7 +188,7 @@ def search_references(
 
     ms = elapsed_ms(start)
 
-    return {
+    result = {
         "repo": f"{owner}/{name}",
         "query": wrap_untrusted_content(sanitize_signature_for_api(query)),
         "result_count": len(matches),
@@ -197,6 +200,8 @@ def search_references(
             "truncated": len(matches) >= max_results,
         },
     }
+    result["_meta"].update(ctx.meta_fields())
+    return result
 
 
 _spec = register(ToolSpec(
@@ -222,6 +227,13 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "Optional glob pattern to filter files (e.g., '*.py').",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder. When the "
+                    "index is missing or stale it is built on demand."
+                ),
+            },
             "max_results": {
                 "type": "integer",
                 "description": "Maximum number of matching lines to return.",
@@ -236,6 +248,7 @@ _spec = register(ToolSpec(
         file_pattern=args.get("file_pattern"),
         max_results=args.get("max_results", 20),
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo", "query"],

@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Index-on-demand (opt-in via `CODESIGHT_AUTOINDEX`).** Repo-scoped read operations
+  can index a repository on first access when its index is missing or stale (older than
+  `INDEX_AGE_THRESHOLD_DAYS`, 7 days), instead of returning "Repository not indexed" —
+  provided the caller supplies the working folder via the `repo_path` argument. Because
+  on-demand indexing performs a durable index **write** on a nominally read-only path,
+  it is **off by default** and gated behind the `CODESIGHT_AUTOINDEX` environment flag
+  (accepted on values: `on`/`1`/`true`/`yes`/`missing`/`stale`; anything else, including
+  unset, is off). While the flag is off, the repo-scoped read tools stay strictly
+  read-only: a missing index returns the prior "not indexed"/"not found" error and a
+  stale index is served stale — no index is ever written on the read path, so their
+  `readOnlyHint` remains accurate. Enabling `CODESIGHT_AUTOINDEX` is an explicit operator
+  opt-in that allows those read tools to perform on-demand index writes. When enabled,
+  on-demand indexing reuses the existing validated pipeline unchanged (the
+  `CODESIGHT_ALLOWED_ROOTS` allowlist with default-deny, `O_NOFOLLOW`, every cap, and the
+  sanitizers), with AI summaries disabled for speed. The supplied path is canonicalized
+  exactly once and that single resolution drives the identity guard and the indexer
+  (which no longer re-resolves), closing a directory-swap TOCTOU window. Results carry
+  `_meta.freshly_indexed`, `_meta.stale`, and `_meta.index_warnings` so freshness and any
+  truncation are surfaced, never silent. Behavior fails safe to the prior error when no
+  path is available or indexing fails, and a directory-swap guard refuses to reindex a
+  mismatched folder under a known repo name. `compare-symbols` and `verify` are
+  intentionally excluded.
+
 ## [0.6.0] - 2026-07-15
 
 This is a catch-up release: `pyproject.toml` was never bumped past `0.1.0`

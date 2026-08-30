@@ -189,25 +189,33 @@ def get_changes(
     except ValidationError as exc:
         return {"error": str(exc)}
 
-    # 2. Resolve repo context
-    ctx = RepoContext.resolve(repo, storage_path)
+    # 2. Resolve repo context.
+    #    get_changes already carries ``repo_path`` -- the host filesystem path
+    #    of the git repo working folder. That is exactly the folder to index on
+    #    demand, so it maps directly onto RepoContext.resolve's ``path`` kwarg
+    #    (no separate on-demand key is introduced). The reused index_folder
+    #    pipeline enforces its own allowlist default-deny, so passing repo_path
+    #    here before the allowed_roots check below cannot bypass any gate.
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
 
     owner, name, index = ctx.owner, ctx.name, ctx.index
 
-    # 3. Validate repo_path against ALLOWED_ROOTS
+    # 3. Validate repo_path against ALLOWED_ROOTS.
+    #    These are POST-resolution errors: if the index was freshly built on
+    #    demand above, the provenance must survive them (CLAUDE.md rule 8).
     if not repo_path:
-        return {"error": "repo_path is required to run git diff"}
+        return {"error": "repo_path is required to run git diff", "_meta": ctx.error_meta()}
 
     resolved_path = Path(repo_path).expanduser().resolve()
     if allowed_roots:
         allowed = [Path(r).expanduser().resolve() for r in allowed_roots if r.strip()]
         if not any(is_within(a, resolved_path) or resolved_path == a for a in allowed):
-            return {"error": "repo_path is outside allowed roots"}
+            return {"error": "repo_path is outside allowed roots", "_meta": ctx.error_meta()}
 
     if not resolved_path.is_dir():
-        return {"error": "repo_path is not a directory"}
+        return {"error": "repo_path is not a directory", "_meta": ctx.error_meta()}
 
     try:
         proc = subprocess.run(
@@ -218,15 +226,15 @@ def get_changes(
             timeout=30,
         )
     except FileNotFoundError:
-        return {"error": "git executable not found"}
+        return {"error": "git executable not found", "_meta": ctx.error_meta()}
     except subprocess.TimeoutExpired:
-        return {"error": "git diff timed out after 30 seconds"}
+        return {"error": "git diff timed out after 30 seconds", "_meta": ctx.error_meta()}
     except OSError as exc:
-        return {"error": f"Failed to run git diff: {exc}"}
+        return {"error": f"Failed to run git diff: {exc}", "_meta": ctx.error_meta()}
 
     if proc.returncode != 0:
         stderr = proc.stderr.strip()[:500]
-        return {"error": f"git diff failed (exit {proc.returncode}): {stderr}"}
+        return {"error": f"git diff failed (exit {proc.returncode}): {stderr}", "_meta": ctx.error_meta()}
 
     # 4. Parse diff → map to symbols
     hunks = _parse_diff_output(proc.stdout)
@@ -284,6 +292,7 @@ def get_changes(
     if include_impact:
         result["impact"] = impact_result or {"downstream_count": 0, "downstream": []}
 
+    result["_meta"].update(ctx.meta_fields())
     return result
 
 

@@ -14,6 +14,7 @@ from .registry import ToolSpec, register
 def get_dependencies(
     repo: str,
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Aggregate import data to show external vs internal dependencies.
 
@@ -24,13 +25,15 @@ def get_dependencies(
     Args:
         repo: Repository identifier (owner/repo or just repo name).
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder; enables
+            on-demand indexing when the index is missing/stale.
 
     Returns:
         Dict with external/internal dependency lists and _meta envelope.
     """
     start = timed()
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, index = ctx.owner, ctx.name, ctx.index
@@ -80,7 +83,7 @@ def get_dependencies(
 
     ms = elapsed_ms(start)
 
-    return {
+    result = {
         "repo": f"{owner}/{name}",
         "external": external,
         "internal": internal,
@@ -94,6 +97,8 @@ def get_dependencies(
             "circular_truncated": cycle_truncated,
         },
     }
+    result["_meta"].update(ctx.meta_fields())
+    return result
 
 
 _spec = register(ToolSpec(
@@ -112,12 +117,20 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "Repository identifier (owner/repo or just repo name)",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder. When the "
+                    "index is missing or stale it is built on demand."
+                ),
+            },
         },
         "required": ["repo"],
     },
     handler=lambda args, storage_path: get_dependencies(
         repo=args["repo"],
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     required_args=["repo"],
     annotations=ToolAnnotations(title="Get Dependencies", readOnlyHint=True, openWorldHint=False),

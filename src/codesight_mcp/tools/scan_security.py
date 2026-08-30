@@ -25,6 +25,7 @@ def scan_security(
     severity: Optional[str] = None,
     limit: int = 100,
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Scan indexed symbols for dangerous API usage patterns.
 
@@ -34,6 +35,8 @@ def scan_security(
         severity: Optional minimum severity threshold (critical, high, medium, low).
         limit: Maximum findings to return (1-100, default 100).
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder; enables
+            on-demand indexing when the index is missing/stale.
 
     Returns:
         Dict with scan_summary, findings, limitations, and _meta envelope.
@@ -52,7 +55,7 @@ def scan_security(
     # Clamp limit to 1-100 (server._sanitize_arguments caps limit at 100)
     limit = max(1, min(100, limit))
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, index = ctx.owner, ctx.name, ctx.index
@@ -192,7 +195,7 @@ def scan_security(
 
     ms = elapsed_ms(start)
 
-    return {
+    result = {
         "repo": f"{owner}/{name}",
         "scan_type": "dangerous_api_usage",
         "scan_summary": {
@@ -216,6 +219,8 @@ def scan_security(
             "timing_ms": ms,
         },
     }
+    result["_meta"].update(ctx.meta_fields())
+    return result
 
 
 _spec = register(ToolSpec(
@@ -233,6 +238,13 @@ _spec = register(ToolSpec(
             "repo": {
                 "type": "string",
                 "description": "Repository identifier (owner/repo or just repo name)",
+            },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder. When the "
+                    "index is missing or stale it is built on demand."
+                ),
             },
             "category": {
                 "type": "string",
@@ -263,6 +275,7 @@ _spec = register(ToolSpec(
         severity=args.get("severity"),
         limit=args.get("limit", 100),
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     required_args=["repo"],
     untrusted=True,

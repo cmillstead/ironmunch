@@ -12,15 +12,23 @@ from ._common import RepoContext, timed, elapsed_ms
 from .registry import ToolSpec, register
 
 
-def lint_index(repo: str, storage_path: Optional[str] = None) -> dict:
+def lint_index(
+    repo: str,
+    storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
+) -> dict:
     """Deep structural integrity audit for a code index.
 
     Finds orphaned symbols/content, duplicates, call graph broken
     references, and file hash corruption.
+
+    ``repo_path`` is the host filesystem path of the repo working folder;
+    when the index is missing/stale it is built on demand via the validated
+    pipeline (see RepoContext.resolve).
     """
     start = timed()
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
 
@@ -148,7 +156,7 @@ def lint_index(repo: str, storage_path: Optional[str] = None) -> dict:
     for finding in findings:
         by_type[finding["type"]] = by_type.get(finding["type"], 0) + 1
 
-    return {
+    result = {
         "repo": wrap_untrusted_content(f"{ctx.owner}/{ctx.name}"),
         "clean": len(findings) == 0,
         "findings": findings,
@@ -158,6 +166,8 @@ def lint_index(repo: str, storage_path: Optional[str] = None) -> dict:
             "timing_ms": elapsed_ms(start),
         },
     }
+    result["_meta"].update(ctx.meta_fields())
+    return result
 
 
 _spec = register(ToolSpec(
@@ -173,11 +183,19 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "Repository identifier (owner/repo or just repo name)",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder. When the "
+                    "index is missing or stale it is built on demand."
+                ),
+            },
         },
         "required": ["repo"],
     },
     handler=lambda args, storage_path: lint_index(
         repo=args["repo"], storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     required_args=["repo"],
     untrusted=True,

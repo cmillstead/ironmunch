@@ -17,6 +17,7 @@ def get_key_symbols(
     limit: int = 20,
     kind: Optional[str] = None,
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Rank symbols by structural importance in the codebase.
 
@@ -25,10 +26,13 @@ def get_key_symbols(
 
     Args:
         repo: Repository identifier (owner/repo or just repo name).
-        path: Optional file/directory prefix filter (applied after ranking).
+        path: Optional repo-relative file/directory prefix filter (applied after ranking).
         limit: Maximum results (default 20, max 100).
         kind: Optional kind filter ('function', 'method', 'class').
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder (distinct
+            from the repo-relative ``path`` filter above); enables on-demand
+            indexing when the index is missing/stale.
 
     Returns:
         Dict with ranked symbol list and _meta envelope.
@@ -42,7 +46,7 @@ def get_key_symbols(
         if any(part == ".." for part in path.split("/")):
             return {"error": "path traversal not allowed"}
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, index = ctx.owner, ctx.name, ctx.index
@@ -113,7 +117,7 @@ def get_key_symbols(
 
     ms = elapsed_ms(start)
 
-    return {
+    result = {
         "repo": f"{owner}/{name}",
         "key_symbols": key_symbols,
         "scope": path,
@@ -123,6 +127,8 @@ def get_key_symbols(
             "timing_ms": ms,
         },
     }
+    result["_meta"].update(ctx.meta_fields())
+    return result
 
 
 _spec = register(ToolSpec(
@@ -142,6 +148,14 @@ _spec = register(ToolSpec(
             "path": {
                 "type": "string",
                 "description": "Filter to file or directory prefix (e.g. 'src/parser/')",
+            },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder (distinct "
+                    "from the repo-relative 'path' filter). When the index is "
+                    "missing or stale it is built on demand."
+                ),
             },
             "limit": {
                 "type": "integer",
@@ -164,6 +178,7 @@ _spec = register(ToolSpec(
         limit=args.get("limit", 20),
         kind=args.get("kind"),
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo"],

@@ -299,13 +299,25 @@ class TestGetChangesIntegration:
     """Integration tests for get_changes handler."""
 
     def test_repo_not_found_returns_error(self, tmp_path):
+        # Unindexed repo whose working folder cannot be indexed on demand
+        # (empty dir -> no source files) must fall back to a graceful error and
+        # persist nothing -- the "no valid path -> error" intent, preserved now
+        # that get_changes threads repo_path into on-demand resolution.
+        from codesight_mcp.tools._common import _clear_shared_stores
+
+        _clear_shared_stores()
+        work = tmp_path / "work"
+        work.mkdir()  # empty: no source files -> on-demand indexing fails safe
+        storage = tmp_path / "storage"
         result = get_changes(
             repo="local/nonexistent",
-            repo_path=str(tmp_path),
-            storage_path=str(tmp_path),
+            repo_path=str(work),
+            storage_path=str(storage),
         )
         assert "error" in result
-        assert "not indexed" in result["error"].lower() or "not found" in result["error"].lower()
+        # Fail-safe: nothing was indexed/persisted for the unresolved repo.
+        assert IndexStore(base_path=str(storage)).list_repos() == []
+        _clear_shared_stores()
 
     def test_invalid_git_ref_returns_error(self, tmp_path):
         result = get_changes(
@@ -563,6 +575,53 @@ class TestGetChangesIntegration:
         )
         assert "error" not in result
         assert result["impact"] == {"downstream_count": 0, "downstream": []}
+
+    def test_ondemand_then_git_failure_keeps_provenance(self, tmp_path):
+        """Finding 4: a git-diff failure that happens AFTER a successful
+        on-demand index must still surface _meta.freshly_indexed (no silent
+        data loss). A 1-commit repo + HEAD~1..HEAD makes git diff fail.
+
+        On-demand indexing is opt-in (default OFF); enable it via real
+        environment config (not a mock) and restore the prior value after."""
+        import os
+        import subprocess
+
+        from codesight_mcp.tools._common import _clear_shared_stores
+        from codesight_mcp.tools.index_folder import set_allowed_roots_fn
+
+        _clear_shared_stores()
+        set_allowed_roots_fn(lambda: [str(tmp_path)])
+        _prev_autoindex = os.environ.get("CODESIGHT_AUTOINDEX")
+        os.environ["CODESIGHT_AUTOINDEX"] = "on"
+        try:
+            repo_dir = tmp_path / "provrepo"
+            repo_dir.mkdir()
+            (repo_dir / "app.py").write_text("def somefn():\n    return 1\n")
+            subprocess.run(["git", "init"], cwd=str(repo_dir), capture_output=True, check=True)
+            subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=str(repo_dir), capture_output=True, check=True)
+            subprocess.run(["git", "config", "user.name", "T"], cwd=str(repo_dir), capture_output=True, check=True)
+            subprocess.run(["git", "add", "."], cwd=str(repo_dir), capture_output=True, check=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=str(repo_dir), capture_output=True, check=True)
+
+            storage = tmp_path / "storage"  # empty -> forces on-demand index
+            result = get_changes(
+                repo="provrepo",
+                git_ref="HEAD~1..HEAD",  # no parent on a 1-commit repo -> git diff fails
+                repo_path=str(repo_dir),
+                storage_path=str(storage),
+                allowed_roots=[str(tmp_path)],
+            )
+
+            # The index WAS built on demand, then git diff failed.
+            assert "error" in result, f"expected git-diff failure, got: {result}"
+            assert result.get("_meta", {}).get("freshly_indexed") is True
+        finally:
+            if _prev_autoindex is None:
+                os.environ.pop("CODESIGHT_AUTOINDEX", None)
+            else:
+                os.environ["CODESIGHT_AUTOINDEX"] = _prev_autoindex
+            set_allowed_roots_fn(None)
+            _clear_shared_stores()
 
     def test_max_affected_truncation(self, tmp_path):
         """Affected symbols should be capped at _MAX_AFFECTED with truncated flag."""

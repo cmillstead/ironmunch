@@ -339,8 +339,14 @@ class TestGetImports:
         assert "invalid direction" in result["error"].lower()
 
     def test_file_not_in_index(self, graph_index):
-        with pytest.raises(Exception):
-            get_imports(_repo(), "nonexistent.py", direction="imports", storage_path=graph_index["path"])
+        # get_imports returns an error DICT (with a _meta envelope) rather than
+        # raising, so on-demand/staleness provenance is never dropped by the
+        # server's exception-to-error conversion (Finding 3).
+        result = get_imports(_repo(), "nonexistent.py", direction="imports", storage_path=graph_index["path"])
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "File not found in index" in result["error"]
+        assert "_meta" in result
 
     def test_no_imports(self, graph_index):
         result = get_imports(_repo(), "models.py", direction="imports", storage_path=graph_index["path"])

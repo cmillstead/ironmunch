@@ -15,13 +15,17 @@ def get_file_tree(
     repo: str,
     path_prefix: str = "",
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Get repository file tree, optionally filtered by path prefix.
 
     Args:
         repo: Repository identifier (owner/repo or just repo name).
-        path_prefix: Optional path prefix to filter.
+        path_prefix: Optional repo-relative path prefix to filter.
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder (distinct
+            from the repo-relative ``path_prefix`` above); enables on-demand
+            indexing when the index is missing/stale.
 
     Returns:
         Dict with hierarchical tree structure and _meta envelope.
@@ -36,7 +40,7 @@ def get_file_tree(
     if any(part == ".." for part in prefix_parts):
         return {"error": "path_prefix must not contain '..' components"}
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, index = ctx.owner, ctx.name, ctx.index
@@ -45,18 +49,28 @@ def get_file_tree(
     files = [f for f in index.source_files if f.startswith(path_prefix)]
 
     if not files:
-        return {
+        # Preserve on-demand/staleness/warning provenance on the empty-tree
+        # early return so a freshly-indexed build is never silently dropped
+        # (CLAUDE.md rule 8 -- no data-loss silences).
+        empty = {
             "repo": f"{owner}/{name}",
             "path_prefix": path_prefix,
             "tree": [],
+            "_meta": {
+                **make_meta(source="index_list", trusted=False),
+                "timing_ms": elapsed_ms(start),
+                "file_count": 0,
+            },
         }
+        empty["_meta"].update(ctx.meta_fields())
+        return empty
 
     # Build tree structure
     tree = _build_tree(files, index, path_prefix)
 
     ms = elapsed_ms(start)
 
-    return {
+    result = {
         "repo": f"{owner}/{name}",
         "path_prefix": path_prefix,
         "tree": tree,
@@ -66,6 +80,8 @@ def get_file_tree(
             "file_count": len(files),
         },
     }
+    result["_meta"].update(ctx.meta_fields())
+    return result
 
 
 def _build_tree(files: list[str], index, path_prefix: str) -> list[dict]:
@@ -144,6 +160,14 @@ _spec = register(ToolSpec(
                 "description": "Optional path prefix to filter (e.g., 'src/utils')",
                 "default": "",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder (distinct "
+                    "from the repo-relative 'path_prefix'). When the index is "
+                    "missing or stale it is built on demand."
+                ),
+            },
         },
         "required": ["repo"],
     },
@@ -151,6 +175,7 @@ _spec = register(ToolSpec(
         repo=args["repo"],
         path_prefix=args.get("path_prefix", ""),
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     required_args=["repo"],
     untrusted=True,

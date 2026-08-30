@@ -248,19 +248,23 @@ class TestPrepareGraphQuery:
     """Tests for prepare_graph_query()."""
 
     def test_valid_repo_and_symbol(self, tmp_path):
-        """Valid repo + symbol returns 5-tuple."""
+        """Valid repo + symbol returns 6-tuple (last element is the RepoContext)."""
         _make_store_with_repo(tmp_path)
         result = prepare_graph_query(
             "acme/myproject", symbol_id="hello-py::hello",
             storage_path=str(tmp_path),
         )
         assert isinstance(result, tuple)
-        assert len(result) == 5
-        owner, name, index, graph, symbol_info = result
+        assert len(result) == 6
+        owner, name, index, graph, symbol_info, ctx = result
         assert owner == "acme"
         assert name == "myproject"
         assert symbol_info is not None
         assert symbol_info["name"] == "hello"
+        # The resolved context rides along so graph handlers can surface
+        # index provenance (freshly_indexed / stale / index_warnings).
+        assert isinstance(ctx, RepoContext)
+        assert ctx.meta_fields() == {}  # already-indexed fresh repo: no extra keys
 
     def test_missing_repo(self, tmp_path):
         """Missing repo returns error dict."""
@@ -290,5 +294,5 @@ class TestPrepareGraphQuery:
             storage_path=str(tmp_path),
         )
         assert isinstance(result, tuple)
-        _, _, _, _, symbol_info = result
+        _, _, _, _, symbol_info, _ctx = result
         assert symbol_info is None

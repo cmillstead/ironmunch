@@ -1,6 +1,6 @@
 # Architecture — codesight-mcp
 
-<!-- codesight:counts ops=34 langs=66 tests=2594 -->
+<!-- codesight:counts ops=34 langs=66 tests=2648 -->
 
 > Generated: 2026-03-09 | Scan Level: Exhaustive | Project Type: Python Library (MCP Server)
 
@@ -259,7 +259,7 @@ graph LR
 | Server/Registry | 109 (6%) | Dispatch, sanitization, tool registration, structured logging |
 | Integration | 67 (4%) | Full pipeline: index → query → verify |
 | Stress/Fuzz/Benchmark | 33 (2%) | Load testing, fuzzing, performance benchmarks |
-| **Total** | **2,594** | |
+| **Total** | **2,648** | |
 
 Testing philosophy: security tests use real filesystems with no mocking, adversarial tests attempt to break security boundaries.
 

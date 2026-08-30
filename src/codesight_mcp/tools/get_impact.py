@@ -14,6 +14,7 @@ def get_impact(
     symbol_id: str,
     max_depth: int = 3,
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Transitive impact analysis for a symbol.
 
@@ -25,16 +26,18 @@ def get_impact(
         symbol_id: Symbol ID to analyze impact for.
         max_depth: Maximum traversal depth (default 3, max 10).
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder; enables
+            on-demand indexing when the index is missing/stale.
 
     Returns:
         Dict with impacted symbols/files and _meta envelope.
     """
     start = timed()
 
-    result = prepare_graph_query(repo, symbol_id, storage_path)
+    result = prepare_graph_query(repo, symbol_id, storage_path, path=repo_path)
     if isinstance(result, dict):
         return result
-    owner, name, index, graph, target = result
+    owner, name, index, graph, target, ctx = result
 
     # Clamp max_depth
     max_depth = min(max(max_depth, 1), 10)
@@ -149,7 +152,7 @@ def get_impact(
 
     ms = elapsed_ms(start)
 
-    return {
+    out = {
         "repo": f"{owner}/{name}",
         "symbol_id": wrap_untrusted_content(symbol_id),
         "symbol_name": wrap_untrusted_content(target_name),
@@ -164,6 +167,8 @@ def get_impact(
             "timing_ms": ms,
         },
     }
+    out["_meta"].update(ctx.meta_fields())
+    return out
 
 
 _spec = register(ToolSpec(
@@ -183,6 +188,13 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "Symbol ID to analyze impact for",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder. When the "
+                    "index is missing or stale it is built on demand."
+                ),
+            },
             "max_depth": {
                 "type": "integer",
                 "description": "Maximum traversal depth (default 3, max 10)",
@@ -196,6 +208,7 @@ _spec = register(ToolSpec(
         symbol_id=args["symbol_id"],
         max_depth=args.get("max_depth", 3),
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo", "symbol_id"],

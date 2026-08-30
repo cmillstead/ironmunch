@@ -13,38 +13,57 @@ def get_file_outline(
     repo: str,
     file_path: str,
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Get symbols in a file with hierarchical structure.
 
     Args:
         repo: Repository identifier (owner/repo or just repo name).
-        file_path: Path to file within repository.
+        file_path: Repo-relative path to file within repository.
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder (distinct
+            from the repo-relative ``file_path`` above); enables on-demand
+            indexing when the index is missing/stale.
 
     Returns:
         Dict with symbols outline and _meta envelope.
     """
     start = timed()
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, index = ctx.owner, ctx.name, ctx.index
 
     # --- security gate: validate file_path is tracked by the index ---
     if file_path not in index.source_files:
-        return {"error": "File not found in index"}
+        # Preserve on-demand/staleness/warning provenance even on the early
+        # error return, so a freshly-indexed build is never silently dropped
+        # (CLAUDE.md rule 8 -- no data-loss silences).
+        err = {
+            "error": "File not found in index",
+            "_meta": make_meta(source="code_index", trusted=False),
+        }
+        err["_meta"].update(ctx.meta_fields())
+        return err
 
     # Filter symbols to this file
     file_symbols = [s for s in index.symbols if s.get("file") == file_path]
 
     if not file_symbols:
-        return {
+        empty = {
             "repo": f"{owner}/{name}",
             "file": wrap_untrusted_content(file_path),
             "language": "",
             "symbols": [],
+            "_meta": {
+                **make_meta(source="code_index", trusted=False),
+                "timing_ms": elapsed_ms(start),
+                "symbol_count": 0,
+            },
         }
+        empty["_meta"].update(ctx.meta_fields())
+        return empty
 
     # Build symbol tree
     symbol_objects = [sym for s in file_symbols if (sym := _dict_to_symbol(s)) is not None]
@@ -58,7 +77,7 @@ def get_file_outline(
 
     ms = elapsed_ms(start)
 
-    return {
+    result = {
         "repo": f"{owner}/{name}",
         "file": wrap_untrusted_content(file_path),
         "language": language,
@@ -69,6 +88,8 @@ def get_file_outline(
             "symbol_count": len(symbols_output),
         },
     }
+    result["_meta"].update(ctx.meta_fields())
+    return result
 
 
 def _dict_to_symbol(d: dict) -> Symbol | None:
@@ -138,6 +159,14 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "Path to the file within the repository (e.g., 'src/main.py')",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder (distinct "
+                    "from the repo-relative 'file_path'). When the index is "
+                    "missing or stale it is built on demand."
+                ),
+            },
         },
         "required": ["repo", "file_path"],
     },
@@ -145,6 +174,7 @@ _spec = register(ToolSpec(
         repo=args["repo"],
         file_path=args["file_path"],
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo", "file_path"],

@@ -47,6 +47,15 @@ def test_contract_classifies_path_parameters():
     pattern_prop = ops["search-text"]["params"]["properties"]["file_pattern"]
     assert pattern_prop["path_class"] == "glob"
 
+    # The index-on-demand working-folder key is a real host path on every
+    # repo-scoped read op it was threaded through -- and stays distinct from a
+    # co-existing repo-relative path filter on the same op.
+    for op_name in ("search-text", "get-callers", "analyze-complexity"):
+        ondemand = ops[op_name]["params"]["properties"]["repo_path"]
+        assert ondemand["path_class"] == "host_path", op_name
+    analyze_path = ops["analyze-complexity"]["params"]["properties"]["path"]
+    assert analyze_path["path_class"] == "repo_relative_path"
+
     # Non-path params (e.g. a plain repo identifier) classify as None.
     repo_prop = ops["get-changes"]["params"]["properties"]["repo"]
     assert repo_prop["path_class"] is None
