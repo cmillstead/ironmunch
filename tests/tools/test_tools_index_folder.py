@@ -4,8 +4,11 @@ import re
 
 import pytest
 
+import hashlib
+from pathlib import Path
+
 from codesight_mcp.storage.index_store import IndexStore
-from codesight_mcp.tools.index_folder import index_folder
+from codesight_mcp.tools.index_folder import folder_repo_identity, index_folder
 from codesight_mcp.tools.registry import load_all_specs
 
 _UNTRUSTED_MARKER_PREFIX = "<<<UNTRUSTED_CODE_"
@@ -85,6 +88,71 @@ def test_non_parseable_file_type_still_succeeds_if_py_present(tmp_path):
 
 def _py_file_content():
     return "def hello():\n    \"\"\"Say hello.\"\"\"\n    return 'hello'\n"
+
+
+class TestFolderRepoIdentity:
+    """Task 1: folder_repo_identity is the single source of truth for the
+    local ``(owner, name)`` scheme extracted from index_folder."""
+
+    def test_owner_is_local(self, tmp_path):
+        owner, _name = folder_repo_identity(str(tmp_path))
+        # owner=="local" is the fixed identity scheme. Changing this requires a spec change.
+        assert owner == "local"
+
+    def test_name_matches_documented_scheme(self, tmp_path):
+        """The name is ``<basename>-<sha256(resolved)[:12]>`` (index_folder.py scheme)."""
+        resolved = Path(str(tmp_path)).expanduser().resolve()
+        expected_hash = hashlib.sha256(str(resolved).encode()).hexdigest()[:12]
+        _owner, name = folder_repo_identity(str(tmp_path))
+        assert name == f"{resolved.name}-{expected_hash}"
+
+    def test_deterministic_same_path_same_key(self, tmp_path):
+        """The same path always yields the same identity."""
+        first = folder_repo_identity(str(tmp_path))
+        second = folder_repo_identity(str(tmp_path))
+        assert first == second
+
+    def test_distinct_paths_distinct_keys(self, tmp_path):
+        """Two different paths yield different names."""
+        dir_a = tmp_path / "alpha"
+        dir_a.mkdir()
+        dir_b = tmp_path / "beta"
+        dir_b.mkdir()
+        _owner_a, name_a = folder_repo_identity(str(dir_a))
+        _owner_b, name_b = folder_repo_identity(str(dir_b))
+        assert name_a != name_b
+
+    def test_same_basename_different_path_distinct_keys(self, tmp_path):
+        """Same basename at different paths gets distinct keys via the path hash."""
+        dir_a = tmp_path / "one" / "myapp"
+        dir_a.mkdir(parents=True)
+        dir_b = tmp_path / "two" / "myapp"
+        dir_b.mkdir(parents=True)
+        _owner_a, name_a = folder_repo_identity(str(dir_a))
+        _owner_b, name_b = folder_repo_identity(str(dir_b))
+        # Same basename prefix, different hash suffix.
+        assert name_a.startswith("myapp-")
+        assert name_b.startswith("myapp-")
+        assert name_a != name_b
+
+    def test_index_folder_writes_the_helper_key(self, tmp_path):
+        """index_folder persists the index under exactly folder_repo_identity(path)."""
+        (tmp_path / "main.py").write_text(_py_file_content())
+        result = index_folder(
+            path=str(tmp_path),
+            use_ai_summaries=False,
+            storage_path=str(tmp_path / "_storage"),
+            allowed_roots=[str(tmp_path)],
+        )
+        assert result.get("success") is True, f"indexing failed: {result}"
+
+        expected_owner, expected_name = folder_repo_identity(str(tmp_path))
+        written_owner, written_name = _unwrap_repo(result["repo"]).split("/", 1)
+        assert (written_owner, written_name) == (expected_owner, expected_name)
+
+        # And the index is loadable under that exact key.
+        store = IndexStore(base_path=str(tmp_path / "_storage"))
+        assert store.load_index(expected_owner, expected_name) is not None
 
 
 class TestStorageKeyCollision:

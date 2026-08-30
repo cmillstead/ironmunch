@@ -30,6 +30,19 @@ from mcp.types import ToolAnnotations  # noqa: E402
 from ._indexing_common import parse_source_files, finalize_index  # noqa: E402
 
 
+def folder_repo_identity(path: str) -> tuple[str, str]:
+    """Deterministic ``(owner, name)`` for a local folder path.
+
+    Single source of truth for the local index identity scheme. The name is
+    ``<basename>-<sha256(resolved_path)[:12]>`` so that two directories with
+    the same basename (e.g. ``/projects/myapp`` and ``/tmp/myapp``) never
+    collide in storage (ADV-HIGH-2). ``owner`` is always ``"local"``.
+    """
+    resolved = Path(path).expanduser().resolve()
+    path_hash = hashlib.sha256(str(resolved).encode()).hexdigest()[:12]
+    return "local", f"{resolved.name}-{path_hash}"
+
+
 def _is_git_repo(folder_path: Path) -> bool:
     """Check if folder_path is inside a git working tree.
 
@@ -172,13 +185,10 @@ def index_folder(
             return {"success": False, "error": "No source files found"}
 
         # Create repo identifier from folder path early — needed for diff-aware check.
-        # ADV-HIGH-2: use a short SHA-256 hash of the full resolved path so that
+        # ADV-HIGH-2: folder_repo_identity hashes the full resolved path so that
         # two directories with the same basename (e.g. /projects/myapp and
-        # /tmp/myapp) never collide in storage.
-        resolved = folder_path.resolve()
-        path_hash = hashlib.sha256(str(resolved).encode()).hexdigest()[:12]
-        repo_name = f"{resolved.name}-{path_hash}"
-        owner = "local"
+        # /tmp/myapp) never collide in storage. Single source of truth.
+        owner, repo_name = folder_repo_identity(path)
 
         # --- security gate: validate generated identifiers ---
         try:
