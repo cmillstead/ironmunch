@@ -217,6 +217,24 @@ class RepoContext:
             index_warnings=list(idx.get("warnings") or []),
         )
 
+    def meta_fields(self) -> dict:
+        """Index-provenance fields to merge into a handler's result ``_meta``.
+
+        Empty when the served index was already present and fresh, so the
+        common happy path adds no keys and output stays byte-stable for
+        already-indexed repos. Surfaces on-demand indexing provenance and any
+        truncation/parse warnings so caps are never dropped silently
+        (CLAUDE.md rule 8 -- no data-loss silences).
+        """
+        fields: dict = {}
+        if self.freshly_indexed:
+            fields["freshly_indexed"] = True
+        if self.stale:
+            fields["stale"] = True
+        if self.index_warnings:
+            fields["index_warnings"] = list(self.index_warnings)
+        return fields
+
 
 def timed() -> float:
     """Return a perf_counter timestamp for timing calculations."""
@@ -360,6 +378,8 @@ def prepare_graph_query(
     repo: str,
     symbol_id: Optional[str] = None,
     storage_path: Optional[str] = None,
+    *,
+    path: Optional[str] = None,
 ) -> Union[tuple, dict]:
     """Shared setup for graph-based tool handlers.
 
@@ -374,16 +394,22 @@ def prepare_graph_query(
         symbol_id: Symbol ID to look up.  Pass ``None`` to skip
             the symbol-existence check (e.g. for file-based queries).
         storage_path: Custom storage path forwarded to IndexStore.
+        path: Optional host filesystem path of the repo working folder.
+            Forwarded to :meth:`RepoContext.resolve` so a missing/stale
+            index can be built on demand through the validated pipeline.
 
     Returns:
-        On success a 5-tuple ``(owner, name, index, graph, symbol_info)``
-        where *symbol_info* is the symbol dict when *symbol_id* was
-        provided, or ``None`` otherwise.
+        On success a 6-tuple ``(owner, name, index, graph, symbol_info,
+        ctx)`` where *symbol_info* is the symbol dict when *symbol_id* was
+        provided, or ``None`` otherwise, and *ctx* is the resolved
+        :class:`RepoContext` (carries ``freshly_indexed``/``stale``/
+        ``index_warnings`` for the caller's ``_meta`` via
+        :meth:`RepoContext.meta_fields`).
 
         On failure a plain ``dict`` with an ``"error"`` key that the
         caller should return directly.
     """
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=path)
     if isinstance(ctx, dict):
         return ctx
 
@@ -402,4 +428,4 @@ def prepare_graph_query(
     except (ValueError, TypeError, KeyError):
         return {"error": "Failed to build code graph"}
 
-    return (owner, name, index, graph, symbol_info)
+    return (owner, name, index, graph, symbol_info, ctx)

@@ -29,9 +29,10 @@ def _search_text_single_repo(
     max_results: int,
     storage_path: Optional[str],
     repo_label: bool = False,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Search text in a single repo. Returns result dict or error dict."""
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, store, index = ctx.owner, ctx.name, ctx.store, ctx.index
@@ -82,6 +83,7 @@ def _search_text_single_repo(
         "repo": f"{owner}/{name}",
         "results": matches,
         "files_searched": files_searched,
+        "_ctx_meta": ctx.meta_fields(),
     }
 
 
@@ -92,6 +94,7 @@ def search_text(
     max_results: int = 20,
     repos: Optional[list[str]] = None,
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Search for text across all indexed files in one or more repositories.
 
@@ -106,6 +109,9 @@ def search_text(
         repos: Optional list of repo identifiers to search across (max 5).
                Mutually exclusive with repo.
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder. Enables
+            on-demand indexing when the index is missing/stale. Applies only in
+            single-repo mode (ignored when ``repos`` is used).
 
     Returns:
         Dict with matching lines grouped by file, plus _meta envelope.
@@ -150,6 +156,7 @@ def search_text(
     total_files_searched = 0
     errors = []
     repos_searched = []
+    single_ctx_meta: dict = {}
 
     for r in repo_list:
         remaining = max_results - len(all_matches)
@@ -158,6 +165,7 @@ def search_text(
         result = _search_text_single_repo(
             r, query, query_lower, file_pattern, remaining, storage_path,
             repo_label=is_multi,
+            repo_path=repo_path if not is_multi else None,
         )
         if "error" in result:
             errors.append({"repo": r, "error": result["error"]})
@@ -165,6 +173,8 @@ def search_text(
         repos_searched.append(result["repo"])
         all_matches.extend(result["results"])
         total_files_searched += result["files_searched"]
+        if not is_multi:
+            single_ctx_meta = result.get("_ctx_meta", {})
 
     ms = elapsed_ms(start)
 
@@ -179,6 +189,7 @@ def search_text(
             "truncated": len(all_matches) >= max_results,
         },
     }
+    response["_meta"].update(single_ctx_meta)
 
     if is_multi:
         response["repos"] = repos_searched
@@ -222,6 +233,14 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "Optional glob pattern to filter files (e.g., '*.py')",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder. When the "
+                    "index is missing or stale it is built on demand "
+                    "(single-repo mode only)."
+                ),
+            },
             "max_results": {
                 "type": "integer",
                 "description": "Maximum number of matching lines to return",
@@ -237,6 +256,7 @@ _spec = register(ToolSpec(
         max_results=args.get("max_results", 20),
         repos=args.get("repos"),
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["query"],

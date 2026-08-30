@@ -101,6 +101,7 @@ def get_dead_code(
     include_tests: bool = False,
     limit: int = 100,
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Find symbols with zero callers (potentially dead code).
 
@@ -110,6 +111,9 @@ def get_dead_code(
         include_tests: If True, include symbols from test files (default False).
         limit: Maximum results to return (1-100, default 100).
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder. When the
+            index is missing/stale it is built on demand via the validated
+            pipeline (see RepoContext.resolve).
 
     Returns:
         Dict with list of potentially dead symbols and _meta envelope.
@@ -118,7 +122,7 @@ def get_dead_code(
 
     limit = max(1, min(limit, _MAX_DEAD_CODE))
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, index = ctx.owner, ctx.name, ctx.index
@@ -163,7 +167,7 @@ def get_dead_code(
 
     ms = elapsed_ms(start)
 
-    return {
+    result = {
         "repo": f"{owner}/{name}",
         "dead_count": len(dead),
         "symbols": dead,
@@ -173,6 +177,8 @@ def get_dead_code(
             "timing_ms": ms,
         },
     }
+    result["_meta"].update(ctx.meta_fields())
+    return result
 
 
 _spec = register(ToolSpec(
@@ -191,6 +197,13 @@ _spec = register(ToolSpec(
             "language": {
                 "type": "string",
                 "description": "Filter by language (e.g. 'python', 'javascript')",
+            },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder. When the "
+                    "index is missing or stale it is built on demand."
+                ),
             },
             "include_tests": {
                 "type": "boolean",
@@ -213,6 +226,7 @@ _spec = register(ToolSpec(
         include_tests=args.get("include_tests", False),
         limit=args.get("limit", 100),
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo"],

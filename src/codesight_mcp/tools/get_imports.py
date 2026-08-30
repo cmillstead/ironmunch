@@ -17,14 +17,18 @@ def get_imports(
     file: str,
     direction: str = "imports",
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Get import relationships for a file.
 
     Args:
         repo: Repository identifier (owner/repo or just repo name).
-        file: Path to file within the repository.
+        file: Repo-relative path to file within the repository.
         direction: "imports" (what this file imports) or "importers" (what imports this file).
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder (distinct
+            from the repo-relative ``file`` above); enables on-demand indexing
+            when the index is missing/stale.
 
     Returns:
         Dict with import list and _meta envelope.
@@ -39,10 +43,10 @@ def get_imports(
         }
 
     # Use shared helper (no symbol_id needed for file-based queries)
-    result = prepare_graph_query(repo, symbol_id=None, storage_path=storage_path)
+    result = prepare_graph_query(repo, symbol_id=None, storage_path=storage_path, path=repo_path)
     if isinstance(result, dict):
         return result
-    owner, name, index, graph, _ = result
+    owner, name, index, graph, _, ctx = result
 
     # --- security gate: validate file is tracked by the index ---
     if file not in index.source_files:
@@ -95,7 +99,7 @@ def get_imports(
 
     ms = elapsed_ms(start)
 
-    return {
+    out = {
         "repo": f"{owner}/{name}",
         "file": wrap_untrusted_content(file),
         "direction": direction,
@@ -106,6 +110,8 @@ def get_imports(
             "timing_ms": ms,
         },
     }
+    out["_meta"].update(ctx.meta_fields())
+    return out
 
 
 _spec = register(ToolSpec(
@@ -125,6 +131,14 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "Path to file within the repository",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder (distinct "
+                    "from the repo-relative 'file'). When the index is missing "
+                    "or stale it is built on demand."
+                ),
+            },
             "direction": {
                 "type": "string",
                 "description": "Direction of import lookup",
@@ -139,6 +153,7 @@ _spec = register(ToolSpec(
         file=args["file"],
         direction=args.get("direction", "imports"),
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo", "file"],

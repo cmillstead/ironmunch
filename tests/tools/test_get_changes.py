@@ -299,13 +299,25 @@ class TestGetChangesIntegration:
     """Integration tests for get_changes handler."""
 
     def test_repo_not_found_returns_error(self, tmp_path):
+        # Unindexed repo whose working folder cannot be indexed on demand
+        # (empty dir -> no source files) must fall back to a graceful error and
+        # persist nothing -- the "no valid path -> error" intent, preserved now
+        # that get_changes threads repo_path into on-demand resolution.
+        from codesight_mcp.tools._common import _clear_shared_stores
+
+        _clear_shared_stores()
+        work = tmp_path / "work"
+        work.mkdir()  # empty: no source files -> on-demand indexing fails safe
+        storage = tmp_path / "storage"
         result = get_changes(
             repo="local/nonexistent",
-            repo_path=str(tmp_path),
-            storage_path=str(tmp_path),
+            repo_path=str(work),
+            storage_path=str(storage),
         )
         assert "error" in result
-        assert "not indexed" in result["error"].lower() or "not found" in result["error"].lower()
+        # Fail-safe: nothing was indexed/persisted for the unresolved repo.
+        assert IndexStore(base_path=str(storage)).list_repos() == []
+        _clear_shared_stores()
 
     def test_invalid_git_ref_returns_error(self, tmp_path):
         result = get_changes(

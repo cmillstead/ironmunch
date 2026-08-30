@@ -295,11 +295,17 @@ def trace_taint(
     """
     start = timed()
 
-    # Resolve repo and build graph (no specific symbol needed)
-    result = prepare_graph_query(repo, symbol_id=None, storage_path=storage_path)
+    # Resolve repo and build graph (no specific symbol needed).
+    # trace_taint already carries ``repo_path`` -- the host working folder used
+    # for semgrep. That is exactly the folder to index on demand, so it maps
+    # onto prepare_graph_query's ``path`` kwarg (no separate key introduced).
+    # The reused index_folder pipeline enforces its own allowlist default-deny.
+    result = prepare_graph_query(
+        repo, symbol_id=None, storage_path=storage_path, path=repo_path,
+    )
     if isinstance(result, dict):
         return result
-    owner, name, index, graph, _sym_info = result
+    owner, name, index, graph, _sym_info, ctx = result
 
     # Get all symbol dicts
     sym_dicts = index.symbols
@@ -319,7 +325,7 @@ def trace_taint(
 
     ms = elapsed_ms(start)
 
-    return {
+    out = {
         "repo": f"{owner}/{name}",
         "taint_paths": core_result["taint_paths"],
         "summary": core_result["summary"],
@@ -331,6 +337,8 @@ def trace_taint(
             "timing_ms": ms,
         },
     }
+    out["_meta"].update(ctx.meta_fields())
+    return out
 
 
 # ---------------------------------------------------------------------------

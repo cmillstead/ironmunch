@@ -22,6 +22,10 @@
             "path_class": null,
             "type": "string"
           },
+          "repo_path": {
+            "path_class": "host_path",
+            "type": "string"
+          },
           "sort_by": {
             "default": "risk",
             "enum": [
@@ -149,6 +153,10 @@
             "path_class": null,
             "type": "string"
           },
+          "repo_path": {
+            "path_class": "host_path",
+            "type": "string"
+          },
           "to_symbol": {
             "path_class": null,
             "type": "string"
@@ -184,6 +192,10 @@
             "path_class": null,
             "type": "string"
           },
+          "repo_path": {
+            "path_class": "host_path",
+            "type": "string"
+          },
           "symbol_id": {
             "path_class": null,
             "type": "string"
@@ -215,6 +227,10 @@
           },
           "repo": {
             "path_class": null,
+            "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
             "type": "string"
           },
           "symbol_id": {
@@ -296,6 +312,10 @@
           "repo": {
             "path_class": null,
             "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
+            "type": "string"
           }
         },
         "required": [
@@ -317,6 +337,10 @@
         "properties": {
           "repo": {
             "path_class": null,
+            "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
             "type": "string"
           }
         },
@@ -357,6 +381,10 @@
           },
           "repo": {
             "path_class": null,
+            "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
             "type": "string"
           },
           "symbol_id": {
@@ -400,6 +428,10 @@
           "repo": {
             "path_class": null,
             "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
+            "type": "string"
           }
         },
         "required": [
@@ -429,6 +461,10 @@
           "repo": {
             "path_class": null,
             "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
+            "type": "string"
           }
         },
         "required": [
@@ -455,6 +491,10 @@
           },
           "repo": {
             "path_class": null,
+            "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
             "type": "string"
           },
           "symbol_id": {
@@ -496,6 +536,10 @@
           },
           "repo": {
             "path_class": null,
+            "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
             "type": "string"
           }
         },
@@ -541,6 +585,10 @@
           "repo": {
             "path_class": null,
             "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
+            "type": "string"
           }
         },
         "required": [
@@ -562,6 +610,10 @@
         "properties": {
           "repo": {
             "path_class": null,
+            "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
             "type": "string"
           }
         },
@@ -611,6 +663,10 @@
             "path_class": null,
             "type": "string"
           },
+          "repo_path": {
+            "path_class": "host_path",
+            "type": "string"
+          },
           "symbol_id": {
             "path_class": null,
             "type": "string"
@@ -647,6 +703,10 @@
             "path_class": null,
             "type": "string"
           },
+          "repo_path": {
+            "path_class": "host_path",
+            "type": "string"
+          },
           "symbol_id": {
             "path_class": null,
             "type": "string"
@@ -673,6 +733,10 @@
         "properties": {
           "repo": {
             "path_class": null,
+            "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
             "type": "string"
           },
           "symbol_ids": {
@@ -704,6 +768,10 @@
         "properties": {
           "repo": {
             "path_class": null,
+            "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
             "type": "string"
           },
           "symbol_id": {
@@ -847,6 +915,10 @@
           "repo": {
             "path_class": null,
             "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
+            "type": "string"
           }
         },
         "required": [
@@ -893,6 +965,10 @@
             "path_class": null,
             "type": "string"
           },
+          "repo_path": {
+            "path_class": "host_path",
+            "type": "string"
+          },
           "severity": {
             "path_class": null,
             "type": "string"
@@ -930,6 +1006,10 @@
           },
           "repo": {
             "path_class": null,
+            "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
             "type": "string"
           }
         },
@@ -1052,6 +1132,10 @@
             "path_class": null,
             "type": "string"
           },
+          "repo_path": {
+            "path_class": "host_path",
+            "type": "string"
+          },
           "repos": {
             "items": {
               "type": "string"
@@ -1110,6 +1194,10 @@
           },
           "repo": {
             "path_class": null,
+            "type": "string"
+          },
+          "repo_path": {
+            "path_class": "host_path",
             "type": "string"
           },
           "repos": {

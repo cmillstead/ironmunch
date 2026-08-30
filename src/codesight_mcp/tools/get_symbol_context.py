@@ -97,6 +97,7 @@ def get_symbol_context(
     symbol_id: str,
     include_graph: bool = False,
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Get a symbol plus its structural and optional relational neighborhood.
 
@@ -117,13 +118,15 @@ def get_symbol_context(
         symbol_id: Symbol ID from get_file_outline or search_symbols.
         include_graph: Include direct callers, callees, and type hierarchy.
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder; enables
+            on-demand indexing when the index is missing/stale.
 
     Returns:
         Dict with symbol, siblings, parent, optional graph, and _meta envelope.
     """
     start = timed()
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, store, index = ctx.owner, ctx.name, ctx.store, ctx.index
@@ -197,6 +200,7 @@ def get_symbol_context(
     if graph_section is not None:
         result["graph"] = graph_section
 
+    result["_meta"].update(ctx.meta_fields())
     return result
 
 
@@ -226,6 +230,13 @@ _spec = register(ToolSpec(
                 "description": "Include direct callers, callees, and type hierarchy from the code graph",
                 "default": False,
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder. When the "
+                    "index is missing or stale it is built on demand."
+                ),
+            },
         },
         "required": ["repo", "symbol_id"],
     },
@@ -234,6 +245,7 @@ _spec = register(ToolSpec(
         symbol_id=args["symbol_id"],
         include_graph=args.get("include_graph", False),
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo", "symbol_id"],

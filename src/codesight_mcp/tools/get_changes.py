@@ -189,8 +189,14 @@ def get_changes(
     except ValidationError as exc:
         return {"error": str(exc)}
 
-    # 2. Resolve repo context
-    ctx = RepoContext.resolve(repo, storage_path)
+    # 2. Resolve repo context.
+    #    get_changes already carries ``repo_path`` -- the host filesystem path
+    #    of the git repo working folder. That is exactly the folder to index on
+    #    demand, so it maps directly onto RepoContext.resolve's ``path`` kwarg
+    #    (no separate on-demand key is introduced). The reused index_folder
+    #    pipeline enforces its own allowlist default-deny, so passing repo_path
+    #    here before the allowed_roots check below cannot bypass any gate.
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
 
@@ -284,6 +290,7 @@ def get_changes(
     if include_impact:
         result["impact"] = impact_result or {"downstream_count": 0, "downstream": []}
 
+    result["_meta"].update(ctx.meta_fields())
     return result
 
 

@@ -29,9 +29,10 @@ def _search_single_repo(
     semantic_weight: float = 0.7,
     semantic_only: bool = False,
     provider=None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Search symbols in a single repo. Returns result dict."""
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, index = ctx.owner, ctx.name, ctx.index
@@ -203,6 +204,9 @@ def _search_single_repo(
         response["search_mode"] = "semantic_only"
     elif effective_semantic:
         response["search_mode"] = "hybrid"
+    # Carry on-demand/staleness/warning provenance for the caller to surface
+    # (merged into the top-level _meta only in single-repo mode).
+    response["_ctx_meta"] = ctx.meta_fields()
     return response
 
 
@@ -218,6 +222,7 @@ def search_symbols(
     semantic: bool = False,
     semantic_weight: float = 0.7,
     semantic_only: bool = False,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Search for symbols matching a query.
 
@@ -231,6 +236,10 @@ def search_symbols(
         repos: Optional list of repo identifiers to search across (max 5).
                Mutually exclusive with repo.
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder. Enables
+            on-demand indexing when the index is missing/stale. Applies only in
+            single-repo mode (ignored when ``repos`` is used, since one path
+            cannot identify multiple repos).
         semantic: Enable semantic (embedding-based) search.
         semantic_weight: Weight for semantic vs keyword scoring (0.0-1.0).
         semantic_only: Use only semantic scoring, skip keyword matching.
@@ -315,11 +324,15 @@ def search_symbols(
     truncated = False
     errors = []
     repos_searched = []
+    # On-demand only applies when a single repo+path pair is unambiguous.
+    single_repo_mode = len(repo_list) == 1
+    single_ctx_meta: dict = {}
 
     for r in repo_list:
         result = _search_single_repo(
             r, query, kind, file_pattern, language, max_results, storage_path,
             semantic=semantic, semantic_weight=semantic_weight, semantic_only=semantic_only, provider=provider,
+            repo_path=repo_path if single_repo_mode else None,
         )
         if "error" in result:
             errors.append({"repo": r, "error": result["error"]})
@@ -329,6 +342,8 @@ def search_symbols(
         total_symbols += result["total_symbols"]
         if result["all_results_count"] > max_results:
             truncated = True
+        if single_repo_mode:
+            single_ctx_meta = result.get("_ctx_meta", {})
 
     # Sort merged results by score descending, take top max_results
     all_scored.sort(key=lambda x: x["score"], reverse=True)
@@ -351,6 +366,7 @@ def search_symbols(
             "truncated": truncated,
         },
     }
+    response["_meta"].update(single_ctx_meta)
 
     if semantic or semantic_only:
         response["search_mode"] = "semantic_only" if semantic_only else "hybrid"
@@ -401,6 +417,14 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "Optional glob pattern to filter files (e.g., 'src/**/*.py')",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder. When the "
+                    "index is missing or stale it is built on demand "
+                    "(single-repo mode only)."
+                ),
+            },
             "language": {
                 "type": "string",
                 "description": "Optional filter by language",
@@ -446,6 +470,7 @@ _spec = register(ToolSpec(
         semantic=args.get("semantic", False),
         semantic_weight=args.get("semantic_weight", 0.7),
         semantic_only=args.get("semantic_only", False),
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["query"],

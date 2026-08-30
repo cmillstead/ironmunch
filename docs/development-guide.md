@@ -1,6 +1,6 @@
 # Development Guide — codesight-mcp
 
-<!-- codesight:counts ops=34 langs=66 tests=2627 -->
+<!-- codesight:counts ops=34 langs=66 tests=2631 -->
 
 > Generated: 2026-03-09 | Project Type: Python Library (MCP Server)
 
@@ -68,7 +68,7 @@ The server communicates via MCP protocol (stdio). It's typically configured in a
 # Install test dependencies
 uv sync --extra test
 
-# Run all tests (2,627 tests)
+# Run all tests (2,631 tests)
 uv run pytest --tb=short -q
 
 # Run specific test categories

@@ -13,20 +13,24 @@ def get_file_outline(
     repo: str,
     file_path: str,
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Get symbols in a file with hierarchical structure.
 
     Args:
         repo: Repository identifier (owner/repo or just repo name).
-        file_path: Path to file within repository.
+        file_path: Repo-relative path to file within repository.
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder (distinct
+            from the repo-relative ``file_path`` above); enables on-demand
+            indexing when the index is missing/stale.
 
     Returns:
         Dict with symbols outline and _meta envelope.
     """
     start = timed()
 
-    ctx = RepoContext.resolve(repo, storage_path)
+    ctx = RepoContext.resolve(repo, storage_path, path=repo_path)
     if isinstance(ctx, dict):
         return ctx
     owner, name, index = ctx.owner, ctx.name, ctx.index
@@ -58,7 +62,7 @@ def get_file_outline(
 
     ms = elapsed_ms(start)
 
-    return {
+    result = {
         "repo": f"{owner}/{name}",
         "file": wrap_untrusted_content(file_path),
         "language": language,
@@ -69,6 +73,8 @@ def get_file_outline(
             "symbol_count": len(symbols_output),
         },
     }
+    result["_meta"].update(ctx.meta_fields())
+    return result
 
 
 def _dict_to_symbol(d: dict) -> Symbol | None:
@@ -138,6 +144,14 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "Path to the file within the repository (e.g., 'src/main.py')",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder (distinct "
+                    "from the repo-relative 'file_path'). When the index is "
+                    "missing or stale it is built on demand."
+                ),
+            },
         },
         "required": ["repo", "file_path"],
     },
@@ -145,6 +159,7 @@ _spec = register(ToolSpec(
         repo=args["repo"],
         file_path=args["file_path"],
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo", "file_path"],

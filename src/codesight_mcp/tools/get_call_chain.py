@@ -14,6 +14,7 @@ def get_call_chain(
     to_symbol: str,
     max_depth: int = 10,
     storage_path: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> dict:
     """Find call paths between two symbols.
 
@@ -23,6 +24,8 @@ def get_call_chain(
         to_symbol: Target symbol ID.
         max_depth: Maximum path length to search (default 10, max 10).
         storage_path: Custom storage path.
+        repo_path: Host filesystem path of the repo working folder; enables
+            on-demand indexing when the index is missing/stale.
 
     Returns:
         Dict with list of paths and _meta envelope.
@@ -30,10 +33,10 @@ def get_call_chain(
     start = timed()
 
     # Validate from_symbol via the shared helper
-    result = prepare_graph_query(repo, from_symbol, storage_path)
+    result = prepare_graph_query(repo, from_symbol, storage_path, path=repo_path)
     if isinstance(result, dict):
         return result
-    owner, name, index, graph, from_sym = result
+    owner, name, index, graph, from_sym, ctx = result
 
     # Verify to_symbol exists
     to_sym = index.get_symbol(to_symbol)
@@ -74,7 +77,7 @@ def get_call_chain(
 
     ms = elapsed_ms(start)
 
-    return {
+    out = {
         "repo": f"{owner}/{name}",
         "from_symbol": wrap_untrusted_content(from_symbol),
         "to_symbol": wrap_untrusted_content(to_symbol),
@@ -87,6 +90,8 @@ def get_call_chain(
             "timing_ms": ms,
         },
     }
+    out["_meta"].update(ctx.meta_fields())
+    return out
 
 
 _spec = register(ToolSpec(
@@ -110,6 +115,13 @@ _spec = register(ToolSpec(
                 "type": "string",
                 "description": "Target symbol ID",
             },
+            "repo_path": {
+                "type": "string",
+                "description": (
+                    "Host filesystem path of the repo working folder. When the "
+                    "index is missing or stale it is built on demand."
+                ),
+            },
             "max_depth": {
                 "type": "integer",
                 "description": "Maximum path length to search (default 10, max 10)",
@@ -124,6 +136,7 @@ _spec = register(ToolSpec(
         to_symbol=args["to_symbol"],
         max_depth=args.get("max_depth", 10),
         storage_path=storage_path,
+        repo_path=args.get("repo_path"),
     ),
     untrusted=True,
     required_args=["repo", "from_symbol", "to_symbol"],
