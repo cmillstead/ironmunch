@@ -144,6 +144,7 @@ def index_folder(
     extra_ignore_patterns: Optional[list[str]] = None,
     follow_symlinks: bool = False,
     allowed_roots: Optional[list[str]] = None,
+    resolved_path: Optional[Path] = None,
 ) -> dict:
     """Index a local folder containing source code.
 
@@ -157,12 +158,21 @@ def index_folder(
             (not provided), indexing is denied by default. The caller
             (server.py) is responsible for reading CODESIGHT_ALLOWED_ROOTS
             from the environment and splitting it before passing it here.
+        resolved_path: An ALREADY-CANONICALIZED folder path. When the caller
+            (on-demand indexing) has resolved *path* exactly once, it threads
+            that single canonical ``Path`` here so this function does NOT
+            resolve the raw input a second time -- closing the directory-swap
+            TOCTOU window where a retargeted top-level symlink could make the
+            guard approve one target and the indexer persist another (Finding
+            2). The allowlist check still runs against this path unchanged;
+            security stays monotonic.
 
     Returns:
         Dict with indexing results.
     """
-    # Resolve folder path
-    folder_path = Path(path).expanduser().resolve()
+    # Resolve folder path once. When the caller already resolved it (on-demand
+    # indexing), reuse that single canonical path instead of resolving again.
+    folder_path = resolved_path if resolved_path is not None else Path(path).expanduser().resolve()
 
     # Directory allowlist check — default-deny when unset
     if not allowed_roots:
@@ -417,6 +427,9 @@ def _handle_index_folder(args: dict, storage_path, *, _allowed_roots_fn=None):
         extra_ignore_patterns=args.get("extra_ignore_patterns"),
         follow_symlinks=args.get("follow_symlinks", False),
         allowed_roots=allowed,
+        # On-demand indexing threads the single canonical resolution here so the
+        # folder is not re-resolved (Finding 2). Absent on the public MCP path.
+        resolved_path=args.get("_resolved_path"),
     )
 
 

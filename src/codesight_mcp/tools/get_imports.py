@@ -3,7 +3,6 @@
 from typing import Optional
 
 from ..core.boundaries import make_meta, wrap_untrusted_content
-from ..core.validation import ValidationError
 from ._common import prepare_graph_query, timed, elapsed_ms
 from mcp.types import ToolAnnotations
 from .registry import ToolSpec, register
@@ -50,7 +49,12 @@ def get_imports(
 
     # --- security gate: validate file is tracked by the index ---
     if file not in index.source_files:
-        raise ValidationError("File not found in index")
+        # Post-resolution error: return (do not raise) so on-demand/staleness
+        # provenance survives -- a successful on-demand build whose requested
+        # file is absent must still surface _meta.freshly_indexed / stale /
+        # index_warnings, matching the round-1 pattern in get_symbol /
+        # get_symbol_context / prepare_graph_query (no silent data loss).
+        return {"error": "File not found in index", "_meta": ctx.error_meta()}
 
     if direction == "imports":
         # What does this file import?

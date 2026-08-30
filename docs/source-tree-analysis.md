@@ -1,6 +1,6 @@
 # Source Tree Analysis — codesight-mcp
 
-<!-- codesight:counts ops=34 langs=66 tests=2643 -->
+<!-- codesight:counts ops=34 langs=66 tests=2648 -->
 
 > Generated: 2026-03-09 | Scan Level: Exhaustive | Project Type: Python Library (MCP Server)
 
@@ -74,7 +74,7 @@ codesight-mcp/
 │       ├── get_key_symbols.py  # PageRank-based structural importance ranking
 │       ├── get_diagram.py      # Mermaid diagram generation (call_graph, hierarchy, imports, impact)
 │       └── get_dead_code.py    # Unused symbol detection (zero callers)
-├── tests/                      # Test suite (2,643 tests)
+├── tests/                      # Test suite (2,648 tests)
 │   ├── conftest.py             # Shared fixtures (tmp_index_store, python_index)
 │   ├── core/                   # Core infrastructure tests (85 tests)
 │   │   ├── test_core_boundaries.py

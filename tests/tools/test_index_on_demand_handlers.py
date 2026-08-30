@@ -16,6 +16,7 @@ does, via ``set_allowed_roots_fn``.
 
 import gzip
 import json
+import os
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -27,6 +28,7 @@ from codesight_mcp.tools._common import _clear_shared_stores
 from codesight_mcp.tools.get_callers import get_callers
 from codesight_mcp.tools.get_file_outline import get_file_outline
 from codesight_mcp.tools.get_file_tree import get_file_tree
+from codesight_mcp.tools.get_imports import get_imports
 from codesight_mcp.tools.index_folder import (
     folder_repo_identity,
     index_folder,
@@ -46,8 +48,16 @@ def _unwrap(value: str) -> str:
 
 @pytest.fixture(autouse=True)
 def _hygiene():
+    # On-demand indexing is opt-in (default OFF); enable it for these tests via
+    # real environment config (not a mock) and restore the prior value after.
     _clear_shared_stores()
+    _prev_autoindex = os.environ.get("CODESIGHT_AUTOINDEX")
+    os.environ["CODESIGHT_AUTOINDEX"] = "on"
     yield
+    if _prev_autoindex is None:
+        os.environ.pop("CODESIGHT_AUTOINDEX", None)
+    else:
+        os.environ["CODESIGHT_AUTOINDEX"] = _prev_autoindex
     set_allowed_roots_fn(None)
     _clear_shared_stores()
 
@@ -339,4 +349,32 @@ def test_get_file_tree_empty_prefix_keeps_provenance(tmp_path, allow):
 
     assert "error" not in result, f"get_file_tree errored: {result}"
     assert result["tree"] == []
+    assert result.get("_meta", {}).get("freshly_indexed") is True
+
+
+# ---------------------------------------------------------------------------
+# Finding 3 (get_imports provenance): an on-demand build that SUCCEEDS but whose
+# requested import file is absent must return an error DICT carrying
+# _meta.freshly_indexed -- previously get_imports raised, and the server
+# converted the exception to a plain error, dropping the provenance.
+# ---------------------------------------------------------------------------
+
+def test_get_imports_missing_file_returns_error_dict_with_provenance(tmp_path, allow):
+    repo_dir = _make_repo(tmp_path)
+    storage = tmp_path / "_storage"  # empty -> forces on-demand
+    allow(tmp_path)
+
+    # "missing.py" is not a tracked source file -> "File not found in index",
+    # but the index WAS freshly built on demand: that provenance must survive.
+    result = get_imports(
+        repo="myrepo",
+        file="missing.py",
+        storage_path=str(storage),
+        repo_path=str(repo_dir),
+    )
+
+    # Returned as a dict (not raised), and the provenance is preserved.
+    assert isinstance(result, dict)
+    assert "error" in result, f"expected file-not-found error, got: {result}"
+    assert "File not found in index" in result["error"]
     assert result.get("_meta", {}).get("freshly_indexed") is True

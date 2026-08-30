@@ -11,6 +11,7 @@ allowlist is injected exactly as server.py does, via ``set_allowed_roots_fn``.
 
 import gzip
 import json
+import os
 import re
 import subprocess
 from datetime import datetime, timedelta, timezone
@@ -47,9 +48,20 @@ def _py(func_name: str) -> str:
 @pytest.fixture(autouse=True)
 def _store_and_allowlist_hygiene():
     """Clear the shared store cache and reset the injected allowlist around
-    every test so a leaked in-memory index or allowlist can't mask a bug."""
+    every test so a leaked in-memory index or allowlist can't mask a bug.
+
+    On-demand indexing is a durable write and therefore opt-in (default OFF);
+    these tests exercise the enabled behavior, so the CODESIGHT_AUTOINDEX flag
+    is turned on for the duration of each test and restored to its prior value
+    in teardown (real environment config, not a mock)."""
     _clear_shared_stores()
+    _prev_autoindex = os.environ.get("CODESIGHT_AUTOINDEX")
+    os.environ["CODESIGHT_AUTOINDEX"] = "on"
     yield
+    if _prev_autoindex is None:
+        os.environ.pop("CODESIGHT_AUTOINDEX", None)
+    else:
+        os.environ["CODESIGHT_AUTOINDEX"] = _prev_autoindex
     set_allowed_roots_fn(None)
     _clear_shared_stores()
 
@@ -464,3 +476,60 @@ def test_never_indexed_git_repo_on_demand(tmp_path, allow):
     assert not isinstance(ctx, dict), f"expected served context, got: {ctx}"
     assert ctx.freshly_indexed is True
     assert "gitsym" in {s.get("name") for s in ctx.index.symbols}
+
+
+# ---------------------------------------------------------------------------
+# Finding 1 (read-only contract): CODESIGHT_AUTOINDEX gates the durable write.
+# Default is OFF; when OFF the read path performs NO write, so readOnlyHint
+# stays honest. These two tests set the flag OFF explicitly (the autouse
+# fixture turns it on, then restores the prior value in teardown).
+# ---------------------------------------------------------------------------
+
+def test_flag_off_missing_with_path_returns_error_and_writes_nothing(tmp_path, allow):
+    """Flag OFF + a missing repo + a valid repo_path -> the existing
+    "not indexed"/"not found" error and NOT a single index is written. The
+    read-only contract is preserved: no on-demand write happens."""
+    os.environ["CODESIGHT_AUTOINDEX"] = "off"
+    repo_dir = tmp_path / "myrepo"
+    repo_dir.mkdir()
+    (repo_dir / "foo.py").write_text(_py("bar"))
+    storage = tmp_path / "_storage"
+    allow(tmp_path)
+
+    result = RepoContext.resolve("myrepo", storage_path=str(storage), path=str(repo_dir))
+
+    assert isinstance(result, dict) and "error" in result
+    msg = result["error"].lower()
+    assert "not indexed" in msg or "not found" in msg
+    # No index was written anywhere on the read path (readOnlyHint honest).
+    assert IndexStore(base_path=str(storage)).list_repos() == []
+    owner, name = folder_repo_identity(str(repo_dir))
+    assert IndexStore(base_path=str(storage)).load_index(owner, name) is None
+
+
+def test_flag_off_stale_with_path_serves_stale_no_reindex(tmp_path, allow):
+    """Flag OFF + a stale index + a matching repo_path -> the stale index is
+    served (availability-monotonic, the pre-feature behavior) and NOT
+    reindexed: the stored ``indexed_at`` is untouched and the served context is
+    flagged stale, never freshly_indexed."""
+    os.environ["CODESIGHT_AUTOINDEX"] = "off"
+    repo_dir = tmp_path / "myrepo"
+    repo_dir.mkdir()
+    (repo_dir / "foo.py").write_text(_py("bar"))
+    storage = tmp_path / "_storage"
+    allow(tmp_path)
+
+    owner, name = _preindex(repo_dir, storage, [tmp_path])
+    # Backdate past the 7-day policy. Changing this requires a spec change.
+    _backdate(storage, owner, name, INDEX_AGE_THRESHOLD_DAYS + 1)
+    _clear_shared_stores()
+    stale_stamp = IndexStore(base_path=str(storage)).load_index(owner, name).indexed_at
+
+    ctx = RepoContext.resolve(f"{owner}/{name}", storage_path=str(storage), path=str(repo_dir))
+
+    assert not isinstance(ctx, dict), f"expected served stale context, got: {ctx}"
+    assert ctx.stale is True
+    assert ctx.freshly_indexed is False
+    # No reindex happened: the stored stamp is unchanged (still the stale one).
+    _clear_shared_stores()
+    assert IndexStore(base_path=str(storage)).load_index(owner, name).indexed_at == stale_stamp

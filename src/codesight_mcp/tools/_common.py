@@ -5,6 +5,7 @@ doesn't duplicate the logic.
 """
 
 import logging
+import os
 import re
 import threading
 import time
@@ -41,6 +42,27 @@ def _clear_shared_stores() -> None:
     """Clear the shared store cache (for testing only)."""
     with _store_lock:
         _store_instances.clear()
+
+
+# On-demand indexing turns a repo-scoped READ into a durable index WRITE, so it
+# is opt-in: the read tools advertise ``readOnlyHint=True`` and that contract
+# must stay honest by default. ``CODESIGHT_AUTOINDEX`` is the operator opt-in.
+# Accepted "on" spellings are generous; everything else (including "off", "0",
+# unknown values, and an unset var) fails safe to OFF (CLAUDE.md rule 4).
+_AUTOINDEX_ON_VALUES = frozenset({"1", "true", "on", "yes", "missing", "stale"})
+
+
+def _autoindex_enabled() -> bool:
+    """Whether on-demand indexing (a read-path write) is enabled.
+
+    Reads ``CODESIGHT_AUTOINDEX`` from the environment. Default and safe branch
+    is OFF: unset or any unrecognized value returns ``False`` so a read tool
+    never performs a durable write unless an operator opted in explicitly.
+    """
+    raw = os.environ.get("CODESIGHT_AUTOINDEX")
+    if raw is None:
+        return False
+    return raw.strip().lower() in _AUTOINDEX_ON_VALUES
 
 
 def parse_repo(
@@ -99,8 +121,8 @@ def parse_repo(
     return owner, name
 
 
-def _run_ondemand_index(path: str, storage_path: Optional[str] = None) -> dict:
-    """Fast synchronous reindex of *path* via the existing index_folder handler.
+def _run_ondemand_index(resolved: Path, storage_path: Optional[str] = None) -> dict:
+    """Fast synchronous reindex of the ALREADY-RESOLVED folder *resolved*.
 
     Routes through ``_handle_index_folder`` (lazy-imported to avoid the
     ``_common`` <-> ``index_folder`` import cycle) so the allowlist
@@ -108,17 +130,35 @@ def _run_ondemand_index(path: str, storage_path: Optional[str] = None) -> dict:
     exclusive file lock are reused unchanged -- security stays monotonic.
     ``use_ai_summaries=False`` keeps it fast and off the network by default.
 
+    *resolved* is the single canonical path resolved once by the caller; it is
+    threaded through so the indexer does NOT resolve the raw input a second
+    time -- closing the directory-swap TOCTOU window where a retargeted
+    top-level symlink could make the guard approve one target and the indexer
+    persist another (Finding 2). On success the result carries an ``identity``
+    tuple: the ``(owner, name)`` the pipeline committed to for this canonical
+    path, so the caller can verify it before trusting the build.
+
     Never raises; always returns the handler's result dict (or a sanitized
     failure dict) so a read op can never crash on an indexing error.
     """
     try:
-        from .index_folder import _handle_index_folder
-        return _handle_index_folder(
-            {"path": path, "use_ai_summaries": False},
+        from .index_folder import _handle_index_folder, _identity_from_resolved
+        result = _handle_index_folder(
+            {
+                "path": str(resolved),
+                "use_ai_summaries": False,
+                "_resolved_path": resolved,
+            },
             storage_path,
         )
+        if result.get("success"):
+            # The pipeline used the threaded canonical path (no re-resolve), so
+            # the identity it persisted under is _identity_from_resolved of the
+            # same path -- surface it for the caller's identity-match guard.
+            result["identity"] = _identity_from_resolved(resolved)
+        return result
     except Exception as exc:  # RC-011: outer boundary -- indexing must never crash a read
-        logger.debug("on-demand index failed for %s: %s", path, exc)
+        logger.debug("on-demand index failed for %s: %s", resolved, exc)
         return {"success": False, "error": sanitize_error(exc)}
 
 
@@ -140,11 +180,28 @@ class RepoContext:
     ) -> Union["RepoContext", dict]:
         """Parse repo, load index, return context or error dict.
 
-        When *path* is supplied and the resolved index is missing or stale
-        (age strictly exceeds ``INDEX_AGE_THRESHOLD_DAYS``), the folder is
-        indexed on demand through the existing validated pipeline
+        On-demand indexing is a durable WRITE on a read path, so it is OFF by
+        default and gated behind the ``CODESIGHT_AUTOINDEX`` operator opt-in
+        (:func:`_autoindex_enabled`). When the flag is off, *path* is ignored
+        entirely and this method behaves exactly as before the feature existed:
+        a missing index yields the "not indexed"/"not found" error and a stale
+        index is served stale -- no index is ever written on the read path, so
+        the repo-scoped tools' ``readOnlyHint=True`` stays honest (Finding 1).
+
+        When the flag is on AND *path* is supplied and the resolved index is
+        missing or stale (age strictly exceeds ``INDEX_AGE_THRESHOLD_DAYS``),
+        the folder is indexed on demand through the existing validated pipeline
         (:func:`_run_ondemand_index`) and the freshly-built index is served
         with ``freshly_indexed=True``.
+
+        The supplied path is canonicalized EXACTLY ONCE and that single
+        resolution drives every downstream decision -- the basename check, the
+        directory-swap guard identity, and the indexer itself (threaded through
+        so it does not re-resolve) -- so a concurrently-retargeted top-level
+        symlink cannot make the guard approve one target while another is
+        persisted (Finding 2). After indexing, the freshly-persisted identity
+        and stamp are verified against that single canonical resolution before
+        ``freshly_indexed`` is set; on any mismatch the build is distrusted.
 
         Fails safe to today's behavior on any doubt (CLAUDE.md rules 4 & 8):
 
@@ -177,32 +234,49 @@ class RepoContext:
         degrades to normal name resolution and the stale/error fallback
         (Finding 3; CLAUDE.md rules 4 & 8).
         """
-        from .index_folder import folder_repo_identity
+        from .index_folder import _identity_from_resolved
 
         store = _get_shared_store(storage_path)
 
-        # --- C28: decide whether the supplied path owns the identity. ---
-        # A bad path (e.g. embedded NUL) must not crash the read: treat it as
-        # non-authoritative and fall through to name resolution (Finding 3).
-        path_authoritative = False
-        if path and "/" not in repo:
+        # --- Finding 1: on-demand indexing is a durable WRITE, so it is opt-in.
+        # When CODESIGHT_AUTOINDEX is off (default) the supplied path is ignored
+        # entirely and the read path performs no write -- the exact pre-feature
+        # contract (missing -> error; stale -> serve stale). readOnlyHint stays
+        # honest because no branch below can reach _run_ondemand_index.
+        autoindex = _autoindex_enabled()
+        if not autoindex:
+            path = None
+
+        # --- Finding 2: canonicalize the supplied path EXACTLY ONCE. Every
+        # downstream identity/guard/indexer decision keys off this single
+        # `resolved` so a concurrently-retargeted top-level symlink cannot make
+        # the guard approve one target while the indexer persists another.
+        # A malformed path (e.g. embedded NUL) must not crash the read: treat it
+        # as unusable and fall through to name resolution (round-1 Finding 3).
+        resolved: Optional[Path] = None
+        if path:
             try:
-                if Path(path).expanduser().resolve().name == repo:
-                    path_authoritative = True
+                resolved = Path(path).expanduser().resolve()
             except (OSError, ValueError):
-                path_authoritative = False
+                resolved = None
+
+        # The canonical path-derived identity, computed once from `resolved`.
+        canonical_identity: Optional[tuple[str, str]] = (
+            _identity_from_resolved(resolved) if resolved is not None else None
+        )
+
+        # --- C28: decide whether the supplied path owns the identity. ---
+        path_authoritative = (
+            resolved is not None and "/" not in repo and resolved.name == repo
+        )
 
         owner = name = None
         index = None
         first_error: Optional[str] = None
 
-        if path_authoritative:
-            # The folder wins: identity is derived from the path itself.
-            try:
-                owner, name = folder_repo_identity(path)
-            except (OSError, ValueError) as exc:
-                path_authoritative = False
-                first_error = sanitize_error(exc)
+        if path_authoritative and canonical_identity is not None:
+            # The folder wins: identity is the path's own canonical identity.
+            owner, name = canonical_identity
 
         if owner is None:
             try:
@@ -226,24 +300,21 @@ class RepoContext:
         if index is not None and not stale:
             return cls(owner=owner, name=name, store=store, index=index)
 
-        # From here the index is missing or stale. On-demand indexing needs a
-        # usable path:
+        # From here the index is missing or stale. On-demand reindex needs a
+        # usable canonical path AND the autoindex opt-in:
         #   - path_authoritative: identity already derived from the path.
         #   - otherwise: the supplied folder MUST hash-match the resolved
-        #     identity, or serving its content under this known name would be
-        #     directory-swap index poisoning (security req 7). A malformed path
-        #     is treated as a non-match, never a crash (Finding 3).
+        #     identity (same single resolution), or serving its content under
+        #     this known name would be directory-swap index poisoning
+        #     (security req 7).
         can_reindex = False
-        if path:
+        if resolved is not None and autoindex:
             if path_authoritative:
                 can_reindex = True
             else:
-                try:
-                    can_reindex = folder_repo_identity(path) == (owner, name)
-                except (OSError, ValueError):
-                    can_reindex = False
+                can_reindex = canonical_identity == (owner, name)
 
-        # No usable path -> preserve today's behavior:
+        # No usable path / autoindex off -> preserve today's behavior:
         #   missing -> the existing "not indexed"/"not found" error
         #   stale   -> serve the stale index (availability-monotonic) + flag
         if not can_reindex:
@@ -251,8 +322,10 @@ class RepoContext:
                 return cls(owner=owner, name=name, store=store, index=index, stale=True)
             return {"error": first_error}
 
-        # Index on demand through the existing validated pipeline. Never raises.
-        idx = _run_ondemand_index(path, storage_path)
+        # Index on demand through the existing validated pipeline, threading the
+        # single canonical `resolved` path so the indexer does not re-resolve
+        # (Finding 2). Never raises.
+        idx = _run_ondemand_index(resolved, storage_path)
         if not idx.get("success"):
             # Fail-safe: serve a stale index if we had one, else the sanitized
             # index error, else the original error.
@@ -260,11 +333,24 @@ class RepoContext:
                 return cls(owner=owner, name=name, store=store, index=index, stale=True)
             return {"error": idx.get("error") or first_error}
 
-        # Reload under the authoritative identity (owner/name is the path's
-        # identity when path_authoritative, and the matched identity otherwise).
+        # Finding 2: before trusting the build, verify (a) the identity the
+        # pipeline committed to for this canonical path matches the single
+        # canonical identity we guarded on, and (b) the reload under that key is
+        # genuinely fresh -- not a stale leftover. Had a retargeted symlink
+        # caused the write to land under a different key, this reload would
+        # return the OLD stale index (or None); either way we must NOT mark it
+        # freshly indexed. On any mismatch, fail safe: serve stale if present,
+        # else error.
         fresh = store.load_index(owner, name)
-        if not fresh:
+        identity_ok = idx.get("identity") == canonical_identity == (owner, name)
+        reload_ok = fresh is not None and age_threshold_exceeded(
+            getattr(fresh, "indexed_at", None)
+        ) is False
+        if not (identity_ok and reload_ok):
+            if index is not None:
+                return cls(owner=owner, name=name, store=store, index=index, stale=True)
             return {"error": first_error}
+
         return cls(
             owner=owner,
             name=name,

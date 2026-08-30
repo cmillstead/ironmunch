@@ -579,7 +579,11 @@ class TestGetChangesIntegration:
     def test_ondemand_then_git_failure_keeps_provenance(self, tmp_path):
         """Finding 4: a git-diff failure that happens AFTER a successful
         on-demand index must still surface _meta.freshly_indexed (no silent
-        data loss). A 1-commit repo + HEAD~1..HEAD makes git diff fail."""
+        data loss). A 1-commit repo + HEAD~1..HEAD makes git diff fail.
+
+        On-demand indexing is opt-in (default OFF); enable it via real
+        environment config (not a mock) and restore the prior value after."""
+        import os
         import subprocess
 
         from codesight_mcp.tools._common import _clear_shared_stores
@@ -587,6 +591,8 @@ class TestGetChangesIntegration:
 
         _clear_shared_stores()
         set_allowed_roots_fn(lambda: [str(tmp_path)])
+        _prev_autoindex = os.environ.get("CODESIGHT_AUTOINDEX")
+        os.environ["CODESIGHT_AUTOINDEX"] = "on"
         try:
             repo_dir = tmp_path / "provrepo"
             repo_dir.mkdir()
@@ -610,6 +616,10 @@ class TestGetChangesIntegration:
             assert "error" in result, f"expected git-diff failure, got: {result}"
             assert result.get("_meta", {}).get("freshly_indexed") is True
         finally:
+            if _prev_autoindex is None:
+                os.environ.pop("CODESIGHT_AUTOINDEX", None)
+            else:
+                os.environ["CODESIGHT_AUTOINDEX"] = _prev_autoindex
             set_allowed_roots_fn(None)
             _clear_shared_stores()
 

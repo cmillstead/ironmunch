@@ -11,6 +11,7 @@ The allowlist is injected exactly as server.py does, via set_allowed_roots_fn.
 
 import gzip
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from threading import Thread
 
@@ -34,8 +35,17 @@ from codesight_mcp.tools.index_folder import (
 
 @pytest.fixture(autouse=True)
 def _hygiene():
+    # On-demand indexing is opt-in (default OFF); these tests prove the reused
+    # pipeline's guards still fire when the trigger is a read, so the flag is
+    # enabled via real environment config (not a mock) and restored afterward.
     _clear_shared_stores()
+    _prev_autoindex = os.environ.get("CODESIGHT_AUTOINDEX")
+    os.environ["CODESIGHT_AUTOINDEX"] = "on"
     yield
+    if _prev_autoindex is None:
+        os.environ.pop("CODESIGHT_AUTOINDEX", None)
+    else:
+        os.environ["CODESIGHT_AUTOINDEX"] = _prev_autoindex
     set_allowed_roots_fn(None)
     _clear_shared_stores()
 
@@ -322,6 +332,68 @@ def test_toplevel_symlink_identity_matches_resolved_target(tmp_path):
     assert "resolved_target_symbol" in {s.get("name") for s in idx.symbols}
     # Exactly one index was written (no split between link-name and target-name).
     assert len(_index_files(storage)) == 1, _index_files(storage)
+
+
+# ---------------------------------------------------------------------------
+# 10c. Finding 2: the ON-DEMAND read path (RepoContext.resolve) canonicalizes
+#      the supplied path exactly once, so the identity guarded, the identity
+#      indexed, and the identity reloaded are all derived from the SAME single
+#      resolution. Indexing a symlinked top-level dir on demand must persist and
+#      serve under the RESOLVED canonical target's identity, with
+#      freshly_indexed set only because the reload matches that identity.
+# ---------------------------------------------------------------------------
+
+def test_ondemand_symlink_single_resolution_identity(tmp_path):
+    real = tmp_path / "realtarget"
+    real.mkdir()
+    (real / "app.py").write_text("def resolved_only_symbol():\n    return 1\n")
+    link = tmp_path / "linkname"  # different basename than the resolved target
+    link.symlink_to(real, target_is_directory=True)
+    storage = tmp_path / "_storage"
+    set_allowed_roots_fn(lambda: [str(tmp_path)])
+
+    # The path-derived identity of the LINK and of the RESOLVED target are the
+    # same single resolution -- folder_repo_identity resolves before hashing.
+    resolved_identity = folder_repo_identity(str(real))
+    assert folder_repo_identity(str(link)) == resolved_identity
+
+    # Resolve on demand via the symlink path (owner/name == resolved identity).
+    owner, name = resolved_identity
+    ctx = RepoContext.resolve(f"{owner}/{name}", storage_path=str(storage), path=str(link))
+
+    assert not isinstance(ctx, dict), ctx
+    # freshly_indexed is set only because the reload under the canonical identity
+    # succeeded and is fresh (single-resolution invariant held).
+    assert ctx.freshly_indexed is True
+    assert (ctx.owner, ctx.name) == resolved_identity
+    assert "resolved_only_symbol" in _symbol_names(ctx)
+    # Persisted exactly once, under the resolved-target identity.
+    store = IndexStore(base_path=str(storage))
+    assert store.load_index(owner, name) is not None
+    assert len(_index_files(storage)) == 1, _index_files(storage)
+
+
+# ---------------------------------------------------------------------------
+# 14. Finding 1 (read-only contract, security angle): with CODESIGHT_AUTOINDEX
+#     OFF, the read path performs NO durable write even given a valid path under
+#     an allowed root -- the on-demand write is an explicit operator opt-in.
+# ---------------------------------------------------------------------------
+
+def test_flag_off_read_path_writes_nothing(tmp_path):
+    os.environ["CODESIGHT_AUTOINDEX"] = "off"
+    repo_dir = tmp_path / "myrepo"
+    repo_dir.mkdir()
+    (repo_dir / "foo.py").write_text("def bar():\n    return 1\n")
+    storage = tmp_path / "_storage"
+    set_allowed_roots_fn(lambda: [str(tmp_path)])  # a valid, trusted root
+
+    result = RepoContext.resolve("myrepo", storage_path=str(storage), path=str(repo_dir))
+
+    # Missing index + flag off -> the pre-feature error, and nothing written.
+    assert isinstance(result, dict) and "error" in result
+    owner, name = folder_repo_identity(str(repo_dir))
+    assert IndexStore(base_path=str(storage)).load_index(owner, name) is None
+    assert _index_files(storage) == []
 
 
 # ---------------------------------------------------------------------------
