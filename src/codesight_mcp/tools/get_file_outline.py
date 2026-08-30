@@ -37,18 +37,33 @@ def get_file_outline(
 
     # --- security gate: validate file_path is tracked by the index ---
     if file_path not in index.source_files:
-        return {"error": "File not found in index"}
+        # Preserve on-demand/staleness/warning provenance even on the early
+        # error return, so a freshly-indexed build is never silently dropped
+        # (CLAUDE.md rule 8 -- no data-loss silences).
+        err = {
+            "error": "File not found in index",
+            "_meta": make_meta(source="code_index", trusted=False),
+        }
+        err["_meta"].update(ctx.meta_fields())
+        return err
 
     # Filter symbols to this file
     file_symbols = [s for s in index.symbols if s.get("file") == file_path]
 
     if not file_symbols:
-        return {
+        empty = {
             "repo": f"{owner}/{name}",
             "file": wrap_untrusted_content(file_path),
             "language": "",
             "symbols": [],
+            "_meta": {
+                **make_meta(source="code_index", trusted=False),
+                "timing_ms": elapsed_ms(start),
+                "symbol_count": 0,
+            },
         }
+        empty["_meta"].update(ctx.meta_fields())
+        return empty
 
     # Build symbol tree
     symbol_objects = [sym for s in file_symbols if (sym := _dict_to_symbol(s)) is not None]

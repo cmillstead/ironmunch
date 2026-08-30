@@ -49,11 +49,21 @@ def get_file_tree(
     files = [f for f in index.source_files if f.startswith(path_prefix)]
 
     if not files:
-        return {
+        # Preserve on-demand/staleness/warning provenance on the empty-tree
+        # early return so a freshly-indexed build is never silently dropped
+        # (CLAUDE.md rule 8 -- no data-loss silences).
+        empty = {
             "repo": f"{owner}/{name}",
             "path_prefix": path_prefix,
             "tree": [],
+            "_meta": {
+                **make_meta(source="index_list", trusted=False),
+                "timing_ms": elapsed_ms(start),
+                "file_count": 0,
+            },
         }
+        empty["_meta"].update(ctx.meta_fields())
+        return empty
 
     # Build tree structure
     tree = _build_tree(files, index, path_prefix)

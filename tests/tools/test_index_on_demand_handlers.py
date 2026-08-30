@@ -14,18 +14,25 @@ Real temp dirs only (no mocks). The allowlist is injected exactly as server.py
 does, via ``set_allowed_roots_fn``.
 """
 
+import gzip
+import json
 import re
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from codesight_mcp.core.freshness import INDEX_AGE_THRESHOLD_DAYS
 from codesight_mcp.storage.index_store import IndexStore
 from codesight_mcp.tools._common import _clear_shared_stores
 from codesight_mcp.tools.get_callers import get_callers
+from codesight_mcp.tools.get_file_outline import get_file_outline
+from codesight_mcp.tools.get_file_tree import get_file_tree
 from codesight_mcp.tools.index_folder import (
     folder_repo_identity,
     index_folder,
     set_allowed_roots_fn,
 )
+from codesight_mcp.tools.search_symbols import search_symbols
 from codesight_mcp.tools.search_text import search_text
 
 _SPOTLIGHT_RE = re.compile(
@@ -164,3 +171,150 @@ def test_get_callers_without_repo_path_unchanged_error(tmp_path):
     assert "error" in result
     msg = result["error"].lower()
     assert "not indexed" in msg or "not found" in msg
+
+
+# ---------------------------------------------------------------------------
+# helpers for the staleness / warning / early-return tests below
+# ---------------------------------------------------------------------------
+
+def _preindex(folder, storage, roots):
+    """Index *folder* up front (not on demand) and return (owner, name)."""
+    result = index_folder(
+        path=str(folder),
+        use_ai_summaries=False,
+        storage_path=str(storage),
+        allowed_roots=[str(r) for r in roots],
+    )
+    assert result.get("success") is True, f"pre-index failed: {result}"
+    return folder_repo_identity(str(folder))
+
+
+def _backdate(storage, owner, name, days):
+    """Rewrite the stored index's ``indexed_at`` to *days* ago (on disk)."""
+    store = IndexStore(base_path=str(storage))
+    path = store._index_path(owner, name)
+    data = json.loads(gzip.decompress(path.read_bytes()))
+    old = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    data["indexed_at"] = old
+    path.write_bytes(gzip.compress(json.dumps(data).encode("utf-8")))
+    _clear_shared_stores()
+
+
+# ---------------------------------------------------------------------------
+# Finding 1: _meta.index_warnings surfaces in an op's OUTPUT (no silent data
+# loss, CLAUDE.md rule 8). A skipped secret file trips an index warning that
+# must reach the read op's _meta.
+# ---------------------------------------------------------------------------
+
+def test_search_text_surfaces_index_warnings_in_meta(tmp_path, allow):
+    repo_dir = _make_repo(tmp_path)
+    # A .env file is a secret file -> discovery skips it and emits a warning.
+    (repo_dir / ".env").write_text("SECRET=abc123\n")
+    storage = tmp_path / "_storage"
+    allow(tmp_path)
+
+    result = search_text(
+        repo="myrepo",
+        query="UNIQ_TOKEN",
+        storage_path=str(storage),
+        repo_path=str(repo_dir),
+    )
+
+    assert "error" not in result, f"search_text errored instead of indexing: {result}"
+    assert result["_meta"].get("freshly_indexed") is True
+    warnings = result["_meta"].get("index_warnings")
+    assert warnings, f"expected index_warnings in _meta, got: {result['_meta']}"
+    assert any("secret" in w.lower() for w in warnings), warnings
+
+
+# ---------------------------------------------------------------------------
+# Finding 2b: no-path + stale index -> handler serves the stale index and
+# surfaces _meta.stale=True (availability-monotonic; never errors on this
+# branch).
+# ---------------------------------------------------------------------------
+
+def test_search_text_no_path_stale_surfaces_stale_meta(tmp_path, allow):
+    repo_dir = _make_repo(tmp_path)
+    storage = tmp_path / "_storage"
+    allow(tmp_path)
+
+    owner, name = _preindex(repo_dir, storage, [tmp_path])
+    # Backdate past the 7-day policy. Changing this requires a spec change.
+    _backdate(storage, owner, name, INDEX_AGE_THRESHOLD_DAYS + 1)
+
+    # No repo_path -> cannot reindex; the stale index must still serve.
+    result = search_text(
+        repo=f"{owner}/{name}",
+        query="UNIQ_TOKEN",
+        storage_path=str(storage),
+    )
+
+    assert "error" not in result, f"stale no-path branch errored: {result}"
+    assert result["result_count"] >= 1, f"stale index not served: {result}"
+    assert result["_meta"].get("stale") is True
+    assert result["_meta"].get("freshly_indexed") is None
+
+
+# ---------------------------------------------------------------------------
+# Finding 3: search_symbols on-demand provenance travels through the bespoke
+# _ctx_meta intermediate into the top-level _meta (single-repo mode).
+# ---------------------------------------------------------------------------
+
+def test_search_symbols_surfaces_freshly_indexed_in_meta(tmp_path, allow):
+    repo_dir = _make_repo(tmp_path)
+    storage = tmp_path / "_storage"  # empty -> forces on-demand
+    allow(tmp_path)
+
+    result = search_symbols(
+        repo="myrepo",
+        query="callee",
+        storage_path=str(storage),
+        repo_path=str(repo_dir),
+    )
+
+    assert "error" not in result, f"search_symbols errored instead of indexing: {result}"
+    assert result["_meta"].get("freshly_indexed") is True
+
+
+# ---------------------------------------------------------------------------
+# Finding 4: early returns must not drop provenance flags. A freshly-indexed
+# repo whose target file/path yields no results STILL surfaces
+# _meta.freshly_indexed (no silent data loss).
+# ---------------------------------------------------------------------------
+
+def test_get_file_outline_missing_file_keeps_provenance(tmp_path, allow):
+    repo_dir = _make_repo(tmp_path)
+    storage = tmp_path / "_storage"  # empty -> forces on-demand
+    allow(tmp_path)
+
+    # "missing.py" is not a tracked source file -> "File not found in index"
+    # early return, but the index was still freshly built on demand.
+    result = get_file_outline(
+        repo="myrepo",
+        file_path="missing.py",
+        storage_path=str(storage),
+        repo_path=str(repo_dir),
+    )
+
+    assert "error" in result, f"expected file-not-found error, got: {result}"
+    assert "File not found in index" in result["error"]
+    assert result.get("_meta", {}).get("freshly_indexed") is True
+
+
+def test_get_file_tree_empty_prefix_keeps_provenance(tmp_path, allow):
+    repo_dir = _make_repo(tmp_path)
+    storage = tmp_path / "_storage"  # empty -> forces on-demand
+    allow(tmp_path)
+
+    # A prefix that matches no files -> empty-tree early return, but the index
+    # was still freshly built on demand.
+    result = get_file_tree(
+        repo="myrepo",
+        path_prefix="does_not_exist/",
+        storage_path=str(storage),
+        repo_path=str(repo_dir),
+    )
+
+    assert "error" not in result, f"get_file_tree errored: {result}"
+    assert result["tree"] == []
+    assert result.get("_meta", {}).get("freshly_indexed") is True

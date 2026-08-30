@@ -192,6 +192,28 @@ def test_missing_bare_name_no_path_returns_not_found(tmp_path):
     assert "not found" in result["error"].lower()
 
 
+def test_stale_no_path_serves_stale_context(tmp_path, allow):
+    """no-path + stale index -> serve the stale index (availability-monotonic),
+    never an error. ``stale`` is flagged; ``freshly_indexed`` stays False."""
+    repo_dir = tmp_path / "myrepo"
+    repo_dir.mkdir()
+    (repo_dir / "foo.py").write_text(_py("bar"))
+    storage = tmp_path / "_storage"
+    allow(tmp_path)
+
+    owner, name = _preindex(repo_dir, storage, [tmp_path])
+    # Backdate past the 7-day policy. Changing this requires a spec change.
+    _backdate(storage, owner, name, INDEX_AGE_THRESHOLD_DAYS + 1)
+
+    # No path supplied -> cannot reindex; the stale index must still serve.
+    ctx = RepoContext.resolve(f"{owner}/{name}", storage_path=str(storage))
+
+    assert not isinstance(ctx, dict), f"stale no-path branch errored: {ctx}"
+    assert ctx.stale is True
+    assert ctx.freshly_indexed is False
+    assert "bar" in {s.get("name") for s in ctx.index.symbols}
+
+
 # ---------------------------------------------------------------------------
 # (e) indexing fails -> fail-safe, nothing persisted or served
 # ---------------------------------------------------------------------------
