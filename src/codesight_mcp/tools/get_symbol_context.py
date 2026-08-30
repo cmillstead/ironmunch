@@ -131,16 +131,17 @@ def get_symbol_context(
         return ctx
     owner, name, store, index = ctx.owner, ctx.name, ctx.store, ctx.index
 
-    # Look up the target symbol
+    # Look up the target symbol. Post-resolution errors keep on-demand/
+    # staleness provenance (CLAUDE.md rule 8).
     symbol = index.get_symbol(symbol_id)
     if not symbol:
-        return {"error": f"Symbol not found: {symbol_id}"}
+        return {"error": f"Symbol not found: {symbol_id}", "_meta": ctx.error_meta()}
 
     # Retrieve source code for the target symbol
     try:
         source = store.get_symbol_content(owner, name, symbol_id, index=index)
     except (OSError, KeyError, ValueError) as exc:
-        return {"error": sanitize_error(exc)}
+        return {"error": sanitize_error(exc), "_meta": ctx.error_meta()}
 
     target_file = symbol.get("file", "")
     target_parent = symbol.get("parent")  # None for module-level symbols

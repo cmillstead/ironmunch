@@ -80,24 +80,26 @@ def get_symbol(
         return ctx
     owner, name, store, index = ctx.owner, ctx.name, ctx.store, ctx.index
 
-    # Resolve symbol_id from file:line when symbol_id is absent
+    # Resolve symbol_id from file:line when symbol_id is absent.
+    # Post-resolution errors keep on-demand/staleness provenance (CLAUDE.md
+    # rule 8): a fresh on-demand build must not be silently dropped.
     if not symbol_id and file_path is not None and line is not None:
         symbol = _find_symbol_at_line(index, file_path, line)
         if not symbol:
-            return {"error": f"No symbol found at {file_path}:{line}"}
+            return {"error": f"No symbol found at {file_path}:{line}", "_meta": ctx.error_meta()}
         symbol_id = symbol["id"]
     elif symbol_id:
         symbol = index.get_symbol(symbol_id)
         if not symbol:
-            return {"error": f"Symbol not found: {symbol_id}"}
+            return {"error": f"Symbol not found: {symbol_id}", "_meta": ctx.error_meta()}
     else:
-        return {"error": "Either symbol_id or both file_path and line are required"}
+        return {"error": "Either symbol_id or both file_path and line are required", "_meta": ctx.error_meta()}
 
     # Get source via byte-offset read
     try:
         source = store.get_symbol_content(owner, name, symbol_id, index=index)
     except (OSError, KeyError, ValueError) as exc:
-        return {"error": sanitize_error(exc)}
+        return {"error": sanitize_error(exc), "_meta": ctx.error_meta()}
 
     # --- security gate: clamp context_lines ---
     context_lines = min(max(context_lines, 0), MAX_CONTEXT_LINES)

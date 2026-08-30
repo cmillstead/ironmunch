@@ -301,6 +301,28 @@ def test_get_file_outline_missing_file_keeps_provenance(tmp_path, allow):
     assert result.get("_meta", {}).get("freshly_indexed") is True
 
 
+def test_get_callers_missing_symbol_keeps_provenance(tmp_path, allow):
+    """A graph op whose on-demand build SUCCEEDS but whose requested symbol is
+    absent still surfaces _meta.freshly_indexed (Finding 4: post-resolution
+    error returns from prepare_graph_query must not drop provenance)."""
+    repo_dir = _make_repo(tmp_path)
+    storage = tmp_path / "_storage"  # empty -> forces on-demand
+    allow(tmp_path)
+
+    result = get_callers(
+        repo="myrepo",
+        symbol_id="does-not-exist::nope",
+        storage_path=str(storage),
+        repo_path=str(repo_dir),
+    )
+
+    # The symbol is absent -> a "Symbol not found" error, but the index WAS
+    # freshly built on demand: that provenance must survive the early return.
+    assert "error" in result, f"expected symbol-not-found error, got: {result}"
+    assert "not found" in result["error"].lower()
+    assert result.get("_meta", {}).get("freshly_indexed") is True
+
+
 def test_get_file_tree_empty_prefix_keeps_provenance(tmp_path, allow):
     repo_dir = _make_repo(tmp_path)
     storage = tmp_path / "_storage"  # empty -> forces on-demand

@@ -363,7 +363,9 @@ def get_diagram(
         result = _render_impact(graph, symbol_id, index, max_depth, direction)
 
     if "error" in result:
-        return result
+        # Post-resolution renderer error (e.g. symbol-not-found): keep the
+        # on-demand/staleness provenance (CLAUDE.md rule 8).
+        return {**result, "_meta": ctx.error_meta()}
 
     ms = elapsed_ms(start)
 

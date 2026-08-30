@@ -9,10 +9,12 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional, Union
 
 from ..security import sanitize_repo_identifier
 from ..storage import CodeIndex, IndexStore
+from ..core.boundaries import make_meta
 from ..core.errors import sanitize_error, RepoNotFoundError
 from ..core.freshness import age_threshold_exceeded
 from ..core.validation import ValidationError
@@ -153,18 +155,65 @@ class RepoContext:
         - path + success but reload empty -> the original error
 
         An unparseable/future ``indexed_at`` is treated as stale (fail-closed).
+
+        Identity resolution follows the C28 dual-resolution policy -- each
+        question is routed to its own input so a supplied ``path`` can never
+        silently serve (or index) a repo the caller did not point at:
+
+        - ``path`` supplied AND ``repo`` is a bare name (no ``/``) AND the
+          resolved path's basename equals ``repo`` -> the PATH is authoritative
+          for the whole resolve (identity, load, stale-check, on-demand index,
+          serve). "The folder you point at" wins over a coincidentally
+          same-named existing index (Finding 1a).
+        - ``path`` supplied but its basename does NOT match a bare ``repo``
+          name (e.g. a front-door auto-injecting cwd for a different repo) ->
+          ``path`` is IGNORED for identity and the unrelated folder is never
+          indexed; ``repo`` resolves normally (Finding 1b, cwd-injection guard).
+        - ``repo`` is explicit ``owner/name`` -> ``path`` is ignored for
+          identity; on-demand reindex is still allowed, gated by the
+          directory-swap guard (the path must hash-match the resolved identity).
+
+        A malformed/unresolvable ``path`` never raises out of resolve: it
+        degrades to normal name resolution and the stale/error fallback
+        (Finding 3; CLAUDE.md rules 4 & 8).
         """
+        from .index_folder import folder_repo_identity
+
         store = _get_shared_store(storage_path)
+
+        # --- C28: decide whether the supplied path owns the identity. ---
+        # A bad path (e.g. embedded NUL) must not crash the read: treat it as
+        # non-authoritative and fall through to name resolution (Finding 3).
+        path_authoritative = False
+        if path and "/" not in repo:
+            try:
+                if Path(path).expanduser().resolve().name == repo:
+                    path_authoritative = True
+            except (OSError, ValueError):
+                path_authoritative = False
 
         owner = name = None
         index = None
-        try:
-            owner, name = parse_repo(repo, storage_path)
+        first_error: Optional[str] = None
+
+        if path_authoritative:
+            # The folder wins: identity is derived from the path itself.
+            try:
+                owner, name = folder_repo_identity(path)
+            except (OSError, ValueError) as exc:
+                path_authoritative = False
+                first_error = sanitize_error(exc)
+
+        if owner is None:
+            try:
+                owner, name = parse_repo(repo, storage_path)
+            except RepoNotFoundError as exc:
+                first_error = str(exc)
+
+        if owner is not None:
             index = store.load_index(owner, name)
-        except RepoNotFoundError as exc:
-            first_error = str(exc)
-        else:
-            first_error = f"Repository not indexed: {owner}/{name}"
+            if index is None and first_error is None:
+                first_error = f"Repository not indexed: {owner}/{name}"
 
         # Stale iff we HAVE an index whose age strictly exceeds the policy.
         # age_threshold_exceeded -> None (unparseable/future) is treated as
@@ -177,22 +226,30 @@ class RepoContext:
         if index is not None and not stale:
             return cls(owner=owner, name=name, store=store, index=index)
 
-        # No path -> cannot index on demand. Preserve today's behavior:
+        # From here the index is missing or stale. On-demand indexing needs a
+        # usable path:
+        #   - path_authoritative: identity already derived from the path.
+        #   - otherwise: the supplied folder MUST hash-match the resolved
+        #     identity, or serving its content under this known name would be
+        #     directory-swap index poisoning (security req 7). A malformed path
+        #     is treated as a non-match, never a crash (Finding 3).
+        can_reindex = False
+        if path:
+            if path_authoritative:
+                can_reindex = True
+            else:
+                try:
+                    can_reindex = folder_repo_identity(path) == (owner, name)
+                except (OSError, ValueError):
+                    can_reindex = False
+
+        # No usable path -> preserve today's behavior:
         #   missing -> the existing "not indexed"/"not found" error
         #   stale   -> serve the stale index (availability-monotonic) + flag
-        if not path:
+        if not can_reindex:
             if index is not None:
                 return cls(owner=owner, name=name, store=store, index=index, stale=True)
             return {"error": first_error}
-
-        # Path supplied. When we already resolved an index (necessarily stale
-        # here), the supplied path MUST hash-match it; otherwise the caller is
-        # pointing at a different directory and serving its content under this
-        # known name would be directory-swap index poisoning (security req 7).
-        # Refuse the reindex and serve the stale index instead.
-        from .index_folder import folder_repo_identity
-        if index is not None and folder_repo_identity(path) != (owner, name):
-            return cls(owner=owner, name=name, store=store, index=index, stale=True)
 
         # Index on demand through the existing validated pipeline. Never raises.
         idx = _run_ondemand_index(path, storage_path)
@@ -203,14 +260,14 @@ class RepoContext:
                 return cls(owner=owner, name=name, store=store, index=index, stale=True)
             return {"error": idx.get("error") or first_error}
 
-        # Reload using the PATH-derived identity (authoritative), then serve.
-        n_owner, n_name = folder_repo_identity(path)
-        fresh = store.load_index(n_owner, n_name)
+        # Reload under the authoritative identity (owner/name is the path's
+        # identity when path_authoritative, and the matched identity otherwise).
+        fresh = store.load_index(owner, name)
         if not fresh:
             return {"error": first_error}
         return cls(
-            owner=n_owner,
-            name=n_name,
+            owner=owner,
+            name=name,
             store=store,
             index=fresh,
             freshly_indexed=True,
@@ -234,6 +291,20 @@ class RepoContext:
         if self.index_warnings:
             fields["index_warnings"] = list(self.index_warnings)
         return fields
+
+    def error_meta(self) -> dict:
+        """A ``_meta`` envelope for a POST-resolution error return.
+
+        After a successful (possibly on-demand) resolve, an error that follows
+        -- symbol-not-found, "no symbol at line", graph-build failure -- must
+        still carry ``freshly_indexed``/``stale``/``index_warnings`` so a fresh
+        build (or truncation) is never silently dropped just because the
+        requested symbol turned out to be absent (CLAUDE.md rule 8). Matches
+        the QA-finding-4 pattern used by get_file_outline/get_file_tree.
+        """
+        meta = make_meta(source="code_index", trusted=False)
+        meta.update(self.meta_fields())
+        return meta
 
 
 def timed() -> float:
@@ -420,12 +491,13 @@ def prepare_graph_query(
     if symbol_id is not None:
         symbol_info = index.get_symbol(symbol_id)
         if not symbol_info:
-            return {"error": f"Symbol not found: {symbol_id}"}
+            # Post-resolution error: keep on-demand/staleness provenance.
+            return {"error": f"Symbol not found: {symbol_id}", "_meta": ctx.error_meta()}
 
     # Build graph from index
     try:
         graph = CodeGraph.get_or_build(index.symbols)
     except (ValueError, TypeError, KeyError):
-        return {"error": "Failed to build code graph"}
+        return {"error": "Failed to build code graph", "_meta": ctx.error_meta()}
 
     return (owner, name, index, graph, symbol_info, ctx)

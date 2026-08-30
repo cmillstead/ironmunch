@@ -1,6 +1,6 @@
 # codesight-mcp — Documentation Index
 
-<!-- codesight:counts ops=34 langs=66 tests=2637 -->
+<!-- codesight:counts ops=34 langs=66 tests=2642 -->
 
 > Generated: 2026-03-09 | Scan Level: Exhaustive
 
@@ -17,7 +17,7 @@
 - **Entry Point:** `codesight_mcp.server:main`
 - **Architecture Pattern:** Layered library — thin server dispatcher + 34 tool modules
 - **Tools:** 34 MCP tools (indexing, navigation, search, code graph, analysis, security, dependencies)
-- **Tests:** 2,637 tests (31% security/adversarial)
+- **Tests:** 2,642 tests (31% security/adversarial)
 - **Build:** hatchling + uv lockfile
 
 ## Generated Documentation

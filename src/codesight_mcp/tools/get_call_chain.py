@@ -41,7 +41,8 @@ def get_call_chain(
     # Verify to_symbol exists
     to_sym = index.get_symbol(to_symbol)
     if not to_sym:
-        return {"error": f"Symbol not found: {to_symbol}"}
+        # Post-resolution error: keep on-demand/staleness provenance.
+        return {"error": f"Symbol not found: {to_symbol}", "_meta": ctx.error_meta()}
 
     # Clamp max_depth
     max_depth = min(max(max_depth, 1), 10)

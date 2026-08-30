@@ -30,6 +30,19 @@ from mcp.types import ToolAnnotations  # noqa: E402
 from ._indexing_common import parse_source_files, finalize_index  # noqa: E402
 
 
+def _identity_from_resolved(resolved: Path) -> tuple[str, str]:
+    """Deterministic ``(owner, name)`` from an ALREADY-RESOLVED folder path.
+
+    Split out so a caller that already resolved (and allowlist-checked) the
+    folder can derive the identity from that same canonical path instead of
+    resolving the raw input a second time -- closing a directory-swap TOCTOU
+    window where a top-level symlink retargeted between the two resolves would
+    persist the old target's files under the new target's identity (Finding 2).
+    """
+    path_hash = hashlib.sha256(str(resolved).encode()).hexdigest()[:12]
+    return "local", f"{resolved.name}-{path_hash}"
+
+
 def folder_repo_identity(path: str) -> tuple[str, str]:
     """Deterministic ``(owner, name)`` for a local folder path.
 
@@ -37,10 +50,12 @@ def folder_repo_identity(path: str) -> tuple[str, str]:
     ``<basename>-<sha256(resolved_path)[:12]>`` so that two directories with
     the same basename (e.g. ``/projects/myapp`` and ``/tmp/myapp``) never
     collide in storage (ADV-HIGH-2). ``owner`` is always ``"local"``.
+
+    Resolves *path* fresh; callers that have already resolved the folder should
+    use :func:`_identity_from_resolved` to avoid a second (racy) resolve.
     """
     resolved = Path(path).expanduser().resolve()
-    path_hash = hashlib.sha256(str(resolved).encode()).hexdigest()[:12]
-    return "local", f"{resolved.name}-{path_hash}"
+    return _identity_from_resolved(resolved)
 
 
 def _is_git_repo(folder_path: Path) -> bool:
@@ -185,10 +200,13 @@ def index_folder(
             return {"success": False, "error": "No source files found"}
 
         # Create repo identifier from folder path early — needed for diff-aware check.
-        # ADV-HIGH-2: folder_repo_identity hashes the full resolved path so that
-        # two directories with the same basename (e.g. /projects/myapp and
-        # /tmp/myapp) never collide in storage. Single source of truth.
-        owner, repo_name = folder_repo_identity(path)
+        # ADV-HIGH-2: the identity hashes the full resolved path so that two
+        # directories with the same basename (e.g. /projects/myapp and
+        # /tmp/myapp) never collide in storage. Derive it from the ALREADY
+        # resolved+allowlist-checked folder_path (not by re-resolving the raw
+        # input) so a top-level symlink swap cannot make us persist the old
+        # target's files under the new target's identity (Finding 2 TOCTOU).
+        owner, repo_name = _identity_from_resolved(folder_path)
 
         # --- security gate: validate generated identifiers ---
         try:

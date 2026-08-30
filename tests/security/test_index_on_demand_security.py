@@ -289,6 +289,42 @@ def test_stale_directory_swap_poisoning_blocked(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# 10b. Top-level symlink: the persisted identity is derived from the RESOLVED
+#      canonical target, consistent with the files that were discovered/read
+#      (Finding 2 -- no read-target vs stored-identity mismatch; the identity is
+#      taken from the already-resolved folder_path, not a second raw resolve).
+# ---------------------------------------------------------------------------
+
+def test_toplevel_symlink_identity_matches_resolved_target(tmp_path):
+    real = tmp_path / "realtarget"
+    real.mkdir()
+    (real / "app.py").write_text("def resolved_target_symbol():\n    return 1\n")
+    link = tmp_path / "linkname"  # different basename than the target
+    link.symlink_to(real, target_is_directory=True)
+    storage = tmp_path / "_storage"
+    set_allowed_roots_fn(lambda: [str(tmp_path)])
+
+    # Index via the symlink path.
+    result = index_folder(
+        path=str(link), use_ai_summaries=False,
+        storage_path=str(storage), allowed_roots=[str(tmp_path)],
+    )
+    assert result.get("success") is True, result
+
+    # The stored identity is the RESOLVED target's identity (basename + hash of
+    # the canonical path), so read-target and stored-identity never diverge.
+    owner, name = folder_repo_identity(str(real))
+    assert folder_repo_identity(str(link)) == (owner, name)
+    store = IndexStore(base_path=str(storage))
+    idx = store.load_index(owner, name)
+    assert idx is not None, "index not stored under the resolved-target identity"
+    # The files actually read are the target's -> served under that same key.
+    assert "resolved_target_symbol" in {s.get("name") for s in idx.symbols}
+    # Exactly one index was written (no split between link-name and target-name).
+    assert len(_index_files(storage)) == 1, _index_files(storage)
+
+
+# ---------------------------------------------------------------------------
 # 11. On-demand defaults to AI-off (no network / no API key required)
 # ---------------------------------------------------------------------------
 

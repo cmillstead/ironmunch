@@ -306,6 +306,101 @@ def test_same_basename_distinct_paths_resolve_independently(tmp_path, allow):
 
 
 # ---------------------------------------------------------------------------
+# Finding 1 (C28 dual-resolution): a bare name + a matching-basename path is
+# path-authoritative; a mismatched-basename path is ignored for identity.
+# ---------------------------------------------------------------------------
+
+def test_bare_name_matching_path_wins_over_existing_index(tmp_path, allow):
+    """A supplied repo_path whose basename matches the bare name is
+    authoritative -- it wins over a coincidentally same-named existing index,
+    which must be left untouched (Finding 1a)."""
+    dir_a = tmp_path / "a" / "myapp"
+    dir_a.mkdir(parents=True)
+    (dir_a / "a.py").write_text(_py("alpha_unique"))
+    dir_b = tmp_path / "b" / "myapp"
+    dir_b.mkdir(parents=True)
+    (dir_b / "b.py").write_text(_py("beta_unique"))
+    storage = tmp_path / "_storage"
+    allow(tmp_path)
+
+    # Pre-index dir_a so a fresh index named "myapp-<hashA>" already exists.
+    owner_a, name_a = _preindex(dir_a, storage, [tmp_path])
+    _clear_shared_stores()
+
+    # Resolve the bare name but point at dir_b (same basename, different path).
+    ctx = RepoContext.resolve("myapp", storage_path=str(storage), path=str(dir_b))
+
+    assert not isinstance(ctx, dict), f"expected served context, got: {ctx}"
+    names = {s.get("name") for s in ctx.index.symbols}
+    assert "beta_unique" in names, f"dir_b not served: {names}"
+    assert "alpha_unique" not in names, f"served dir_a instead of dir_b: {names}"
+
+    # dir_b was indexed under its OWN path-derived identity.
+    owner_b, name_b = folder_repo_identity(str(dir_b))
+    assert (owner_b, name_b) != (owner_a, name_a)
+    assert IndexStore(base_path=str(storage)).load_index(owner_b, name_b) is not None
+    # dir_a's index is untouched (still has alpha, never beta).
+    idx_a = IndexStore(base_path=str(storage)).load_index(owner_a, name_a)
+    assert "alpha_unique" in {s.get("name") for s in idx_a.symbols}
+    assert "beta_unique" not in json.dumps(idx_a.symbols)
+
+
+def test_bare_name_mismatched_path_ignored_not_indexed(tmp_path, allow):
+    """A supplied repo_path whose basename does NOT match the bare name is
+    ignored for identity -- the requested repo is served and the unrelated
+    folder is never indexed (Finding 1b, cwd-injection guard)."""
+    other = tmp_path / "otherrepo"
+    other.mkdir()
+    (other / "o.py").write_text(_py("other_sym"))
+    cwd = tmp_path / "somecwd"
+    cwd.mkdir()
+    (cwd / "c.py").write_text(_py("cwd_sym"))
+    storage = tmp_path / "_storage"
+    allow(tmp_path)
+
+    owner_o, name_o = _preindex(other, storage, [tmp_path])
+    _clear_shared_stores()
+
+    ctx = RepoContext.resolve("otherrepo", storage_path=str(storage), path=str(cwd))
+
+    assert not isinstance(ctx, dict), f"expected served context, got: {ctx}"
+    names = {s.get("name") for s in ctx.index.symbols}
+    assert "other_sym" in names, f"otherrepo not served: {names}"
+    assert "cwd_sym" not in names, f"served the injected cwd folder: {names}"
+    # The cwd folder was never indexed.
+    owner_c, name_c = folder_repo_identity(str(cwd))
+    assert IndexStore(base_path=str(storage)).load_index(owner_c, name_c) is None
+
+
+# ---------------------------------------------------------------------------
+# Finding 3 (fail-safe): a malformed/unresolvable path on the stale branch must
+# never crash the read -- serve the stale index (or a documented error).
+# ---------------------------------------------------------------------------
+
+def test_stale_branch_bad_path_serves_stale_not_crash(tmp_path, allow):
+    """A stale index is present and repo_path is unresolvable (embedded NUL).
+    The directory-swap guard must not raise out of resolve; the stale index is
+    served instead (Finding 3)."""
+    repo_dir = tmp_path / "myrepo"
+    repo_dir.mkdir()
+    (repo_dir / "foo.py").write_text(_py("stalesym"))
+    storage = tmp_path / "_storage"
+    allow(tmp_path)
+
+    owner, name = _preindex(repo_dir, storage, [tmp_path])
+    # Backdate past the 7-day policy. Changing this requires a spec change.
+    _backdate(storage, owner, name, INDEX_AGE_THRESHOLD_DAYS + 1)
+
+    # An embedded NUL makes Path(...).resolve() raise if used unguarded.
+    ctx = RepoContext.resolve("myrepo", storage_path=str(storage), path="bad\x00path")
+
+    assert not isinstance(ctx, dict), f"expected served stale context, got: {ctx}"
+    assert ctx.stale is True
+    assert ctx.freshly_indexed is False
+    assert "stalesym" in {s.get("name") for s in ctx.index.symbols}
+
+
+# ---------------------------------------------------------------------------
 # Idempotence: a second on-demand resolve serves from the persisted index
 # ---------------------------------------------------------------------------
 

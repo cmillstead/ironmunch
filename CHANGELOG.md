@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Index-on-demand.** Repo-scoped read operations now index a repository on first
+  access when its index is missing or stale (older than `INDEX_AGE_THRESHOLD_DAYS`,
+  7 days), instead of returning "Repository not indexed" — provided the caller
+  supplies the working folder via the `repo_path` argument. On-demand indexing reuses
+  the existing validated pipeline unchanged (the `CODESIGHT_ALLOWED_ROOTS` allowlist
+  with default-deny, `O_NOFOLLOW`, every cap, and the sanitizers), with AI summaries
+  disabled for speed. Results carry `_meta.freshly_indexed`, `_meta.stale`, and
+  `_meta.index_warnings` so freshness and any truncation are surfaced, never silent.
+  Behavior fails safe to the prior error when no path is available or indexing fails,
+  and a directory-swap guard refuses to reindex a mismatched folder under a known repo
+  name. `compare-symbols` and `verify` are intentionally excluded.
+
 ## [0.6.0] - 2026-07-15
 
 This is a catch-up release: `pyproject.toml` was never bumped past `0.1.0`
